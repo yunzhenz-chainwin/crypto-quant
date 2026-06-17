@@ -3,3 +3,6 @@ uvicorn[standard]
 apscheduler
 pandas
 numpy
+feedparser
+aiofiles
+requests

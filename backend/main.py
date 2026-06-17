@@ -12,10 +12,16 @@ API 前綴一律為 /api，例如：
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from backend.routers import meta, prices, indicators, correlation, signals, backtest, sentiment
 from backend.scheduler import start_scheduler
+
+# React build 輸出目錄（npm run build 產生）
+DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -32,7 +38,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Crypto Quant API", lifespan=lifespan)
 
-# 允許前端開發伺服器（port 5173）和本地測試（port 3000）跨域請求
+# 允許本地開發時的跨域請求；正式環境前後端同源，CORS 不影響
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
@@ -48,3 +54,14 @@ app.include_router(correlation.router, prefix="/api")  # /api/correlation
 app.include_router(signals.router,     prefix="/api")  # /api/signals
 app.include_router(backtest.router,    prefix="/api")  # /api/backtest/{symbol}
 app.include_router(sentiment.router,   prefix="/api")  # /api/sentiment/...
+
+# ── 正式環境：FastAPI 直接提供 React build 的靜態檔 ─────────────────────────
+# 只在 frontend/dist/ 存在時掛載（本地開發時不存在，不影響開發流程）
+if DIST.exists():
+    # /assets/* 直接回傳對應靜態資源（JS / CSS / 圖片）
+    app.mount("/assets", StaticFiles(directory=str(DIST / "assets")), name="assets")
+
+    # 其他所有路徑都回傳 index.html，讓 React Router 接管
+    @app.get("/{full_path:path}")
+    def serve_spa(full_path: str):
+        return FileResponse(str(DIST / "index.html"))
