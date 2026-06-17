@@ -1,30 +1,26 @@
 /**
- * CandlestickChart.jsx — 蠟燭圖 + 買賣標記
- *
- * 使用 TradingView lightweight-charts，繪製：
- *   - 蠟燭圖（OHLC）
- *   - 成交量長條圖（下方）
- *   - 回測買入▲（綠色）/ 賣出▼（紅色）標記
- *
- * Props：
- *   prices  來自 /api/prices/{symbol} 的 OHLC 陣列
- *   trades  來自 /api/backtest/{symbol} 的交易明細（可選）
+ * CandlestickChart.jsx — 蠟燭圖 + 成交量 + 買賣標記
+ * 使用 lightweight-charts v5 API（chart.addSeries + createSeriesMarkers）
  */
 import { useEffect, useRef } from 'react'
-import { createChart, CrosshairMode } from 'lightweight-charts'
+import {
+  createChart,
+  CandlestickSeries,
+  HistogramSeries,
+  CrosshairMode,
+  createSeriesMarkers,
+} from 'lightweight-charts'
 
 export default function CandlestickChart({ prices, trades }) {
   const containerRef = useRef(null)
-  const chartRef     = useRef(null)
 
   useEffect(() => {
     if (!containerRef.current || !prices || prices.length === 0) return
 
-    // 建立圖表，深色主題配色
     const chart = createChart(containerRef.current, {
       layout: {
         background: { color: '#0f172a' },
-        textColor:  '#94a3b8',
+        textColor: '#94a3b8',
       },
       grid: {
         vertLines: { color: '#1e293b' },
@@ -33,49 +29,51 @@ export default function CandlestickChart({ prices, trades }) {
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: '#334155' },
       timeScale: {
-        borderColor:     '#334155',
-        timeVisible:     true,
-        secondsVisible:  false,
+        borderColor: '#334155',
+        timeVisible: true,
+        secondsVisible: false,
       },
-      width:  containerRef.current.clientWidth,
-      height: 320,
+      width: containerRef.current.clientWidth,
+      height: 360,
     })
-    chartRef.current = chart
 
-    // ── 蠟燭圖 ───────────────────────────────────────────────────────────
-    const candleSeries = chart.addCandlestickSeries({
-      upColor:       '#22c55e',  // 收漲：綠
-      downColor:     '#ef4444',  // 收跌：紅
+    // ── 蠟燭圖（v5：chart.addSeries(CandlestickSeries, options)）────────
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#22c55e',
+      downColor: '#ef4444',
       borderVisible: false,
-      wickUpColor:   '#22c55e',
+      wickUpColor: '#22c55e',
       wickDownColor: '#ef4444',
     })
+    candleSeries.setData(
+      prices.map(p => ({
+        time:  p.date,
+        open:  p.open,
+        high:  p.high,
+        low:   p.low,
+        close: p.close,
+      }))
+    )
 
-    const candleData = prices.map(p => ({
-      time:  p.date,
-      open:  p.open,
-      high:  p.high,
-      low:   p.low,
-      close: p.close,
-    }))
-    candleSeries.setData(candleData)
-
-    // ── 成交量 ────────────────────────────────────────────────────────────
-    const volumeSeries = chart.addHistogramSeries({
-      priceFormat:    { type: 'volume' },
-      priceScaleId:   'vol',          // 獨立 Y 軸，不跟蠟燭共用
-      color:          '#334155',
+    // ── 成交量（獨立 Y 軸，佔下方 15%）──────────────────────────────────
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat:  { type: 'volume' },
+      priceScaleId: 'vol',
     })
     chart.priceScale('vol').applyOptions({
-      scaleMargins: { top: 0.85, bottom: 0 },  // 成交量只佔下方 15%
+      scaleMargins: { top: 0.85, bottom: 0 },
     })
-    volumeSeries.setData(prices.map(p => ({
-      time:  p.date,
-      value: p.volume,
-      color: p.close >= p.open ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)',
-    })))
+    volumeSeries.setData(
+      prices.map(p => ({
+        time:  p.date,
+        value: p.volume,
+        color: p.close >= p.open
+          ? 'rgba(34,197,94,0.3)'
+          : 'rgba(239,68,68,0.3)',
+      }))
+    )
 
-    // ── 回測買賣標記 ──────────────────────────────────────────────────────
+    // ── 回測買賣標記（v5：createSeriesMarkers）───────────────────────────
     if (trades && trades.length > 0) {
       const markers = []
       trades.forEach(t => {
@@ -94,15 +92,12 @@ export default function CandlestickChart({ prices, trades }) {
           text:     `${t.profit ? '獲利' : '停損'} ${t.return_pct > 0 ? '+' : ''}${t.return_pct}%`,
         })
       })
-      // lightweight-charts 要求 markers 依時間排序
       markers.sort((a, b) => a.time.localeCompare(b.time))
-      candleSeries.setMarkers(markers)
+      createSeriesMarkers(candleSeries, markers)
     }
 
-    // 自動縮放到最新 120 根蠟燭
     chart.timeScale().scrollToPosition(-5, false)
 
-    // 視窗大小改變時自適應寬度
     const handleResize = () => {
       if (containerRef.current) {
         chart.applyOptions({ width: containerRef.current.clientWidth })
