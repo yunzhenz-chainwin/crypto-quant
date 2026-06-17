@@ -1,0 +1,16 @@
+{
+  "total_trades": 67,
+  "win_rate": 41.791,
+  "avg_win_pct": 10.7463,
+  "avg_loss_pct": -4.9596,
+  "profit_factor": 1.5556,
+  "total_return_pct": 119.9658,
+  "cagr_pct": 17.9061,
+  "max_drawdown_pct": -34.6859,
+  "sharpe_ratio": 1.0858,
+  "avg_hold_days": 8.7761,
+  "buy_hold_return_pct": 80.8958,
+  "stop_loss_exits": 30,
+  "take_profit_exits": 12,
+  "signal_exits": 25
+}

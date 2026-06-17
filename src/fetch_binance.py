@@ -29,7 +29,11 @@ YEARS = 5                          # 要回補幾年
 SLEEP = 2                          # 每次請求間隔（秒），調大 = 更保守、更不會被擋
 SYMBOL_PAUSE = 5                   # 每抓完一支幣，多休息幾秒再抓下一支
 
-DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
+DEFAULT_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",   # 原有五支
+    "DOGEUSDT", "LINKUSDT", "ADAUSDT", "AVAXUSDT", "DOTUSDT", # 新增：迷因/預言機/老牌L1
+    "ATOMUSDT", "MATICUSDT", "UNIUSDT", "LTCUSDT", "NEARUSDT",# 新增：跨鏈/L2/DeFi/支付/新興L1
+]
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw"
@@ -105,20 +109,20 @@ def main():
     symbols = [s.upper() for s in sys.argv[1:]] or DEFAULT_SYMBOLS
     start_ms = int((datetime.now(timezone.utc) - timedelta(days=365 * YEARS)).timestamp() * 1000)
 
-    print(f"目標：{', '.join(symbols)}　回補約 {YEARS} 年\n")
+    print(f"Target: {', '.join(symbols)}  ({YEARS}Y history)\n")
     for sym in symbols:
-        print(f"▶ {sym}")
+        print(f">> {sym}")
         data = fetch_history(sym, start_ms)
         if not data:
-            print(f"  （無資料，跳過——可能該幣別不存在）\n")
+            print(f"  (no data, skipping)\n")
             continue
         save_raw(sym, data)
         df = to_clean(data)
         save_clean(sym, df)
-        print(f"  共 {len(df)} 根，期間 {df['date'].min().date()} ~ {df['date'].max().date()}\n")
+        print(f"  {len(df)} bars  {df['date'].min().date()} ~ {df['date'].max().date()}\n")
         time.sleep(SYMBOL_PAUSE)
 
-    print("全部完成。")
+    print("Done.")
 
 
 if __name__ == "__main__":

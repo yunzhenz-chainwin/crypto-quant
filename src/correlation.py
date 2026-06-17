@@ -29,7 +29,11 @@ ROOT = Path(__file__).resolve().parent.parent
 CLEAN_DIR = ROOT / "data" / "clean"
 REPORT_DIR = ROOT / "reports"
 
-DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
+DEFAULT_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+    "DOGEUSDT", "LINKUSDT", "ADAUSDT", "AVAXUSDT", "DOTUSDT",
+    "ATOMUSDT", "MATICUSDT", "UNIUSDT", "LTCUSDT", "NEARUSDT",
+]
 
 
 def load_closes(symbols: list[str]) -> pd.DataFrame:
