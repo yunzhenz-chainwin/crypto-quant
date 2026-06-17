@@ -61,7 +61,15 @@ if DIST.exists():
     # /assets/* 直接回傳對應靜態資源（JS / CSS / 圖片）
     app.mount("/assets", StaticFiles(directory=str(DIST / "assets")), name="assets")
 
-    # 其他所有路徑都回傳 index.html，讓 React Router 接管
+    # 根路徑與所有其他路徑都回傳 index.html，讓 React Router 接管
+    @app.get("/")
+    def serve_root():
+        return FileResponse(str(DIST / "index.html"))
+
     @app.get("/{full_path:path}")
     def serve_spa(full_path: str):
+        # 若請求的是真實存在的靜態檔（如 favicon.svg）就直接回傳
+        target = DIST / full_path
+        if target.exists() and target.is_file():
+            return FileResponse(str(target))
         return FileResponse(str(DIST / "index.html"))
