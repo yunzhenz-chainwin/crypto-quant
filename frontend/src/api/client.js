@@ -16,6 +16,10 @@ export const fetchStatus = () => get('/status')
 export const fetchPrices = (symbol, days = 180) =>
   get(`/prices/${symbol}?days=${days}`)
 
+// 取得原始 OHLCV 資料，供蠟燭圖使用（不含指標欄位）
+export const fetchOHLC = (symbol, days = 365) =>
+  get(`/prices/${symbol}?days=${days}`)
+
 // 取得指定幣種的技術指標（MA20、MA60、RSI、MACD、HIST）
 export const fetchIndicators = (symbol, days = 180) =>
   get(`/indicators/${symbol}?days=${days}`)
