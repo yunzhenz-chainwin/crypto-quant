@@ -71,8 +71,11 @@ def _row_signal(rsi, hist, prev_hist, close, ma20, ma60) -> str:
 
 
 def compute_signals(df: pd.DataFrame) -> list[str]:
-    """逐日計算訊號，回傳與 df 等長的訊號清單。"""
-    sigs = ["NEUTRAL", "NEUTRAL"]  # 前兩天沒有前一天可比，給預設值
+    """逐日計算訊號，回傳與 df 等長的訊號清單。
+    sigs[i] = 第 i 天收盤後可得知的訊號（用第 i 天 vs 第 i-1 天資料計算）
+    進場條件：sigs[i-1]=='BULL' and sigs[i-2]!='BULL' → 第 i 天開盤買入（隔日開盤）
+    """
+    sigs = ["NEUTRAL"]  # index 0：第一天無前日資料，給預設 NEUTRAL
     for i in range(1, len(df)):
         cur, prv = df.iloc[i], df.iloc[i - 1]
         sig = _row_signal(

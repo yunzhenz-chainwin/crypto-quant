@@ -15,25 +15,40 @@ def available_symbols() -> list[str]:
     ])
 
 
-def load_prices(symbol: str, days: int = None) -> list[dict]:
+def load_prices(symbol: str, days: int = None,
+                start: str = None, end: str = None) -> list[dict]:
     path = CLEAN_DIR / f"{symbol}_{INTERVAL}.csv"
     if not path.exists():
         return []
     df = pd.read_csv(path, parse_dates=["date"])
     df = df.sort_values("date").reset_index(drop=True)
-    if days:
+    if start or end:
+        # CSV 日期帶 UTC timezone，比較對象也需要 tz-aware
+        tz = df["date"].dt.tz
+        if start:
+            df = df[df["date"] >= pd.Timestamp(start, tz=tz)]
+        if end:
+            df = df[df["date"] <= pd.Timestamp(end, tz=tz) + pd.Timedelta(days=1)]
+    elif days:
         df = df.tail(days)
     df["date"] = df["date"].dt.strftime("%Y-%m-%d")
     return df.to_dict(orient="records")
 
 
-def load_indicators(symbol: str, days: int = None) -> list[dict]:
+def load_indicators(symbol: str, days: int = None,
+                    start: str = None, end: str = None) -> list[dict]:
     path = REPORT_DIR / f"indicators_{symbol}_{INTERVAL}.csv"
     if not path.exists():
         return []
     df = pd.read_csv(path, parse_dates=["date"])
     df = df.sort_values("date").reset_index(drop=True)
-    if days:
+    if start or end:
+        tz = df["date"].dt.tz
+        if start:
+            df = df[df["date"] >= pd.Timestamp(start, tz=tz)]
+        if end:
+            df = df[df["date"] <= pd.Timestamp(end, tz=tz) + pd.Timedelta(days=1)]
+    elif days:
         df = df.tail(days)
     df["date"] = df["date"].dt.strftime("%Y-%m-%d")
     df = df.replace({np.nan: None})

@@ -21,6 +21,37 @@ body { background: var(--bg); }
 /* ── App 框架 ──────────────────────────────────────── */
 .app { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 
+/* ── 市場摘要列 ─────────────────────────────────────── */
+.market-summary {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 20px; height: 40px;
+  background: #0a1628;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  overflow-x: auto; white-space: nowrap;
+}
+.ms-date    { color: var(--muted); }
+.ms-sep     { color: var(--border); user-select: none; }
+.ms-signals { display: flex; gap: 10px; }
+.ms-sig     { font-weight: 700; }
+.ms-bull    { color: var(--bull); }
+.ms-bear    { color: var(--bear); }
+.ms-neutral { color: var(--neutral); }
+.ms-fg      { font-weight: 600; }
+.ms-updated { color: var(--muted); font-size: 11px; }
+.ms-refresh-btn {
+  flex-shrink: 0;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--muted); width: 26px; height: 26px;
+  border-radius: 6px; font-size: 15px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.ms-refresh-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.ms-refresh-btn.spinning { animation: spin 0.8s linear infinite; color: var(--accent); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* ── Header ────────────────────────────────────────── */
 .header {
   flex-shrink: 0;
@@ -118,9 +149,10 @@ body { background: var(--bg); }
   border: 1px solid var(--border);
   padding: 16px 20px;
   display: flex;
-  gap: 24px;
+  gap: 20px;
   align-items: flex-start;
   background: var(--surface);
+  flex-wrap: wrap;
 }
 .hero-bull    { border-left: 5px solid var(--bull); }
 .hero-bear    { border-left: 5px solid var(--bear); }
@@ -176,9 +208,34 @@ body { background: var(--bg); }
   padding: 14px 16px;
 }
 .chart-section-header {
-  display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 12px;
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
 }
+
+/* 右側控制群組（快速按鈕 + 自訂面板） */
+.range-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+
+/* 自訂日期面板 */
+.date-range-panel {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 10px;
+}
+.dr-label { font-size: 11px; color: var(--muted); }
+.dr-input {
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 5px;
+  padding: 4px 8px; font-size: 12px; cursor: pointer;
+  color-scheme: dark;
+}
+.dr-input:focus { outline: none; border-color: var(--accent); }
+.dr-apply {
+  padding: 4px 14px; background: var(--accent);
+  border: none; border-radius: 5px; color: #fff;
+  font-size: 12px; cursor: pointer; transition: opacity 0.12s;
+}
+.dr-apply:hover:not(:disabled) { opacity: 0.85; }
+.dr-apply:disabled { opacity: 0.4; cursor: not-allowed; }
 .chart-section-title { font-size: 14px; font-weight: 600; }
 .chart-wrap { background: transparent; padding: 0; }
 .chart-empty { color: var(--muted); padding: 40px; text-align: center; }
@@ -434,60 +491,176 @@ body { background: var(--bg); }
 
 /* ── 市場總覽 ────────────────────────────────────── */
 .overview-layout {
-  flex: 1; overflow-y: auto; padding: 24px;
+  flex: 1; overflow-y: auto; padding: 20px 24px;
 }
-.overview-section { max-width: 1100px; margin: 0 auto; }
-.overview-header  { margin-bottom: 20px; }
+.overview-section { max-width: 1300px; margin: 0 auto; }
 
-.overview-table-wrap { overflow-x: auto; }
-.overview-table {
-  width: 100%; border-collapse: collapse;
+/* 空狀態 */
+.overview-empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 200px; gap: 12px;
+  color: var(--muted); font-size: 14px;
+}
+.overview-empty-icon { font-size: 32px; }
+
+/* 卡片網格：桌機 5 欄，平板 3 欄，手機 2 欄 */
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+}
+@media (max-width: 1200px) { .overview-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 900px)  { .overview-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 600px)  { .overview-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* 幣種卡片 */
+.coin-card {
   background: var(--surface);
-  border: 1px solid var(--border); border-radius: 12px;
-  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  display: flex; flex-direction: column; gap: 8px;
 }
-.overview-table th {
-  padding: 12px 16px; text-align: left;
-  font-size: 12px; color: var(--muted); font-weight: 600;
-  background: rgba(255,255,255,0.03);
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
+.coin-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  border-color: rgba(255,255,255,0.15);
 }
-.overview-row {
-  border-bottom: 1px solid var(--border);
-  cursor: pointer; transition: background 0.12s;
-}
-.overview-row:last-child { border-bottom: none; }
-.overview-row:hover { background: rgba(255,255,255,0.04); }
-.overview-row td { padding: 14px 16px; font-size: 13px; vertical-align: middle; }
+/* 左側邊框顏色依訊號 */
+.card-bull    { border-left: 3px solid var(--bull); }
+.card-bear    { border-left: 3px solid var(--bear); }
+.card-neutral { border-left: 3px solid var(--neutral); }
 
-/* 幣種欄 */
-.ov-coin   { display: flex; flex-direction: column; gap: 2px; }
-.ov-ticker { font-weight: 700; font-size: 14px; color: var(--text); }
-.ov-zh     { font-size: 11px; color: var(--muted); }
-
-/* 訊號標籤 */
-.ov-sig {
-  display: inline-block; padding: 4px 12px;
-  border-radius: 20px; font-size: 12px; font-weight: 700;
+/* 卡片頂部：訊號 badge + ticker */
+.card-header {
+  display: flex; justify-content: space-between; align-items: center;
 }
-.ov-bull    { background: rgba(34,197,94,0.15);  color: var(--bull); }
-.ov-bear    { background: rgba(239,68,68,0.15);  color: var(--bear); }
-.ov-neutral { background: rgba(245,158,11,0.15); color: var(--neutral); }
+.card-sig {
+  display: inline-flex; align-items: center;
+  padding: 3px 10px; border-radius: 20px;
+  font-size: 11px; font-weight: 700;
+}
+.card-sig-bull    { background: rgba(34,197,94,0.15);  color: var(--bull); }
+.card-sig-bear    { background: rgba(239,68,68,0.15);  color: var(--bear); }
+.card-sig-neutral { background: rgba(245,158,11,0.15); color: var(--neutral); }
+
+.card-ticker { font-size: 11px; color: var(--muted); font-weight: 600; }
+
+/* 幣種中文名 */
+.card-name { font-size: 13px; font-weight: 700; color: var(--text); }
 
 /* 價格 */
-.ov-price  { font-weight: 600; color: var(--text); white-space: nowrap; }
-.ov-muted  { color: var(--muted); }
-.ov-rsi-tip { font-size: 11px; margin-left: 2px; }
+.card-price {
+  font-size: 18px; font-weight: 700; color: var(--text);
+  letter-spacing: -0.5px;
+}
+
+/* RSI 條 */
+.card-rsi { display: flex; flex-direction: column; gap: 4px; }
+.card-rsi-row {
+  display: flex; justify-content: space-between;
+  font-size: 11px;
+}
+.card-rsi-val { color: var(--muted); }
+.card-rsi-lbl { font-weight: 600; }
+.card-rsi-track {
+  position: relative; height: 4px;
+  background: var(--bg); border-radius: 2px; overflow: visible;
+}
+.card-rsi-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+.card-rsi-mark {
+  position: absolute; top: -2px; width: 1px; height: 8px;
+  background: var(--border);
+}
 
 /* 理由標籤 */
-.ov-reasons    { display: flex; flex-wrap: wrap; gap: 5px; }
-.ov-reason-tag {
-  padding: 2px 8px; border-radius: 20px;
+.card-reasons { display: flex; flex-wrap: wrap; gap: 4px; }
+.card-reason-tag {
+  padding: 2px 7px; border-radius: 20px;
   background: var(--bg); border: 1px solid var(--border);
-  font-size: 11px; color: var(--muted); white-space: nowrap;
+  font-size: 10px; color: var(--muted);
+}
+
+/* 底部查看 CTA */
+.card-cta {
+  margin-top: auto; padding-top: 6px;
+  font-size: 11px; color: var(--accent);
+  border-top: 1px solid var(--border);
 }
 
 /* ── 蠟燭圖 ──────────────────────────────────────── */
 .candlestick-wrap { width: 100%; border-radius: 8px; overflow: hidden; }
 .chart-empty      { padding: 40px; text-align: center; color: var(--muted); }
+
+/* 圖例列 */
+.chart-legend {
+  display: flex; align-items: center; gap: 12px;
+  font-size: 11px; color: var(--muted);
+  padding: 6px 4px 0;
+}
+.legend-candle-up { color: #22c55e; }
+.legend-candle-dn { color: #ef4444; }
+.legend-ma20      { color: #f59e0b; font-weight: 700; letter-spacing: 1px; }
+.legend-ma60      { color: #818cf8; font-weight: 700; letter-spacing: 1px; }
+
+/* 可切換圖層按鈕 */
+.legend-toggle {
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 8px;
+  font-size: 11px; cursor: pointer; transition: all 0.12s;
+  opacity: 0.45;
+}
+.legend-toggle.on  { opacity: 1; border-color: currentColor; }
+.legend-toggle:hover { opacity: 0.8; }
+
+/* ── 信心分數量表 ─────────────────────────────────── */
+.hero-gauge-col { display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0; }
+.score-gauge-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.score-gauge-svg  { width: 140px; height: 80px; }
+.score-gauge-axis {
+  display: flex; justify-content: space-between; width: 130px;
+  font-size: 9px; color: var(--muted);
+}
+
+/* ── 因子評分列表 ──────────────────────────────────── */
+.factor-list { display: flex; flex-direction: column; gap: 5px; }
+.factor-list-title { font-size: 11px; color: var(--muted); margin-bottom: 2px; font-weight: 600; }
+.factor-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.factor-label {
+  width: 92px; flex-shrink: 0;
+  font-size: 11px; color: var(--muted); white-space: nowrap;
+}
+.factor-bar-track {
+  position: relative; flex: 1; height: 6px;
+  background: var(--border); border-radius: 3px; overflow: hidden;
+}
+.factor-bar-fill   { height: 100%; border-radius: 3px; transition: width 0.4s; }
+.factor-bar-center {
+  position: absolute; top: 0; bottom: 0; left: 50%; width: 1px;
+  background: rgba(255,255,255,0.25);
+}
+.factor-score {
+  width: 28px; text-align: right; flex-shrink: 0;
+  font-size: 11px; font-weight: 600;
+}
+
+/* ── 信心分數條（卡片用）────────────────────────────── */
+.card-score { display: flex; flex-direction: column; gap: 3px; }
+.card-score-row {
+  display: flex; justify-content: space-between; font-size: 11px;
+}
+.card-score-lbl { color: var(--muted); }
+.card-score-val { font-weight: 700; }
+.card-score-track {
+  position: relative; height: 5px;
+  background: var(--bg); border-radius: 3px; overflow: visible;
+}
+.card-score-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.card-score-mark {
+  position: absolute; top: -2px; width: 1px; height: 9px;
+  background: rgba(255,255,255,0.2);
+}

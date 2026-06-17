@@ -16,13 +16,21 @@ export const fetchStatus = () => get('/status')
 export const fetchPrices = (symbol, days = 180) =>
   get(`/prices/${symbol}?days=${days}`)
 
-// 取得原始 OHLCV 資料，供蠟燭圖使用（不含指標欄位）
-export const fetchOHLC = (symbol, days = 365) =>
-  get(`/prices/${symbol}?days=${days}`)
+// 取得原始 OHLCV 資料，供蠟燭圖使用（支援 days 或 start/end 日期）
+export const fetchOHLC = (symbol, { days = 365, start = null, end = null } = {}) => {
+  const p = new URLSearchParams()
+  if (start && end) { p.set('start', start); p.set('end', end) }
+  else               { p.set('days', days) }
+  return get(`/prices/${symbol}?${p}`)
+}
 
-// 取得指定幣種的技術指標（MA20、MA60、RSI、MACD、HIST）
-export const fetchIndicators = (symbol, days = 180) =>
-  get(`/indicators/${symbol}?days=${days}`)
+// 取得指定幣種的技術指標（支援 days 或 start/end 日期）
+export const fetchIndicators = (symbol, { days = 180, start = null, end = null } = {}) => {
+  const p = new URLSearchParams()
+  if (start && end) { p.set('start', start); p.set('end', end) }
+  else               { p.set('days', days) }
+  return get(`/indicators/${symbol}?${p}`)
+}
 
 // 取得所有幣種的相關性矩陣與年化波動度
 export const fetchCorrelation = () => get('/correlation')

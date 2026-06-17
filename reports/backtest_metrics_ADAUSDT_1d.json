@@ -1,16 +1,16 @@
 {
-  "total_trades": 72,
-  "win_rate": 23.6111,
-  "avg_win_pct": 10.986,
-  "avg_loss_pct": -5.3686,
-  "profit_factor": 0.6325,
-  "total_return_pct": -73.1516,
-  "cagr_pct": -23.9536,
-  "max_drawdown_pct": -73.1516,
-  "sharpe_ratio": -1.9188,
-  "avg_hold_days": 3.4444,
+  "total_trades": 71,
+  "win_rate": 38.0282,
+  "avg_win_pct": 9.1023,
+  "avg_loss_pct": -6.0,
+  "profit_factor": 0.9309,
+  "total_return_pct": -34.9912,
+  "cagr_pct": -8.6102,
+  "max_drawdown_pct": -59.3309,
+  "sharpe_ratio": -0.3071,
+  "avg_hold_days": 3.4366,
   "buy_hold_return_pct": -87.5208,
-  "stop_loss_exits": 46,
+  "stop_loss_exits": 44,
   "take_profit_exits": 7,
-  "signal_exits": 19
+  "signal_exits": 20
 }

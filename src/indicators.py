@@ -35,16 +35,18 @@ def load(symbol: str) -> pd.DataFrame:
 
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    close = df["close"]
+    close  = df["close"]
+    volume = df["volume"]
 
     # 1) MA：最近 N 天收盤價的平均
-    df["MA20"] = close.rolling(20).mean()
-    df["MA60"] = close.rolling(60).mean()
+    df["MA20"]  = close.rolling(20).mean()
+    df["MA60"]  = close.rolling(60).mean()
+    df["MA200"] = close.rolling(200).mean()
 
     # 2) RSI(14)：用 Wilder 平滑法
     delta = close.diff()
-    gain = delta.clip(lower=0)                 # 只留上漲幅度
-    loss = -delta.clip(upper=0)                # 只留下跌幅度（轉正值）
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(alpha=1 / 14, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1 / 14, adjust=False).mean()
     rs = avg_gain / avg_loss
@@ -53,9 +55,19 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # 3) MACD：快線(EMA12) − 慢線(EMA26)，訊號線是 MACD 的 EMA9
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
-    df["MACD"] = ema12 - ema26
+    df["MACD"]   = ema12 - ema26
     df["SIGNAL"] = df["MACD"].ewm(span=9, adjust=False).mean()
-    df["HIST"] = df["MACD"] - df["SIGNAL"]
+    df["HIST"]   = df["MACD"] - df["SIGNAL"]
+
+    # 4) Bollinger Bands（20 期，±2σ）
+    bb_mid         = close.rolling(20).mean()
+    bb_std         = close.rolling(20).std(ddof=0)
+    df["BB_UPPER"] = bb_mid + 2 * bb_std
+    df["BB_LOWER"] = bb_mid - 2 * bb_std
+
+    # 5) 成交量 20 日均量（用於確認訊號強度）
+    df["VOL_MA20"] = volume.rolling(20).mean()
+
     return df
 
 
