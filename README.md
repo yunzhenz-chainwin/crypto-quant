@@ -1,18 +1,18 @@
 # crypto-quant
 
-Python scripts for fetching daily crypto market data, validating OHLC data, cross-checking prices, calculating technical indicators, and generating summary reports.
+加密貨幣量化分析工具:抓取每日行情、驗證 OHLC 資料、跨來源比對價格、計算技術指標,並產生彙整報告。
 
-## Project layout
+## 專案結構
 
-- `src/fetch_binance.py` fetches Binance daily kline data and writes raw JSON plus clean CSV files.
-- `src/validate.py` validates clean OHLC data.
-- `src/cross_check.py` compares Binance prices against CoinGecko data.
-- `src/indicators.py` calculates MA, RSI, and MACD indicators.
-- `src/correlation.py` generates return correlation and cumulative growth charts.
-- `data/` contains fetched raw and cleaned market data.
-- `reports/` contains generated validation reports and charts.
+- `src/fetch_binance.py` 從 Binance 抓取每日 K 線資料,輸出 raw JSON 與 clean CSV 兩層檔案。
+- `src/validate.py` 驗證 clean 後的 OHLC 資料。
+- `src/cross_check.py` 將 Binance 價格與 CoinGecko 資料做跨來源比對。
+- `src/indicators.py` 計算 MA、RSI、MACD 等技術指標。
+- `src/correlation.py` 產生報酬相關性與累積成長走勢圖。
+- `data/` 存放抓取的原始(raw)與清理後(clean)市場資料。
+- `reports/` 存放產生的驗證報告與圖表。
 
-## Setup
+## 安裝設定
 
 ```powershell
 python -m venv .venv
@@ -20,9 +20,9 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-## Usage
+## 使用方式
 
-Run scripts from the project root:
+在專案根目錄下執行各個腳本:
 
 ```powershell
 python src\fetch_binance.py
