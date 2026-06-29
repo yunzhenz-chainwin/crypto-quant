@@ -130,6 +130,8 @@ def main():
 
     sample_idx = [0, len(trades)//2, len(trades)-1]
     spot_ok = True
+    # 進場「觸發價」= 當日原始開盤價；entry_price 另含滑價，故比對 trigger 才正確
+    has_trigger = "entry_trigger_price" in trades.columns
     for idx in sample_idx:
         t = trades.iloc[idx]
         entry_d = str(t["entry_date"])[:10]
@@ -137,13 +139,14 @@ def main():
         # （訊號在前一天收盤產生，次日開盤進場 = entry_date 的 open）
         if entry_d in price_dict:
             raw_open = price_dict[entry_d]["open"]
-            diff = abs(raw_open - t["entry_price"])
+            trigger = t["entry_trigger_price"] if has_trigger else t["entry_price"]
+            diff = abs(raw_open - trigger)
             diff_pct = diff / raw_open * 100
             ok = diff_pct < 0.01   # 允許 0.01% 浮點誤差
             spot_ok = spot_ok and ok
             flag = "OK " if ok else "ERR"
             print(f"    {idx+1:<4} {entry_d:<12} {entry_d:<12} "
-                  f"{t['entry_price']:>14,.2f} {raw_open:>14,.2f} "
+                  f"{trigger:>14,.2f} {raw_open:>14,.2f} "
                   f"{diff_pct:>7.4f}% {flag}")
         else:
             print(f"    {idx+1:<4} {entry_d:<12} (找不到此日期)")

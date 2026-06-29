@@ -49,6 +49,8 @@ def init_db():
         # 日期索引讓「查某天新聞」快 10 倍以上
         conn.execute("CREATE INDEX IF NOT EXISTS idx_fetched ON news(fetched_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_category ON news(category)")
+        # 歷史查詢以「發布日期」為準，故也對 published_at 建索引
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_published ON news(published_at)")
         conn.commit()
 
 
@@ -86,20 +88,21 @@ def save_articles(articles: list[dict]) -> int:
 
 def query_by_date(date: str, category: str = None) -> list[dict]:
     """
-    查詢某一天的新聞
+    查詢某一天「發布」的新聞（依文章原始發布日 published_at，不是系統存入時間）。
+
+    這樣 backfill 進來的歷史新聞才會出現在它真正的發布日期下，
+    而不是全部擠在「按下匯入的那天」。
 
     Args:
         date:     YYYY-MM-DD 格式，例如 '2025-01-15'
         category: 可選分類過濾；不傳則回傳全部分類
-
-    LIKE 'YYYY-MM-DD%' 可比對完整 datetime 字串（含時分秒）
     """
-    sql = "SELECT * FROM news WHERE fetched_at LIKE ? "
-    params = [f"{date}%"]
+    sql = "SELECT * FROM news WHERE substr(published_at, 1, 10) = ? "
+    params = [date]
     if category:
         sql += "AND category = ? "
         params.append(category)
-    sql += "ORDER BY fetched_at DESC"
+    sql += "ORDER BY published_at DESC, fetched_at DESC"
 
     with _connect() as conn:
         rows = conn.execute(sql, params).fetchall()
@@ -124,13 +127,17 @@ def query_recent(days: int = 7, category: str = None) -> list[dict]:
 
 def available_dates() -> list[str]:
     """
-    回傳資料庫中有新聞紀錄的日期清單（最近 90 天，倒序）
-    前端「歷史查詢」下拉選單的資料來源
+    回傳資料庫中有新聞「發布」紀錄的日期清單（最近 90 個有資料的日期，倒序）。
+    前端「歷史查詢」下拉選單的資料來源。
+
+    用 GLOB 過濾掉格式不正確的舊資料（早期 RSS 曾把日期存成 'Wed, 24 Ju'），
+    只列出合法的 YYYY-MM-DD。
     """
     with _connect() as conn:
         rows = conn.execute(
-            """SELECT DISTINCT substr(fetched_at, 1, 10) as d
+            """SELECT DISTINCT substr(published_at, 1, 10) AS d
                FROM news
+               WHERE published_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'
                ORDER BY d DESC
                LIMIT 90"""
         ).fetchall()

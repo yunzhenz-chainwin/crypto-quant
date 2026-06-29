@@ -42,8 +42,14 @@ export const fetchAllSignals = () => get('/signals')
 export const fetchSignal = (symbol) => get(`/signals/${symbol}`)
 
 // 取得回測結果（stop_loss 例如 -0.06，take_profit 例如 0.20）
-export const fetchBacktest = (symbol, stopLoss = -0.06, takeProfit = 0.20) =>
-  get(`/backtest/${symbol}?stop_loss=${stopLoss}&take_profit=${takeProfit}`)
+export const fetchBacktest = (
+  symbol,
+  stopLoss = -0.06,
+  takeProfit = 0.20,
+  feeRate = 0.001,
+  slippageRate = 0.0005,
+) =>
+  get(`/backtest/${symbol}?stop_loss=${stopLoss}&take_profit=${takeProfit}&fee_rate=${feeRate}&slippage_rate=${slippageRate}`)
 
 // 取得恐懼貪婪指數（最近 N 天）
 export const fetchFearGreed = (limit = 30) =>

@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from backend.routers import meta, prices, indicators, correlation, signals, backtest, sentiment
+from backend.routers import meta, prices, indicators, correlation, signals, backtest, sentiment, admin
 from backend.scheduler import start_scheduler
 
 # React build 輸出目錄（npm run build 產生）
@@ -54,6 +54,7 @@ app.include_router(correlation.router, prefix="/api")  # /api/correlation
 app.include_router(signals.router,     prefix="/api")  # /api/signals
 app.include_router(backtest.router,    prefix="/api")  # /api/backtest/{symbol}
 app.include_router(sentiment.router,   prefix="/api")  # /api/sentiment/...
+app.include_router(admin.router,       prefix="/api")  # /api/admin/... (後台,需登入)
 
 # ── 正式環境：FastAPI 直接提供 React build 的靜態檔 ─────────────────────────
 # 只在 frontend/dist/ 存在時掛載（本地開發時不存在，不影響開發流程）

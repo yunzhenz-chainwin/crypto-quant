@@ -108,6 +108,23 @@ def _sentiment(title: str) -> str:
     return "neutral"
 
 
+def _parse_rss_date(entry) -> str:
+    """
+    RSS 的 published 欄位是 RFC822 格式（例如 'Wed, 24 Jun 2026 10:00:00 +0000'），
+    直接取前 10 字會變成 'Wed, 24 Ju' 這種亂碼日期。
+
+    feedparser 已幫我們解析成 struct_time（published_parsed），用它轉成 YYYY-MM-DD
+    才正確；若來源沒提供則退回 updated_parsed，再不行就留空字串。
+    """
+    t = entry.get("published_parsed") or entry.get("updated_parsed")
+    if t:
+        try:
+            return time.strftime("%Y-%m-%d", t)
+        except Exception:
+            return ""
+    return ""
+
+
 def _fetch_and_save() -> list:
     """
     從三個 RSS 來源抓取最新新聞，存入 SQLite，回傳所有文章
@@ -130,7 +147,7 @@ def _fetch_and_save() -> list:
                 all_items.append({
                     "title":        title,
                     "url":          entry.link,
-                    "published_at": entry.get("published", "")[:10],  # 只取日期部分
+                    "published_at": _parse_rss_date(entry),  # RFC822 → YYYY-MM-DD
                     "domain":       source_name,
                     "sentiment":    _sentiment(title),
                     "category":     _categorize(title),

@@ -27,6 +27,14 @@ ROOT = Path(__file__).resolve().parent.parent
 REPORT_DIR = ROOT / "reports"
 INTERVAL = "1d"
 
+# 與前端 signal_engine 共用同一套 6 因子計分（兩種執行方式都要能 import）：
+#   python src/backtest.py      → sys.path[0] 是 src/，走 `from scoring`
+#   from src.backtest import …  → 專案根在 path，走 `from src.scoring`
+try:
+    from src.scoring import score_row, signal_from_score
+except ImportError:
+    from scoring import score_row, signal_from_score
+
 
 # ── 資料載入 ──────────────────────────────────────────────────────────
 def load_indicators(symbol: str) -> pd.DataFrame:
@@ -37,69 +45,50 @@ def load_indicators(symbol: str) -> pd.DataFrame:
     return df.sort_values("date").reset_index(drop=True)
 
 
-# ── 訊號計算（完全複製 signal_engine.py 的邏輯）─────────────────────
-def _row_signal(rsi, hist, prev_hist, close, ma20, ma60) -> str:
-    bull, bear = [], []
-
-    if rsi is not None:
-        if rsi < 35:
-            bull.append("rsi_oversold")
-        elif rsi > 65:
-            bear.append("rsi_overbought")
-
-    if hist is not None and prev_hist is not None:
-        if prev_hist < 0 and hist >= 0:
-            bull.append("macd_golden")
-        elif prev_hist > 0 and hist <= 0:
-            bear.append("macd_death")
-        elif hist > prev_hist:
-            bull.append("macd_strengthening")
-        else:
-            bear.append("macd_weakening")
-
-    if close and ma20 and ma60:
-        if close > ma20 and ma20 > ma60:
-            bull.append("ma_bull")
-        elif close < ma20 and ma20 < ma60:
-            bear.append("ma_bear")
-
-    if len(bull) >= 2:
-        return "BULL"
-    if len(bear) >= 2:
-        return "BEAR"
-    return "NEUTRAL"
+# ── 訊號計算（與前端共用 src/scoring 的 6 因子計分）──────────────────
+def _cell(row, key):
+    """安全取值：欄位不存在或為 NaN 時回 None。"""
+    if key not in row:
+        return None
+    v = row[key]
+    return float(v) if pd.notna(v) else None
 
 
 def compute_signals(df: pd.DataFrame) -> list[str]:
     """逐日計算訊號，回傳與 df 等長的訊號清單。
-    sigs[i] = 第 i 天收盤後可得知的訊號（用第 i 天 vs 第 i-1 天資料計算）
-    進場條件：sigs[i-1]=='BULL' and sigs[i-2]!='BULL' → 第 i 天開盤買入（隔日開盤）
+    sigs[i] = 第 i 天收盤後可得知的訊號（用第 i 天 vs 第 i-1 天資料計算）。
+    進場條件：sigs[i-1]=='BULL' and sigs[i-2]!='BULL' → 第 i 天開盤買入（隔日開盤）。
+
+    使用與前端「信心分數」完全相同的 6 因子計分（src/scoring.score_row），
+    確保回測驗證的策略 == 畫面上建議的策略（分數 ≥65 視為 BULL）。
     """
     sigs = ["NEUTRAL"]  # index 0：第一天無前日資料，給預設 NEUTRAL
     for i in range(1, len(df)):
         cur, prv = df.iloc[i], df.iloc[i - 1]
-        sig = _row_signal(
-            rsi=cur["RSI"] if pd.notna(cur["RSI"]) else None,
-            hist=cur["HIST"] if pd.notna(cur["HIST"]) else None,
-            prev_hist=prv["HIST"] if pd.notna(prv["HIST"]) else None,
-            close=cur["close"] if pd.notna(cur["close"]) else None,
-            ma20=cur["MA20"] if pd.notna(cur["MA20"]) else None,
-            ma60=cur["MA60"] if pd.notna(cur["MA60"]) else None,
+        score, _ = score_row(
+            rsi=_cell(cur, "RSI"),     hist=_cell(cur, "HIST"), prev_hist=_cell(prv, "HIST"),
+            close=_cell(cur, "close"), ma20=_cell(cur, "MA20"), ma60=_cell(cur, "MA60"),
+            ma200=_cell(cur, "MA200"), volume=_cell(cur, "volume"),
+            vol_ma20=_cell(cur, "VOL_MA20"),
+            bb_upper=_cell(cur, "BB_UPPER"), bb_lower=_cell(cur, "BB_LOWER"),
         )
-        sigs.append(sig)
+        sigs.append(signal_from_score(score))
     return sigs
 
 
 # ── 回測核心 ──────────────────────────────────────────────────────────
 def run_backtest(df: pd.DataFrame,
                  stop_loss: float = -0.06,
-                 take_profit: float = 0.20) -> list[dict]:
+                 take_profit: float = 0.20,
+                 fee_rate: float = 0.001,
+                 slippage_rate: float = 0.0005,
+                 signals: list[str] = None) -> list[dict]:
     """
     回傳交易明細清單，每筆包含：
       entry_date, exit_date, entry_price, exit_price,
       return_pct, hold_days, exit_reason
     """
-    signals = compute_signals(df)
+    signals = signals or compute_signals(df)
     trades = []
     position = None  # None = 空倉；dict = 持倉中
 
@@ -115,9 +104,11 @@ def run_backtest(df: pd.DataFrame,
                 ep = today["open"]
                 if pd.isna(ep) or ep <= 0:
                     continue
+                fill_price = float(ep) * (1 + slippage_rate)
                 position = {
                     "entry_date":  str(today["date"].date()),
-                    "entry_price": float(ep),
+                    "entry_price": float(fill_price),
+                    "entry_trigger_price": float(ep),
                     "stop_price":  ep * (1 + stop_loss),
                     "tp_price":    ep * (1 + take_profit),
                 }
@@ -143,7 +134,10 @@ def run_backtest(df: pd.DataFrame,
                 exit_reason = "signal_exit"
 
             if exit_price is not None:
-                ret = (exit_price - ep) / ep
+                raw_exit_price = float(exit_price)
+                fill_exit_price = raw_exit_price * (1 - slippage_rate)
+                gross_ret = (raw_exit_price - position["entry_trigger_price"]) / position["entry_trigger_price"]
+                net_ret = (fill_exit_price * (1 - fee_rate)) / (ep * (1 + fee_rate)) - 1
                 entry_dt = pd.Timestamp(position["entry_date"])
                 exit_dt  = today["date"]
                 # 統一為 tz-naive 才能相減
@@ -154,11 +148,15 @@ def run_backtest(df: pd.DataFrame,
                     "entry_date":  position["entry_date"],
                     "exit_date":   exit_date_str,
                     "entry_price": float(round(ep, 4)),
-                    "exit_price":  float(round(exit_price, 4)),
-                    "return_pct":  float(round(ret * 100, 3)),
+                    "exit_price":  float(round(fill_exit_price, 4)),
+                    "entry_trigger_price": float(round(position["entry_trigger_price"], 4)),
+                    "exit_trigger_price":  float(round(raw_exit_price, 4)),
+                    "gross_return_pct": float(round(gross_ret * 100, 3)),
+                    "return_pct":  float(round(net_ret * 100, 3)),
+                    "cost_pct":    float(round((gross_ret - net_ret) * 100, 3)),
                     "hold_days":   int((exit_dt - entry_dt).days),
                     "exit_reason": exit_reason,
-                    "profit":      bool(ret > 0),  # 明確轉成 Python bool
+                    "profit":      bool(net_ret > 0),  # 明確轉成 Python bool
                 })
                 position = None
 
@@ -209,6 +207,10 @@ def compute_metrics(trades: list[dict], df: pd.DataFrame) -> dict:
 
     # 買入持有比較
     bh_return = (float(df["close"].iloc[-1]) / float(df["close"].iloc[0]) - 1) * 100
+    bh_equity = df["close"].astype(float) / float(df["close"].iloc[0])
+    bh_peak = bh_equity.cummax()
+    bh_dd = (bh_equity - bh_peak) / bh_peak
+    bh_max_dd = float(bh_dd.min() * 100)
 
     # 權益曲線（供圖表用，每筆交易後的資產倍數）
     equity_curve = [
@@ -231,11 +233,123 @@ def compute_metrics(trades: list[dict], df: pd.DataFrame) -> dict:
         "sharpe_ratio":        f(sharpe),
         "avg_hold_days":       f(avg_hold),
         "buy_hold_return_pct": f(bh_return),
+        "buy_hold_max_drawdown_pct": f(bh_max_dd),
+        "excess_return_pct":   f(total_return - bh_return),
+        "avg_cost_pct":        f(float(np.mean([t.get("cost_pct", 0.0) for t in trades]))),
         "stop_loss_exits":     int(sum(1 for t in trades if t["exit_reason"] == "stop_loss")),
         "take_profit_exits":   int(sum(1 for t in trades if t["exit_reason"] == "take_profit")),
         "signal_exits":        int(sum(1 for t in trades if t["exit_reason"] == "signal_exit")),
         "equity_curve":        equity_curve,
     }
+
+
+def split_dataframe(df: pd.DataFrame, train_ratio: float = 0.60) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """依時間順序切成 in-sample / out-of-sample，不打亂資料。"""
+    if df.empty:
+        return df.copy(), df.copy()
+    split_idx = max(1, min(len(df) - 1, int(len(df) * train_ratio)))
+    return df.iloc[:split_idx].copy(), df.iloc[split_idx:].copy()
+
+
+def run_backtest_report(df: pd.DataFrame,
+                        stop_loss: float = -0.06,
+                        take_profit: float = 0.20,
+                        fee_rate: float = 0.001,
+                        slippage_rate: float = 0.0005,
+                        signals: list[str] = None) -> dict:
+    trades = run_backtest(
+        df,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        fee_rate=fee_rate,
+        slippage_rate=slippage_rate,
+        signals=signals,
+    )
+    metrics = compute_metrics(trades, df)
+    return {"trades": trades, "metrics": metrics}
+
+
+def walk_forward_split_report(df: pd.DataFrame,
+                              stop_loss: float = -0.06,
+                              take_profit: float = 0.20,
+                              fee_rate: float = 0.001,
+                              slippage_rate: float = 0.0005,
+                              train_ratio: float = 0.60) -> dict:
+    train_df, test_df = split_dataframe(df, train_ratio=train_ratio)
+    train = run_backtest_report(
+        train_df,
+        stop_loss,
+        take_profit,
+        fee_rate,
+        slippage_rate,
+        signals=compute_signals(train_df),
+    )
+    test = run_backtest_report(
+        test_df,
+        stop_loss,
+        take_profit,
+        fee_rate,
+        slippage_rate,
+        signals=compute_signals(test_df),
+    )
+
+    def compact(metrics: dict) -> dict:
+        return {k: v for k, v in metrics.items() if k != "equity_curve"}
+
+    return {
+        "train_ratio": train_ratio,
+        "in_sample": {
+            "period": {
+                "start": str(train_df["date"].min().date()),
+                "end": str(train_df["date"].max().date()),
+            },
+            "metrics": compact(train["metrics"]),
+        },
+        "out_of_sample": {
+            "period": {
+                "start": str(test_df["date"].min().date()),
+                "end": str(test_df["date"].max().date()),
+            },
+            "metrics": compact(test["metrics"]),
+        },
+    }
+
+
+def parameter_sweep(df: pd.DataFrame,
+                    stop_losses: list[float] = None,
+                    take_profits: list[float] = None,
+                    fee_rate: float = 0.001,
+                    slippage_rate: float = 0.0005) -> list[dict]:
+    stop_losses = stop_losses or [-0.03, -0.05, -0.06, -0.08, -0.10]
+    take_profits = take_profits or [0.10, 0.15, 0.20, 0.25, 0.30]
+    rows = []
+    signals = compute_signals(df)
+    for stop_loss in stop_losses:
+        for take_profit in take_profits:
+            report = run_backtest_report(
+                df,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                fee_rate=fee_rate,
+                slippage_rate=slippage_rate,
+                signals=signals,
+            )
+            metrics = report["metrics"]
+            if "error" in metrics:
+                continue
+            rows.append({
+                "stop_loss": float(stop_loss),
+                "take_profit": float(take_profit),
+                "total_trades": metrics["total_trades"],
+                "total_return_pct": metrics["total_return_pct"],
+                "buy_hold_return_pct": metrics["buy_hold_return_pct"],
+                "excess_return_pct": metrics["excess_return_pct"],
+                "max_drawdown_pct": metrics["max_drawdown_pct"],
+                "sharpe_ratio": metrics["sharpe_ratio"],
+                "profit_factor": metrics["profit_factor"],
+                "win_rate": metrics["win_rate"],
+            })
+    return sorted(rows, key=lambda r: (r["sharpe_ratio"], r["excess_return_pct"]), reverse=True)
 
 
 # ── CLI 報告輸出 ──────────────────────────────────────────────────────

@@ -22,7 +22,6 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
 } from 'recharts'
 import { fetchBacktest } from '../api/client'
-import { coinName } from '../constants/coins'
 
 // 資產倍數曲線圖：X 軸是第幾筆交易，Y 軸是資產倍數（1.0 = 起始本金）
 function EquityCurve({ data }) {
@@ -65,7 +64,7 @@ function TradeTable({ trades }) {
                 {t.return_pct >= 0 ? '+' : ''}{t.return_pct}%
               </td>
               <td>{t.hold_days}天</td>
-              <td className="reason">{t.exit_reason}</td>
+              <td className="reason">{EXIT_REASON_LABEL[t.exit_reason] ?? t.exit_reason}</td>
             </tr>
           ))}
         </tbody>
@@ -74,22 +73,146 @@ function TradeTable({ trades }) {
   )
 }
 
+function ValidationTable({ validation }) {
+  if (!validation) return null
+  const rows = [
+    ['樣本內', validation.in_sample],
+    ['樣本外', validation.out_of_sample],
+  ]
+  return (
+    <div className="mini-table-wrap">
+      <div className="key-chart-title">
+        樣本切分驗證
+        <Info text="把資料切成前 60%（樣本內）和後 40%（樣本外）。若樣本外也能賺錢，代表策略不是只在歷史上剛好有效，較不容易是過度最佳化。" />
+      </div>
+      <table className="mini-table">
+        <thead>
+          <tr>
+            <th>區間</th><th>期間</th><th>報酬</th><th>持有</th><th>回撤</th><th>Sharpe</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([label, row]) => {
+            const m = row?.metrics ?? {}
+            return (
+              <tr key={label}>
+                <td>{label}</td>
+                <td>{row?.period?.start} ~ {row?.period?.end}</td>
+                <td className={m.total_return_pct >= 0 ? 'pos' : 'neg'}>{fmtPct(m.total_return_pct)}</td>
+                <td>{fmtPct(m.buy_hold_return_pct)}</td>
+                <td className="neg">{fmtPct(m.max_drawdown_pct)}</td>
+                <td>{m.sharpe_ratio ?? '-'}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function SweepTable({ rows }) {
+  if (!rows || rows.length === 0) return null
+  return (
+    <div className="mini-table-wrap">
+      <div className="key-chart-title">
+        參數掃描 Top 5
+        <Info text="系統自動試了多種停損／停利組合，依夏普值與超額報酬排序後列出表現最好的前 5 組，方便你挑選參數。" />
+      </div>
+      <table className="mini-table">
+        <thead>
+          <tr>
+            <th>停損</th><th>停利</th><th>報酬</th><th>超額</th><th>回撤</th><th>Sharpe</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={`${r.stop_loss}-${r.take_profit}`}>
+              <td>{fmtPct(r.stop_loss * 100, 0)}</td>
+              <td>{fmtPct(r.take_profit * 100, 0)}</td>
+              <td className={r.total_return_pct >= 0 ? 'pos' : 'neg'}>{fmtPct(r.total_return_pct)}</td>
+              <td className={r.excess_return_pct >= 0 ? 'pos' : 'neg'}>{fmtPct(r.excess_return_pct)}</td>
+              <td className="neg">{fmtPct(r.max_drawdown_pct)}</td>
+              <td>{r.sharpe_ratio}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function fmtPct(value, digits = 1) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '-'
+  const n = Number(value)
+  return `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`
+}
+
+// 出場原因：後端用英文代碼，前端顯示成中文讓一般使用者看得懂
+const EXIT_REASON_LABEL = {
+  stop_loss:   '停損出場',
+  take_profit: '停利出場',
+  signal_exit: '訊號轉空出場',
+}
+
+// 滑鼠移上去會顯示說明的小問號，用來解釋專有名詞
+function Info({ text }) {
+  return <span className="info-tip" title={text}>ⓘ</span>
+}
+
+// 白話結論：把一堆數字翻成一句人話，先講「贏還是輸大盤」再講風險
+function VerdictBanner({ data }) {
+  const m = data?.metrics
+  if (!m || m.error) return null
+  const beat     = m.total_return_pct >= m.buy_hold_return_pct
+  const diffAbs  = Math.abs(m.total_return_pct - m.buy_hold_return_pct).toFixed(1)
+  const ddBetter = Math.abs(m.max_drawdown_pct) < Math.abs(m.buy_hold_max_drawdown_pct)
+  const period   = data.period ? `${data.period.start} ~ ${data.period.end}` : ''
+
+  return (
+    <div className={`backtest-verdict ${beat ? 'good' : 'warn'}`}>
+      <div className="verdict-head">
+        {beat ? '✅ 這段期間「照訊號操作」贏過「買了就放著」' : '⚠️ 這段期間「照訊號操作」輸給「買了就放著」'}
+      </div>
+      <p className="verdict-body">
+        {period} 共進出場 <b>{m.total_trades}</b> 次：策略總報酬 <b>{fmtPct(m.total_return_pct)}</b>、
+        買入持有 <b>{fmtPct(m.buy_hold_return_pct)}</b>，策略{beat ? '多賺' : '少賺'}約 <b>{diffAbs}%</b>。
+        最大回撤（從高點最多跌幅）策略 <b>{fmtPct(m.max_drawdown_pct)}</b>、買入持有 {fmtPct(m.buy_hold_max_drawdown_pct)}，
+        代表策略{ddBetter ? '波動較小、比較抗跌' : '波動較大'}。
+      </p>
+      <p className="verdict-note">※ 這是已扣手續費與滑價的「歷史模擬」，訊號採日線波段，過去績效不代表未來。</p>
+    </div>
+  )
+}
+
 export default function BacktestPanel({ symbol }) {
   const [data,       setData]       = useState(null)
   const [stopLoss,   setStopLoss]   = useState(-0.06)   // 預設停損 -6%
   const [takeProfit, setTakeProfit] = useState(0.20)    // 預設停利 +20%
+  const [feeRate,    setFeeRate]    = useState(0.001)   // 單邊手續費 0.1%
+  const [slippage,   setSlippage]   = useState(0.0005)  // 單邊滑價 0.05%
   const [loading,    setLoading]    = useState(false)
   const [showDetail, setShowDetail] = useState(false)   // 交易明細預設收起
 
   // 換幣種或調整參數時重新計算回測
   useEffect(() => {
     if (!symbol) return
-    setLoading(true)
-    setData(null)
-    fetchBacktest(symbol, stopLoss, takeProfit)
-      .then(setData).catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [symbol, stopLoss, takeProfit])
+    let alive = true
+    async function loadBacktest() {
+      setLoading(true)
+      setData(null)
+      try {
+        const result = await fetchBacktest(symbol, stopLoss, takeProfit, feeRate, slippage)
+        if (alive) setData(result)
+      } catch {
+        if (alive) setData(null)
+      } finally {
+        if (alive) setLoading(false)
+      }
+    }
+    loadBacktest()
+    return () => { alive = false }
+  }, [symbol, stopLoss, takeProfit, feeRate, slippage])
 
   const m = data?.metrics
   // beatsHold=true 表示策略報酬 > 單純買入持有，用來決定顯示綠色還是警告色
@@ -106,17 +229,31 @@ export default function BacktestPanel({ symbol }) {
           <p className="section-subtitle">模擬過去 5 年依訊號買賣的假設績效</p>
         </div>
         <div className="param-row">
-          <label>停損
+          <label>停損<Info text="跌幅達多少就認賠出場，保護本金。例如 -6% = 買進後跌 6% 就賣。" />
             <select value={stopLoss} onChange={e => setStopLoss(+e.target.value)}>
               {[-0.03, -0.05, -0.06, -0.08, -0.10, -0.15].map(v => (
                 <option key={v} value={v}>{(v * 100).toFixed(0)}%</option>
               ))}
             </select>
           </label>
-          <label>停利
+          <label>停利<Info text="漲幅達多少就獲利了結。例如 +20% = 買進後漲 20% 就賣。" />
             <select value={takeProfit} onChange={e => setTakeProfit(+e.target.value)}>
               {[0.10, 0.15, 0.20, 0.25, 0.30, 0.50].map(v => (
                 <option key={v} value={v}>+{(v * 100).toFixed(0)}%</option>
+              ))}
+            </select>
+          </label>
+          <label>手續費<Info text="每次買或賣交易所收取的成本，單邊計算。一般現貨約 0.1%。" />
+            <select value={feeRate} onChange={e => setFeeRate(+e.target.value)}>
+              {[0, 0.0005, 0.001, 0.002].map(v => (
+                <option key={v} value={v}>{(v * 100).toFixed(2)}%</option>
+              ))}
+            </select>
+          </label>
+          <label>滑價<Info text="實際成交價與預期價的落差（市場波動造成）。模擬越保守可設越高。" />
+            <select value={slippage} onChange={e => setSlippage(+e.target.value)}>
+              {[0, 0.0005, 0.001, 0.0025, 0.005].map(v => (
+                <option key={v} value={v}>{(v * 100).toFixed(2)}%</option>
               ))}
             </select>
           </label>
@@ -125,8 +262,19 @@ export default function BacktestPanel({ symbol }) {
 
       {loading && <div className="chart-empty">計算中…</div>}
 
-      {m && (
+      {/* 友善的空狀態：沒有資料或沒有任何交易時，不要顯示一堆空白數字 */}
+      {!loading && data?.error && (
+        <div className="chart-empty">此幣種尚無回測資料</div>
+      )}
+      {!loading && m?.error && (
+        <div className="chart-empty">{m.error}（試著放寬停損／停利再算一次）</div>
+      )}
+
+      {!loading && m && !m.error && (
         <>
+          {/* 白話結論 */}
+          <VerdictBanner data={data} />
+
           {/* 三個核心數字 */}
           <div className="key-metrics">
             {/* 策略 vs 持有 */}
@@ -141,7 +289,8 @@ export default function BacktestPanel({ symbol }) {
                 {m.total_return_pct >= 0 ? '+' : ''}{m.total_return_pct}%
               </div>
               <div className="key-metric-compare">
-                買入持有 {m.buy_hold_return_pct >= 0 ? '+' : ''}{m.buy_hold_return_pct}%
+                買入持有 {fmtPct(m.buy_hold_return_pct)}，超額 {fmtPct(m.excess_return_pct)}
+                <Info text="超額報酬＝策略報酬－買入持有報酬。正數代表這套策略比單純抱著更划算。" />
               </div>
             </div>
 
@@ -153,7 +302,7 @@ export default function BacktestPanel({ symbol }) {
               </div>
               <div className="key-metric-value">{m.win_rate}%</div>
               <div className="key-metric-compare">
-                {m.win_rate >= 50 ? '超過一半交易賺錢' : '不到一半交易賺錢'}，平均獲利 +{m.avg_win_pct}% / 平均虧損 {m.avg_loss_pct}%
+                {m.win_rate >= 50 ? '超過一半交易賺錢' : '不到一半交易賺錢'}，平均成本 {m.avg_cost_pct ?? 0}%
               </div>
             </div>
 
@@ -167,9 +316,15 @@ export default function BacktestPanel({ symbol }) {
                 {m.max_drawdown_pct}%
               </div>
               <div className="key-metric-compare">
-                策略資金從高點最多曾跌這麼多，夏普比率 {m.sharpe_ratio}
+                策略回撤 vs 持有回撤 {fmtPct(m.buy_hold_max_drawdown_pct)}，夏普比率 {m.sharpe_ratio}
+                <Info text="夏普比率＝每承擔一單位波動換到的報酬。數字越高代表報酬相對風險越划算，一般 >1 算不錯。" />
               </div>
             </div>
+          </div>
+
+          <div className="backtest-grid">
+            <ValidationTable validation={data.validation} />
+            <SweepTable rows={data.parameter_sweep} />
           </div>
 
           {/* 資產曲線 */}
