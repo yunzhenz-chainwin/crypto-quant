@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.routers.sentiment import _fetch_and_save
-from backend.services.app_db import get_enabled_symbols, start_job, finish_job
+from backend.services.app_db import get_enabled_symbols, start_job, finish_job, ingest_market_data
 
 # 專案根目錄（相對於本檔往上一層）
 ROOT   = Path(__file__).resolve().parent.parent
@@ -47,8 +47,12 @@ def run_pipeline():
         # 3) 重算相關性矩陣（同樣傳入幣種清單）
         subprocess.run([PYTHON, str(ROOT / "src" / "correlation.py"), *symbols], env=env)
 
-        finish_job(job_id, "success", f"{len(symbols)} 幣種")
-        print("[scheduler] daily pipeline done")
+        # 4) 把最新 K 線 / 指標同步進資料庫（供後台查閱與後續分析）
+        ing = ingest_market_data()
+
+        finish_job(job_id, "success",
+                   f"{len(symbols)} 幣種 · 入庫 {ing['prices']} 筆行情")
+        print(f"[scheduler] daily pipeline done (ingested {ing['prices']} price rows)")
     except Exception as e:
         finish_job(job_id, "failed", str(e))
         print(f"[scheduler] daily pipeline failed: {e}")

@@ -18,8 +18,13 @@
   - ⚠️ 副作用:回測數字因改用真正的 6 因子訊號而變動(例 BTC 73 筆/+12.5% → 64 筆/+53.4%),`reports/backtest_*` 已更新。
 - **🟡 P2 後台(進行中)**
   - ✅ 登入(`/admin`,簡單帳密 + HMAC token,純標準庫):`backend/routers/admin.py`、`frontend/src/api/admin.js`、`frontend/src/admin/AdminApp.jsx`,`main.jsx` 依 `/admin` 路由掛載。
-  - ✅ 監控儀表板:系統健康、各幣資料新鮮度、資料庫統計(news.db + app.db)、最近工作紀錄。
+  - ✅ 監控儀表板:系統健康、各幣資料新鮮度、資料庫統計、最近工作紀錄。
+  - ✅ 工作項目 / 進度追蹤頁:`tasks` 表 + CRUD(新增 / 改狀態 / 標記完成 / 刪除),預設灌入專案進度。
+  - ✅ 點項目開詳細視窗,可編輯「備註 / 交接說明」(`notes` 欄位,多行);現有項目已填入交接資訊,清單以 📝 標示有備註者。
   - ⬜ 操作頁(手動觸發抓取 / 重算 / 回補) ⬜ 管理頁(P3) ⬜ 使用分析(P3)。
+- **🟡 資料庫完整化(進行中)**
+  - ✅ 加密數值入庫:`prices` / `indicators` 各 26,730 筆(15 幣,2021–2026);`/admin/ingest` 可手動匯入,每日排程後自動同步。
+  - ⬜ 持久化每日訊號快照 / 恐懼貪婪歷史;⬜（選用）前台讀取改走 DB。
 - ⬜ P1 前台人性化 ⬜ P4 打磨
 
 > 存取:跑起來後開 `/admin`(帳號 `admin`;密碼於 `backend/routers/admin.py` 或環境變數 `ADMIN_PASS` 設定,`ADMIN_SECRET` 建議對外時一併覆蓋)。
@@ -157,7 +162,7 @@ daily_signal(date, symbol, signal, score, close, rsi)
 -- 恐懼貪婪歷史(自有,不必每次跟外部 API 還原)
 fear_greed(date, value, label)
 ```
-> 市場 K 線/指標維持現有 CSV 管線(資料量小、每日重算良好,搬進 DB 效益低)。
+> (更新)依需求,市場 K 線/指標已一併入庫(`prices` / `indicators`);CSV 管線仍保留產出,DB 作為查閱與後續分析的中央儲存,未來抓到的數值也一併寫入。
 
 ### 3.3 新增 API(節錄)
 ```

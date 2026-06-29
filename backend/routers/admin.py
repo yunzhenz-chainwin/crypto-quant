@@ -18,7 +18,9 @@ import hmac
 import base64
 import hashlib
 import sqlite3
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
+
+from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Depends
 from pydantic import BaseModel
@@ -153,12 +155,87 @@ def db_stats(_: str = Depends(require_admin)):
             "access_log":    _table_count(app_db.DB_PATH, "access_log"),
             "daily_signal":  _table_count(app_db.DB_PATH, "daily_signal"),
             "fear_greed":    _table_count(app_db.DB_PATH, "fear_greed"),
+            "tasks":         _table_count(app_db.DB_PATH, "tasks"),
             "coins_config":  len(app_db.get_coins()),
             "file_kb":       _file_kb(app_db.DB_PATH),
         },
+        "market": app_db.market_stats(),  # 入庫的 K 線 / 指標概況
     }
 
 
 @router.get("/admin/jobs")
 def jobs(_: str = Depends(require_admin)):
     return {"jobs": app_db.recent_jobs(50)}
+
+
+# ── 工作項目 / 進度追蹤 ──────────────────────────────────────────────────────
+class TaskCreateReq(BaseModel):
+    title: str
+    detail: str = ""
+    notes: str = ""                  # 備註 / 交接說明（多行）
+    status: str = "planned"          # planned / in_progress / done
+    phase: str = ""
+    planned_date: Optional[str] = None
+
+
+class TaskUpdateReq(BaseModel):
+    title: Optional[str] = None
+    detail: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = None
+    phase: Optional[str] = None
+    planned_date: Optional[str] = None
+    done_date: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+def _dump(model) -> dict:
+    """相容 pydantic v1 / v2,只取有給值的欄位。"""
+    if hasattr(model, "model_dump"):
+        return model.model_dump(exclude_none=True)
+    return model.dict(exclude_none=True)
+
+
+@router.get("/admin/tasks")
+def get_tasks(_: str = Depends(require_admin)):
+    return {"tasks": app_db.list_tasks()}
+
+
+@router.post("/admin/tasks")
+def add_task(body: TaskCreateReq, _: str = Depends(require_admin)):
+    # 未指定分類 → 依標題自動判斷領域
+    phase = body.phase or app_db.suggest_category(body.title, body.detail)
+    # 未指定預計日 → 自動估算需要幾天,填上 今天 + 天數
+    planned = body.planned_date
+    est_days = None
+    if not planned:
+        est_days = app_db.estimate_days(body.title, body.detail, phase)
+        planned = (datetime.now(timezone.utc).date() + timedelta(days=est_days)).isoformat()
+    tid = app_db.create_task(body.title, body.detail, body.status,
+                             phase, planned, notes=body.notes)
+    return {"ok": True, "id": tid, "phase": phase,
+            "planned_date": planned, "estimated_days": est_days}
+
+
+@router.put("/admin/tasks/{task_id}")
+def edit_task(task_id: int, body: TaskUpdateReq, _: str = Depends(require_admin)):
+    return {"ok": app_db.update_task(task_id, _dump(body))}
+
+
+@router.delete("/admin/tasks/{task_id}")
+def remove_task(task_id: int, _: str = Depends(require_admin)):
+    return {"ok": app_db.delete_task(task_id)}
+
+
+# ── 手動把最新 K 線 / 指標匯入資料庫 ─────────────────────────────────────────
+@router.post("/admin/ingest")
+def ingest(_: str = Depends(require_admin)):
+    jid = app_db.start_job("ingest_market")
+    try:
+        r = app_db.ingest_market_data()
+        app_db.finish_job(jid, "success",
+                          f"{r['prices']} 筆行情 / {r['indicators']} 筆指標")
+        return {"ok": True, **r}
+    except Exception as e:
+        app_db.finish_job(jid, "failed", str(e))
+        return {"ok": False, "error": str(e)}

@@ -807,6 +807,129 @@ body { background: var(--bg); }
 }
 .admin-chip b { color: var(--accent); margin-left: 2px; }
 
+/* 工具列 / 區段標題列 */
+.admin-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 4px; flex-wrap: wrap;
+}
+.admin-count-line { font-size: 12px; color: var(--muted); }
+
+/* 狀態篩選 chips */
+.task-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.task-filter {
+  padding: 4px 12px; border-radius: 20px;
+  border: 1px solid var(--border); background: var(--bg);
+  color: var(--muted); font-size: 12px; cursor: pointer; transition: all 0.12s;
+}
+.task-filter:hover  { color: var(--text); border-color: var(--accent); }
+.task-filter.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.task-filter b { margin-left: 2px; }
+
+/* 篩選狀態下拉 + 顯示筆數 */
+.task-filter-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.task-filter-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted);
+}
+.task-shown-count { font-size: 12px; color: var(--muted); }
+
+/* 新增表單:前導標籤 + 欄位標籤 */
+.tf-lead { font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.tf-field {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--muted); white-space: nowrap;
+}
+
+/* 新增表單下方提示 */
+.task-form-hint { font-size: 11px; color: var(--muted); margin: -6px 0 14px; line-height: 1.5; }
+.admin-section-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.admin-mini-btn {
+  background: var(--bg); color: var(--muted);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 10px; font-size: 12px; cursor: pointer; transition: all 0.12s;
+}
+.admin-mini-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.admin-mini-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 新增工作項目表單 */
+.admin-taskform {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px; margin: 8px 0 14px;
+}
+.admin-taskform .admin-input { padding: 7px 10px; font-size: 13px; }
+.admin-taskform .tf-title { flex: 1; min-width: 180px; }
+.admin-taskform .tf-phase { width: 110px; }
+.admin-taskform .tf-date  { width: 150px; color-scheme: dark; }
+.admin-taskform .tf-add   { padding: 7px 18px; }
+
+/* 下拉選單(後台共用) */
+.admin-select {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 8px; font-size: 13px; cursor: pointer;
+}
+.admin-select.sm { padding: 3px 6px; font-size: 12px; }
+
+/* 工作項目欄位 */
+.task-title  { font-size: 13px; color: var(--text); white-space: normal; }
+.task-detail { font-size: 11px; color: var(--muted); white-space: normal; margin-top: 2px; }
+.admin-del-btn {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--muted); border-radius: 5px; padding: 3px 10px;
+  font-size: 12px; cursor: pointer; transition: all 0.12s;
+}
+.admin-del-btn:hover { color: var(--bear); border-color: var(--bear); }
+
+/* 可點擊的項目標題 */
+.task-title-link {
+  background: none; border: none; padding: 0; text-align: left;
+  color: var(--text); font-size: 13px; font-weight: 600;
+  cursor: pointer; text-decoration: underline; text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+}
+.task-title-link:hover { color: var(--accent); text-decoration-color: var(--accent); }
+
+/* date input 在深色主題的日曆圖示 */
+.admin-input[type="date"] { color-scheme: dark; }
+
+/* 詳細視窗 modal */
+.admin-modal-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 16px; overflow-y: auto;
+}
+.admin-modal {
+  width: 100%; max-width: 560px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.admin-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--border); padding-bottom: 10px;
+}
+.admin-modal-title { font-size: 15px; font-weight: 700; }
+.admin-field { display: flex; flex-direction: column; gap: 4px; }
+.admin-field > span { font-size: 12px; color: var(--muted); }
+.admin-field-row { display: flex; gap: 12px; }
+.admin-field-row .admin-field { flex: 1; }
+.admin-textarea {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px; font-size: 13px; line-height: 1.6;
+  font-family: inherit; resize: vertical;
+}
+.admin-textarea:focus { outline: none; border-color: var(--accent); }
+.admin-modal-actions {
+  display: flex; justify-content: flex-end; align-items: center; gap: 12px;
+  margin-top: 4px;
+}
+.admin-modal-actions .admin-btn { padding: 8px 20px; }
+
 /* ── 信心分數條（卡片用）────────────────────────────── */
 .card-score { display: flex; flex-direction: column; gap: 3px; }
 .card-score-row {

@@ -36,6 +36,27 @@ async function adminGet(path) {
   return res.json()
 }
 
+// 帶 body 的請求(POST / PUT / DELETE)
+async function adminSend(path, method, body) {
+  const res = await fetch(BASE + path, {
+    method,
+    headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  if (res.status === 401) { clearToken(); throw new Error('UNAUTH') }
+  if (!res.ok) throw new Error(`API ${path} 回應 ${res.status}`)
+  return res.json()
+}
+
 export const fetchHealth  = () => adminGet('/health')
 export const fetchDbStats = () => adminGet('/db/stats')
 export const fetchJobs    = () => adminGet('/jobs')
+
+// 工作項目 / 進度追蹤
+export const fetchTasks  = () => adminGet('/tasks')
+export const createTask  = (task)       => adminSend('/tasks', 'POST', task)
+export const updateTask  = (id, fields) => adminSend(`/tasks/${id}`, 'PUT', fields)
+export const deleteTask  = (id)         => adminSend(`/tasks/${id}`, 'DELETE')
+
+// 手動把最新 K 線 / 指標匯入資料庫
+export const ingestMarket = () => adminSend('/ingest', 'POST')
