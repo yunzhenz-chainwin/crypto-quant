@@ -19,7 +19,7 @@
 import { useState, useEffect } from 'react'
 import {
   ResponsiveContainer, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
+  XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, Legend,
 } from 'recharts'
 import { fetchBacktest } from '../api/client'
 import IndicatorCards from './IndicatorCards'
@@ -28,18 +28,22 @@ import IndicatorCards from './IndicatorCards'
 function EquityCurve({ data }) {
   if (!data || data.length === 0) return null
   return (
-    <ResponsiveContainer width="100%" height={160}>
+    <ResponsiveContainer width="100%" height={200}>
       <LineChart data={data} margin={{ top: 4, right: 16, bottom: 0, left: 8 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
         <XAxis dataKey="trade" tick={{ fill: '#94a3b8', fontSize: 10 }} />
-        <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} width={44} />
+        <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} width={44}
+               tickFormatter={(v) => `${v}x`} />
         <Tooltip
           contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6 }}
-          formatter={(v) => [v.toFixed(3), '資產倍數']}
+          formatter={(v, name) => [`${Number(v).toFixed(3)}x`, name]}
           labelFormatter={(l) => `第 ${l} 筆交易`}
         />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
         <ReferenceLine y={1} stroke="#475569" strokeDasharray="4 2" />
-        <Line dataKey="equity" stroke="#60a5fa" dot={false} strokeWidth={1.5} />
+        <Line dataKey="equity" name="策略" stroke="#60a5fa" dot={false} strokeWidth={1.8} />
+        <Line dataKey="bh" name="買入持有" stroke="#94a3b8" dot={false}
+              strokeWidth={1.5} strokeDasharray="5 3" />
       </LineChart>
     </ResponsiveContainer>
   )
@@ -338,7 +342,9 @@ export default function BacktestPanel({ symbol, signal }) {
 
           {/* 資產曲線 */}
           <div style={{ marginTop: 16 }}>
-            <div className="key-chart-title">資產變化曲線（每筆交易後的倍數）</div>
+            <div className="key-chart-title">
+              資產變化曲線:策略 vs 買入持有(每筆交易後的倍數,1.0 = 本金)
+            </div>
             <EquityCurve data={data.equity_curve} />
           </div>
 

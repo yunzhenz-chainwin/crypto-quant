@@ -52,6 +52,9 @@ export const fetchHealth  = () => adminGet('/health')
 export const fetchDbStats = () => adminGet('/db/stats')
 export const fetchJobs    = () => adminGet('/jobs')
 
+// 指標交叉驗證(用獨立演算法逐點比對)
+export const fetchVerifyIndicators = () => adminGet('/verify/indicators')
+
 // 工作項目 / 進度追蹤
 export const fetchTasks  = () => adminGet('/tasks')
 export const createTask  = (task)       => adminSend('/tasks', 'POST', task)

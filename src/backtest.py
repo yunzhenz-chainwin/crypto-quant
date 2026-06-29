@@ -224,11 +224,22 @@ def compute_metrics(trades: list[dict], df: pd.DataFrame) -> dict:
     bh_dd = (bh_equity - bh_peak) / bh_peak
     bh_max_dd = float(bh_dd.min() * 100)
 
-    # 權益曲線（供圖表用，每筆交易後的資產倍數）
-    equity_curve = [
-        {"trade": i + 1, "equity": float(round(e, 4)), "date": trades[i]["exit_date"]}
-        for i, e in enumerate(equity[1:])
-    ]
+    # 權益曲線（供圖表用）：策略 vs 買入持有,以每筆交易的出場日對齊
+    first_close = float(df["close"].iloc[0])
+    close_by_date = {}
+    for _d, _c in zip(df["date"], df["close"]):
+        ds = str(_d.date()) if hasattr(_d, "date") else str(_d)[:10]
+        close_by_date[ds] = float(_c)
+    equity_curve = []
+    for i, e in enumerate(equity[1:]):
+        ed = trades[i]["exit_date"]
+        bh = close_by_date.get(ed, first_close) / first_close   # 同一天若有買入持有會在哪
+        equity_curve.append({
+            "trade": i + 1,
+            "equity": float(round(e, 4)),     # 策略資產倍數
+            "bh": float(round(bh, 4)),         # 買入持有資產倍數
+            "date": ed,
+        })
 
     # 全部轉成 Python 原生型別，避免 FastAPI 序列化 numpy 類型失敗
     def f(v): return float(round(float(v), 4))

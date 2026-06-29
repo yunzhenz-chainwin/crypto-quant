@@ -9,8 +9,11 @@ async function get(path) {
 // 取得所有可用幣種，例如 ["BTCUSDT","ETHUSDT",...]
 export const fetchSymbols = () => get('/symbols')
 
-// 取得資料最後更新時間，例如 { BTCUSDT: "2026-06-17", ... }
+// 取得資料最後更新時間 + 指標交叉驗證摘要
 export const fetchStatus = () => get('/status')
+
+// 取得指標交叉驗證的完整結果(各幣通過與否),供前台彈窗顯示
+export const fetchVerify = () => get('/verify')
 
 // 取得指定幣種最近 N 天的 OHLC 資料，用來畫 K 線 / 折線圖
 export const fetchPrices = (symbol, days = 180) =>

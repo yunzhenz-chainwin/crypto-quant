@@ -84,6 +84,50 @@ body { background: var(--bg); }
   border-radius: 4px; border: 1px solid var(--border);
 }
 
+/* 指標交叉驗證信任徽章(可點擊) */
+.verify-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 600; padding: 3px 10px;
+  border-radius: 20px; cursor: pointer; white-space: nowrap;
+  font-family: inherit; transition: filter 0.12s;
+}
+.verify-badge:hover { filter: brightness(1.25); }
+.verify-badge.ok   { color: var(--bull); background: rgba(34,197,94,0.12);  border: 1px solid rgba(34,197,94,0.35); }
+.verify-badge.warn { color: var(--neutral); background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.35); }
+
+/* 指標交叉驗證彈窗 */
+.vm-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.vm {
+  width: 100%; max-width: 460px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px;
+}
+.vm-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.vm-title { font-size: 16px; font-weight: 700; }
+.vm-x { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+.vm-x:hover { color: var(--text); }
+.vm-intro { font-size: 12px; color: var(--muted); line-height: 1.7; }
+.vm-loading, .vm-err { color: var(--muted); padding: 16px; text-align: center; }
+.vm-summary {
+  margin: 14px 0 10px; padding: 12px; border-radius: 8px;
+  font-size: 15px; font-weight: 700; text-align: center;
+}
+.vm-summary.ok   { color: var(--bull); background: rgba(34,197,94,0.1); }
+.vm-summary.warn { color: var(--neutral); background: rgba(245,158,11,0.1); }
+.vm-items { font-size: 12px; color: var(--muted); text-align: center; margin-bottom: 10px; }
+.vm-coins { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.vm-coin {
+  font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 6px;
+  background: var(--bg); border: 1px solid var(--border);
+}
+.vm-coin.ok  { color: var(--bull); }
+.vm-coin.bad { color: var(--bear); border-color: var(--bear); }
+.vm-note { font-size: 11px; color: var(--muted); line-height: 1.6; margin-top: 14px; }
+
 /* ── 主佈局：側邊欄 + 主區 ──────────────────────────── */
 .app-layout { display: flex; flex: 1; overflow: hidden; }
 

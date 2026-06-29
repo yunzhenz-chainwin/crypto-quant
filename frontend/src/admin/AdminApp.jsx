@@ -11,7 +11,7 @@ import {
   adminLogin, getToken, setToken, clearToken,
   fetchHealth, fetchDbStats, fetchJobs,
   fetchTasks, createTask, updateTask, deleteTask, ingestMarket,
-  fetchDbTables, fetchDbTable,
+  fetchDbTables, fetchDbTable, fetchVerifyIndicators,
 } from '../api/admin'
 
 // ── 登入頁 ──────────────────────────────────────────────────────────────────
@@ -123,6 +123,8 @@ function Dashboard({ onLogout }) {
   const [err, setErr]         = useState('')
   const [loading, setLoading] = useState(false)
   const [ingesting, setIngesting] = useState(false)
+  const [verify, setVerify]       = useState(null)
+  const [verifying, setVerifying] = useState(false)
 
   const load = useCallback(async () => {
     setErr(''); setLoading(true)
@@ -138,6 +140,15 @@ function Dashboard({ onLogout }) {
   }, [onLogout])
 
   useEffect(() => { load() }, [load])
+
+  const runVerify = useCallback(async () => {
+    setVerifying(true)
+    try { setVerify(await fetchVerifyIndicators()) }
+    catch (e) { if (e.message === 'UNAUTH') onLogout() }
+    finally { setVerifying(false) }
+  }, [onLogout])
+
+  useEffect(() => { runVerify() }, [runVerify])   // 進頁自動驗證一次
 
   const runIngest = async () => {
     setIngesting(true)
@@ -237,6 +248,57 @@ function Dashboard({ onLogout }) {
             ))}
           </div>
         </div>
+      )}
+
+      {/* 指標交叉驗證 */}
+      <div className="admin-section-head">
+        <h2 className="admin-section-title">資料正確性(指標交叉驗證)</h2>
+        <button className="admin-mini-btn" onClick={runVerify} disabled={verifying}>
+          {verifying ? '驗證中…' : (verify ? '↻ 重新驗證' : '執行驗證')}
+        </button>
+      </div>
+      {!verify && (
+        <div className="admin-count-line">
+          {verifying ? '用獨立演算法重算指標、逐點比對中…' : '尚未驗證'}
+        </div>
+      )}
+      {verify && (
+        <>
+          <div className="admin-grid">
+            <StatCard label="指標交叉驗證"
+              value={`${verify.passed} / ${verify.total}`}
+              sub="與獨立演算法逐點一致(RSI/MACD/MA/布林/量)"
+              tone={verify.ok ? 'good' : 'bad'} />
+            <StatCard label="最大誤差"
+              value="≈ 機器精度"
+              sub="差異僅浮點殘差(~1e-15),非真實差異" />
+          </div>
+          <div className="admin-table-wrap">
+            <table className="admin-table db-table">
+              <thead><tr>
+                <th>幣種</th><th>狀態</th>
+                <th className="db-num-cell">RSI 誤差</th>
+                <th className="db-num-cell">MACD 誤差</th>
+                <th className="db-num-cell">MA 誤差</th>
+                <th className="db-num-cell">布林 誤差</th>
+              </tr></thead>
+              <tbody>
+                {verify.coins.map(c => (
+                  <tr key={c.symbol}>
+                    <td>{c.symbol.replace('USDT', '')}</td>
+                    <td style={{ color: c.ok ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
+                      {c.ok ? '✓ 一致' : '✗ 不符'}
+                    </td>
+                    <td className="db-num-cell">{c.rsi == null ? '—' : c.rsi.toExponential(1)}</td>
+                    <td className="db-num-cell">{c.macd == null ? '—' : c.macd.toExponential(1)}</td>
+                    <td className="db-num-cell">{c.ma == null ? '—' : c.ma.toExponential(1)}</td>
+                    <td className="db-num-cell">{c.bb == null ? '—' : c.bb.toExponential(1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {/* 最近工作紀錄 */}

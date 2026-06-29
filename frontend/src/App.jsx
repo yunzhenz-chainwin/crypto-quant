@@ -121,12 +121,6 @@ export default function App() {
           >
             市場總覽
           </button>
-          <button
-            className={`nav-btn ${view === 'detail' ? 'active' : ''}`}
-            onClick={() => setView('detail')}
-          >
-            {coinName(active)}
-          </button>
         </nav>
         <StatusBar />
       </header>

@@ -305,3 +305,10 @@ def db_table_rows(
         "limit": limit, "offset": offset,
         "has_symbol": "symbol" in cols, "has_interval": "interval" in cols,
     }
+
+
+# ── 指標交叉驗證(用獨立演算法逐點比對,確認指標計算正確)─────────────────────
+@router.get("/admin/verify/indicators")
+def verify_indicators(_: str = Depends(require_admin)):
+    from src.verify_indicators import cached_result
+    return cached_result()              # 與前台 /status 共用同一份快取
