@@ -200,6 +200,31 @@ body { background: var(--bg); }
   border-radius: 20px; color: var(--text);
 }
 
+/* 指標白話卡 */
+.ind-cards { display: flex; flex-direction: column; gap: 8px; }
+.ind-cards-title { font-size: 11px; color: var(--muted); font-weight: 600; }
+.ind-cards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+@media (max-width: 700px) { .ind-cards-grid { grid-template-columns: 1fr; } }
+.ind-card {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px;
+}
+.ind-card-head { display: flex; align-items: center; gap: 4px; }
+.ind-card-name { font-size: 12px; font-weight: 600; color: var(--text); }
+.ind-card-arrow { margin-left: auto; font-size: 15px; font-weight: 700; line-height: 1; }
+.ind-card-note { font-size: 11px; margin-top: 3px; line-height: 1.4; font-weight: 600; }
+.ind-rsi { margin-top: 6px; }
+.ind-rsi-track {
+  position: relative; height: 6px; background: var(--border);
+  border-radius: 3px; overflow: hidden;
+}
+.ind-rsi-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.ind-rsi-mark { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); }
+.ind-rsi-axis {
+  display: flex; justify-content: space-between;
+  font-size: 9px; color: var(--muted); margin-top: 2px;
+}
+
 /* ── 圖表區塊 ──────────────────────────────────────── */
 .chart-section {
   background: var(--surface);
@@ -377,6 +402,9 @@ body { background: var(--bg); }
 
 /* 資產曲線 */
 .key-chart-title { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+
+/* 回測區頂部:策略依據的指標白話卡 */
+.bt-indicators { margin: 4px 0 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 
 /* 展開按鈕 */
 .detail-toggle {

@@ -82,61 +82,7 @@ function ScoreGauge({ score }) {
   )
 }
 
-// 因子列表
-function FactorList({ factors }) {
-  if (!factors || Object.keys(factors).length === 0) return null
-  const items = Object.entries(factors)
-
-  return (
-    <div className="factor-list">
-      <div className="factor-list-title">各因子評分</div>
-      {items.map(([key, f]) => {
-        const pct   = ((f.score + 20) / 40) * 100  // -20~+20 → 0~100%
-        const color = f.score > 0 ? '#22c55e' : f.score < 0 ? '#ef4444' : '#475569'
-        return (
-          <div key={key} className="factor-row">
-            <span className="factor-label">{f.label}</span>
-            <div className="factor-bar-track">
-              <div
-                className="factor-bar-fill"
-                style={{ width: `${Math.max(2, Math.min(100, pct))}%`, background: color }}
-              />
-              {/* 中線（=50%） */}
-              <div className="factor-bar-center" />
-            </div>
-            <span className="factor-score" style={{ color }}>
-              {f.score > 0 ? '+' : ''}{f.score}
-            </span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// RSI 進度條
-function RsiBar({ rsi }) {
-  if (rsi == null) return null
-  const pct   = Math.max(0, Math.min(100, rsi))
-  const color = rsi > 65 ? '#ef4444' : rsi < 35 ? '#22c55e' : '#f59e0b'
-  const label = rsi > 65 ? '超買（偏高，注意回調）' : rsi < 35 ? '超賣（偏低，可能反彈）' : '正常區間'
-  return (
-    <div className="rsi-bar-wrap">
-      <div className="rsi-bar-labels">
-        <span>RSI {rsi.toFixed(0)}</span>
-        <span style={{ color }}>{label}</span>
-      </div>
-      <div className="rsi-bar-track">
-        <div className="rsi-bar-fill" style={{ width: `${pct}%`, background: color }} />
-        <div className="rsi-bar-marker" style={{ left: '35%' }} />
-        <div className="rsi-bar-marker" style={{ left: '65%' }} />
-      </div>
-      <div className="rsi-bar-axis">
-        <span>0</span><span>超賣 35</span><span>超買 65</span><span>100</span>
-      </div>
-    </div>
-  )
-}
+// 指標白話卡已抽成共用元件,移至「策略回測」區塊顯示:見 ./IndicatorCards.jsx
 
 export default function HeroSignal({ signal, symbol }) {
   const cfg   = SIGNAL_CONFIG[signal?.signal ?? 'UNKNOWN']
@@ -157,25 +103,9 @@ export default function HeroSignal({ signal, symbol }) {
         <div className="hero-desc">{cfg.desc}</div>
       </div>
 
-      {/* 中：信心分數量表 */}
+      {/* 右：信心分數量表 */}
       <div className="hero-gauge-col">
         <ScoreGauge score={signal?.score} />
-      </div>
-
-      {/* 右：RSI + 因子列表 */}
-      <div className="hero-right">
-        <RsiBar rsi={signal?.rsi} />
-
-        {signal?.factors && <FactorList factors={signal.factors} />}
-
-        {signal?.reasons?.length > 0 && (
-          <div className="hero-reasons">
-            <div className="hero-reasons-title">主要依據</div>
-            {signal.reasons.slice(0, 4).map((r, i) => (
-              <span key={i} className="hero-reason-tag">{r}</span>
-            ))}
-          </div>
-        )}
       </div>
     </section>
   )

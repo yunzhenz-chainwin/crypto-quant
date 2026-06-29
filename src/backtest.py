@@ -46,12 +46,14 @@ def load_indicators(symbol: str) -> pd.DataFrame:
 
 
 # ── 訊號計算（與前端共用 src/scoring 的 6 因子計分）──────────────────
-def _cell(row, key):
-    """安全取值：欄位不存在或為 NaN 時回 None。"""
-    if key not in row:
-        return None
-    v = row[key]
-    return float(v) if pd.notna(v) else None
+def _col(df, key):
+    """取欄位的 numpy 陣列;欄位不存在則回傳全 NaN(視為缺值)。"""
+    return df[key].to_numpy() if key in df.columns else np.full(len(df), np.nan)
+
+
+def _num(v):
+    """numpy 值 → float;NaN / 缺值回 None。"""
+    return float(v) if (v is not None and v == v) else None
 
 
 def compute_signals(df: pd.DataFrame) -> list[str]:
@@ -62,15 +64,21 @@ def compute_signals(df: pd.DataFrame) -> list[str]:
     使用與前端「信心分數」完全相同的 6 因子計分（src/scoring.score_row），
     確保回測驗證的策略 == 畫面上建議的策略（分數 ≥65 視為 BULL）。
     """
+    n = len(df)
+    if n == 0:
+        return []
+    # 一次取出所有欄位為 numpy 陣列,迴圈內用整數索引(不逐列 .iloc,快很多)
+    rsi = _col(df, "RSI");   hist = _col(df, "HIST");  close = _col(df, "close")
+    ma20 = _col(df, "MA20"); ma60 = _col(df, "MA60");  ma200 = _col(df, "MA200")
+    vol = _col(df, "volume"); vma = _col(df, "VOL_MA20")
+    bbu = _col(df, "BB_UPPER"); bbl = _col(df, "BB_LOWER")
+
     sigs = ["NEUTRAL"]  # index 0：第一天無前日資料，給預設 NEUTRAL
-    for i in range(1, len(df)):
-        cur, prv = df.iloc[i], df.iloc[i - 1]
+    for i in range(1, n):
         score, _ = score_row(
-            rsi=_cell(cur, "RSI"),     hist=_cell(cur, "HIST"), prev_hist=_cell(prv, "HIST"),
-            close=_cell(cur, "close"), ma20=_cell(cur, "MA20"), ma60=_cell(cur, "MA60"),
-            ma200=_cell(cur, "MA200"), volume=_cell(cur, "volume"),
-            vol_ma20=_cell(cur, "VOL_MA20"),
-            bb_upper=_cell(cur, "BB_UPPER"), bb_lower=_cell(cur, "BB_LOWER"),
+            _num(rsi[i]), _num(hist[i]), _num(hist[i - 1]),
+            _num(close[i]), _num(ma20[i]), _num(ma60[i]), _num(ma200[i]),
+            _num(vol[i]), _num(vma[i]), _num(bbu[i]), _num(bbl[i]),
         )
         sigs.append(signal_from_score(score))
     return sigs
@@ -89,11 +97,15 @@ def run_backtest(df: pd.DataFrame,
       return_pct, hold_days, exit_reason
     """
     signals = signals or compute_signals(df)
+    # 一次取出價格欄位為陣列(不逐列 .iloc),日期保留為 Timestamp 清單
+    opens = df["open"].to_numpy(dtype=float)
+    highs = df["high"].to_numpy(dtype=float)
+    lows  = df["low"].to_numpy(dtype=float)
+    dates = df["date"].tolist()
     trades = []
     position = None  # None = 空倉；dict = 持倉中
 
     for i in range(2, len(df)):
-        today = df.iloc[i]
         sig_today = signals[i]
         sig_prev = signals[i - 1]
         sig_prev2 = signals[i - 2]
@@ -101,12 +113,12 @@ def run_backtest(df: pd.DataFrame,
         if position is None:
             # 進場條件：前一天訊號首次出現 BULL（前兩天不是 BULL）
             if sig_prev == "BULL" and sig_prev2 != "BULL":
-                ep = today["open"]
-                if pd.isna(ep) or ep <= 0:
+                ep = opens[i]
+                if ep != ep or ep <= 0:        # NaN(ep!=ep) 或非正值
                     continue
                 fill_price = float(ep) * (1 + slippage_rate)
                 position = {
-                    "entry_date":  str(today["date"].date()),
+                    "entry_date":  str(dates[i].date()),
                     "entry_price": float(fill_price),
                     "entry_trigger_price": float(ep),
                     "stop_price":  ep * (1 + stop_loss),
@@ -117,8 +129,8 @@ def run_backtest(df: pd.DataFrame,
             exit_price = None
             exit_reason = None
 
-            low  = today["low"]  if pd.notna(today["low"])  else ep
-            high = today["high"] if pd.notna(today["high"]) else ep
+            low  = lows[i]  if lows[i]  == lows[i]  else ep   # nan==nan 為 False
+            high = highs[i] if highs[i] == highs[i] else ep
 
             # 停損（日內觸及）
             if low <= position["stop_price"]:
@@ -130,7 +142,7 @@ def run_backtest(df: pd.DataFrame,
                 exit_reason = "take_profit"
             # 訊號出場：訊號首次轉 BEAR
             elif sig_today == "BEAR" and sig_prev != "BEAR":
-                exit_price = float(today["open"])
+                exit_price = float(opens[i])
                 exit_reason = "signal_exit"
 
             if exit_price is not None:
@@ -139,7 +151,7 @@ def run_backtest(df: pd.DataFrame,
                 gross_ret = (raw_exit_price - position["entry_trigger_price"]) / position["entry_trigger_price"]
                 net_ret = (fill_exit_price * (1 - fee_rate)) / (ep * (1 + fee_rate)) - 1
                 entry_dt = pd.Timestamp(position["entry_date"])
-                exit_dt  = today["date"]
+                exit_dt  = dates[i]
                 # 統一為 tz-naive 才能相減
                 if hasattr(exit_dt, "tz_convert"):
                     exit_dt = exit_dt.tz_convert(None)
@@ -319,11 +331,13 @@ def parameter_sweep(df: pd.DataFrame,
                     stop_losses: list[float] = None,
                     take_profits: list[float] = None,
                     fee_rate: float = 0.001,
-                    slippage_rate: float = 0.0005) -> list[dict]:
+                    slippage_rate: float = 0.0005,
+                    signals: list[str] = None) -> list[dict]:
     stop_losses = stop_losses or [-0.03, -0.05, -0.06, -0.08, -0.10]
     take_profits = take_profits or [0.10, 0.15, 0.20, 0.25, 0.30]
     rows = []
-    signals = compute_signals(df)
+    # 訊號只與指標有關、與停損停利無關 → 整個掃描共用同一份(可由外部傳入避免重算)
+    signals = signals or compute_signals(df)
     for stop_loss in stop_losses:
         for take_profit in take_profits:
             report = run_backtest_report(

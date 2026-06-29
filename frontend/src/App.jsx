@@ -231,7 +231,7 @@ export default function App() {
             </section>
 
             <SentimentPanel symbol={active} />
-            <BacktestPanel symbol={active} />
+            <BacktestPanel symbol={active} signal={activeSignal} />
 
             <section className="collapsible-section">
               <button className="collapse-toggle" onClick={() => setShowIndicators(v => !v)}>

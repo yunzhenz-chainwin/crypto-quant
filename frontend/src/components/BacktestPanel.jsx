@@ -22,6 +22,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
 } from 'recharts'
 import { fetchBacktest } from '../api/client'
+import IndicatorCards from './IndicatorCards'
 
 // 資產倍數曲線圖：X 軸是第幾筆交易，Y 軸是資產倍數（1.0 = 起始本金）
 function EquityCurve({ data }) {
@@ -185,7 +186,7 @@ function VerdictBanner({ data }) {
   )
 }
 
-export default function BacktestPanel({ symbol }) {
+export default function BacktestPanel({ symbol, signal }) {
   const [data,       setData]       = useState(null)
   const [stopLoss,   setStopLoss]   = useState(-0.06)   // 預設停損 -6%
   const [takeProfit, setTakeProfit] = useState(0.20)    // 預設停利 +20%
@@ -259,6 +260,14 @@ export default function BacktestPanel({ symbol }) {
           </label>
         </div>
       </div>
+
+      {/* 策略依據的指標(白話卡)— 不等回測,立即顯示 */}
+      {signal?.factors && (
+        <div className="bt-indicators">
+          <div className="key-chart-title">策略依據的指標(即時解讀)</div>
+          <IndicatorCards factors={signal.factors} rsi={signal.rsi} />
+        </div>
+      )}
 
       {loading && <div className="chart-empty">計算中…</div>}
 
