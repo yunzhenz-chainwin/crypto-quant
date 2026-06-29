@@ -975,3 +975,61 @@ body { background: var(--bg); }
   position: absolute; top: -2px; width: 1px; height: 9px;
   background: rgba(255,255,255,0.2);
 }
+
+/* ══ 響應式 RWD(手機 / 平板)════════════════════════════ */
+/* 平板 / 較窄視窗:精簡 header,隱藏逐幣日期細項(避免擠成一團) */
+@media (max-width: 1024px) {
+  .status-detail { display: none; }
+  .header { flex-wrap: wrap; height: auto; gap: 8px; padding: 8px 16px; }
+}
+
+@media (max-width: 768px) {
+  /* 桌機是「固定高 + 內部捲動」;手機改成整頁自然垂直捲動 */
+  .app { height: auto; min-height: 100vh; overflow: visible; }
+
+  /* Header 換行縮小,隱藏細項資料截至列 */
+  .header { height: auto; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+  .logo { font-size: 15px; }
+  .status-bar { display: none; }
+
+  /* 詳細頁:左側固定欄 → 上方橫向幣種列 */
+  .app-layout { flex-direction: column; overflow: visible; }
+  .coin-sidebar {
+    width: 100%; border-right: none; border-bottom: 1px solid var(--border);
+    flex-direction: row; gap: 6px; padding: 8px;
+    overflow-x: auto; overflow-y: hidden;
+  }
+  .sidebar-title { display: none; }
+  .sidebar-item {
+    flex: 0 0 auto; width: auto; min-width: auto;
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+  }
+  .sidebar-zh, .sidebar-sig { display: none; }   /* 手機僅留 ● ticker 價格 */
+  .sidebar-right { flex-direction: row; align-items: center; gap: 4px; }
+
+  /* 主內容區改成隨頁捲動 */
+  .main-content, .overview-layout { overflow-y: visible; padding: 12px; }
+  .main-content { gap: 12px; }
+
+  /* Hero 訊號卡直向堆疊 */
+  .hero-signal { flex-direction: column; gap: 14px; }
+  .hero-left, .hero-right, .hero-gauge-col { width: 100%; }
+  .hero-desc { max-width: none; }
+
+  /* 區塊內距、控制列縮小 */
+  .chart-section, .backtest-section, .sentiment-section { padding: 12px; }
+  .chart-section-header, .backtest-header { flex-direction: column; align-items: stretch; }
+  .range-controls { align-items: flex-start; }
+  .param-row { justify-content: flex-start; }
+
+  /* 後台:頂列換行、內距縮小 */
+  .admin-header { height: auto; padding: 8px 12px; }
+  .admin-body { padding: 12px; }
+}
+
+/* 很窄的手機再微調 */
+@media (max-width: 420px) {
+  .market-summary { font-size: 11px; gap: 8px; }
+  .hero-price { font-size: 24px; }
+  .key-metric-value { font-size: 22px; }
+}
