@@ -34,6 +34,7 @@ def _connect() -> sqlite3.Connection:
 def init_db():
     """建立資料表與索引（若已存在則略過，可安全重複呼叫）"""
     with _connect() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")  # 更耐當機、讀寫不互鎖
         conn.execute("""
             CREATE TABLE IF NOT EXISTS news (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,

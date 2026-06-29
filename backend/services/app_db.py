@@ -62,6 +62,14 @@ def _ensure_column(conn, table: str, column: str, decl: str):
 def init_db():
     """建立所有資料表與索引（可安全重複呼叫）。"""
     with _connect() as conn:
+        # WAL 模式:更耐當機、讀寫不互相阻塞(穩定性強化)
+        conn.execute("PRAGMA journal_mode=WAL")
+        # 舊版 prices/indicators(只有 date 欄)→ 砍掉重建為多週期 schema。
+        # 這兩張表的資料可由 CSV 重新匯入,故可安全 drop(只會發生一次)。
+        for _tbl in ("prices", "indicators"):
+            _info = conn.execute(f"PRAGMA table_info({_tbl})").fetchall()
+            if _info and "interval" not in [c[1] for c in _info]:
+                conn.execute(f"DROP TABLE {_tbl}")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS job_runs (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,31 +131,33 @@ def init_db():
                 updated_at   TEXT    NOT NULL
             )
         """)
-        # 加密行情（K 線）入庫：未來抓到的數值一併放這裡，供查閱與後續分析
+        # 加密行情（K 線）入庫：支援多週期(1d / 1h…),ts 為完整時間戳
         conn.execute("""
             CREATE TABLE IF NOT EXISTS prices (
-                symbol TEXT NOT NULL,
-                date   TEXT NOT NULL,
-                open   REAL, high REAL, low REAL, close REAL, volume REAL,
-                PRIMARY KEY (symbol, date)
+                symbol   TEXT NOT NULL,
+                interval TEXT NOT NULL DEFAULT '1d',
+                ts       TEXT NOT NULL,
+                open REAL, high REAL, low REAL, close REAL, volume REAL,
+                PRIMARY KEY (symbol, interval, ts)
             )
         """)
-        # 技術指標入庫（與 prices 對齊）
+        # 技術指標入庫（與 prices 對齊,同樣支援多週期）
         conn.execute("""
             CREATE TABLE IF NOT EXISTS indicators (
-                symbol TEXT NOT NULL,
-                date   TEXT NOT NULL,
+                symbol   TEXT NOT NULL,
+                interval TEXT NOT NULL DEFAULT '1d',
+                ts       TEXT NOT NULL,
                 close REAL, ma20 REAL, ma60 REAL, ma200 REAL,
                 rsi REAL, macd REAL, signal REAL, hist REAL,
                 bb_upper REAL, bb_lower REAL, vol_ma20 REAL,
-                PRIMARY KEY (symbol, date)
+                PRIMARY KEY (symbol, interval, ts)
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_job_started ON job_runs(started_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_access_ts   ON access_log(ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_prices_sym  ON prices(symbol, date)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ind_sym     ON indicators(symbol, date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_prices_sym  ON prices(symbol, interval, ts)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ind_sym     ON indicators(symbol, interval, ts)")
         # 既有資料庫的欄位遷移：補上 tasks.notes（備註 / 交接說明）
         _ensure_column(conn, "tasks", "notes", "TEXT")
         conn.commit()
@@ -281,13 +291,17 @@ def estimate_days(title: str, detail: str = "", phase: str = "") -> int:
     text = f"{title} {detail}".lower()
     days = 2  # 基準
 
-    # 階段大致規模（P1 前台大改、P3 後台功能通常較久）
-    phase_add = {"P0": 1, "P1": 3, "P2": 2, "P3": 2, "P4": 1}
-    p = (phase or "").upper()
-    for k, v in phase_add.items():
-        if p.startswith(k):
-            days += v
-            break
+    # 分類大致規模（前台/後台改動通常較久）;相容舊的 P0–P4
+    cat_add = {"前台": 3, "後台": 2, "資料庫": 2, "訊號/回測": 1,
+               "資料抓取": 1, "修復/優化": 0, "其他": 0}
+    p = (phase or "").strip()
+    if p in cat_add:
+        days += cat_add[p]
+    else:
+        for k, v in {"P0": 1, "P1": 3, "P2": 2, "P3": 2, "P4": 1}.items():
+            if p.upper().startswith(k):
+                days += v
+                break
 
     # 大工程關鍵字 +2、小修小補 -1、多畫面/元件 +1
     big   = ["重構", "遷移", "整套", "全部", "系統", "架構", "白話", "簡易",
@@ -340,11 +354,11 @@ def _f(v):
         return None
 
 
-def ingest_market_data() -> dict:
+def ingest_market_data(interval: str = "1d") -> dict:
     """
-    把 data/clean/*.csv（K 線）與 reports/indicators_*.csv（指標）匯入資料庫。
-    用 INSERT OR REPLACE，可重複執行（每日排程後再跑一次即增量更新）。
-    回傳匯入的幣種數與筆數。
+    把 data/clean/*_<interval>.csv（K 線）與 reports/indicators_*_<interval>.csv（指標）
+    匯入資料庫。用 INSERT OR REPLACE，可重複執行（每日排程後再跑一次即增量更新）。
+    ts 存到秒(日線為 00:00:00),搭配 interval 支援 1d / 1h 並存。
     """
     root    = DB_PATH.parent.parent
     clean   = root / "data" / "clean"
@@ -352,26 +366,26 @@ def ingest_market_data() -> dict:
     p_rows = i_rows = syms = 0
 
     with _connect() as conn:
-        for csv_path in sorted(clean.glob("*_1d.csv")):
-            symbol = csv_path.stem.replace("_1d", "")
+        for csv_path in sorted(clean.glob(f"*_{interval}.csv")):
+            symbol = csv_path.stem.replace(f"_{interval}", "")
             syms += 1
             with open(csv_path, newline="", encoding="utf-8") as f:
                 batch = [
-                    (symbol, r["date"][:10], _f(r.get("open")), _f(r.get("high")),
+                    (symbol, interval, r["date"][:19], _f(r.get("open")), _f(r.get("high")),
                      _f(r.get("low")), _f(r.get("close")), _f(r.get("volume")))
                     for r in csv.DictReader(f)
                 ]
             conn.executemany(
                 "INSERT OR REPLACE INTO prices "
-                "(symbol, date, open, high, low, close, volume) VALUES (?,?,?,?,?,?,?)",
-                batch)
+                "(symbol, interval, ts, open, high, low, close, volume) "
+                "VALUES (?,?,?,?,?,?,?,?)", batch)
             p_rows += len(batch)
 
-            ind_path = reports / f"indicators_{symbol}_1d.csv"
+            ind_path = reports / f"indicators_{symbol}_{interval}.csv"
             if ind_path.exists():
                 with open(ind_path, newline="", encoding="utf-8") as f:
                     ibatch = [
-                        (symbol, r["date"][:10], _f(r.get("close")), _f(r.get("MA20")),
+                        (symbol, interval, r["date"][:19], _f(r.get("close")), _f(r.get("MA20")),
                          _f(r.get("MA60")), _f(r.get("MA200")), _f(r.get("RSI")),
                          _f(r.get("MACD")), _f(r.get("SIGNAL")), _f(r.get("HIST")),
                          _f(r.get("BB_UPPER")), _f(r.get("BB_LOWER")), _f(r.get("VOL_MA20")))
@@ -379,12 +393,12 @@ def ingest_market_data() -> dict:
                     ]
                 conn.executemany(
                     "INSERT OR REPLACE INTO indicators "
-                    "(symbol, date, close, ma20, ma60, ma200, rsi, macd, signal, hist, "
-                    "bb_upper, bb_lower, vol_ma20) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "(symbol, interval, ts, close, ma20, ma60, ma200, rsi, macd, signal, hist, "
+                    "bb_upper, bb_lower, vol_ma20) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     ibatch)
                 i_rows += len(ibatch)
         conn.commit()
-    return {"symbols": syms, "prices": p_rows, "indicators": i_rows}
+    return {"interval": interval, "symbols": syms, "prices": p_rows, "indicators": i_rows}
 
 
 def market_stats() -> dict:
@@ -393,9 +407,69 @@ def market_stats() -> dict:
         p = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
         i = conn.execute("SELECT COUNT(*) FROM indicators").fetchone()[0]
         syms = conn.execute("SELECT COUNT(DISTINCT symbol) FROM prices").fetchone()[0]
-        span = conn.execute("SELECT MIN(date), MAX(date) FROM prices").fetchone()
+        span = conn.execute("SELECT MIN(ts), MAX(ts) FROM prices").fetchone()
+        by_int = conn.execute(
+            "SELECT interval, COUNT(*) FROM prices GROUP BY interval").fetchall()
     return {"prices": p, "indicators": i, "symbols": syms,
-            "date_min": span[0], "date_max": span[1]}
+            "date_min": (span[0] or "")[:10], "date_max": (span[1] or "")[:10],
+            "by_interval": {r[0]: r[1] for r in by_int}}
+
+
+def backfill_daily_signals() -> int:
+    """
+    用全部歷史指標重算「每日訊號快照」填入 daily_signal(逐日逐幣的信心分數/多空)。
+    讓前台日後可畫『信心分數歷史走勢』。可重複執行(會先清空重建)。
+    """
+    import sys
+    sys.path.insert(0, str(DB_PATH.parent.parent))
+    from src.scoring import score_row, signal_from_score
+
+    reports = DB_PATH.parent.parent / "reports"
+    total = 0
+    with _connect() as conn:
+        conn.execute("DELETE FROM daily_signal")
+        for csv_path in sorted(reports.glob("indicators_*_1d.csv")):
+            symbol = csv_path.stem.replace("indicators_", "").replace("_1d", "")
+            prev_hist = None
+            rows = []
+            with open(csv_path, newline="", encoding="utf-8") as f:
+                for r in csv.DictReader(f):
+                    score, _ = score_row(
+                        _f(r.get("RSI")), _f(r.get("HIST")), prev_hist,
+                        _f(r.get("close")), _f(r.get("MA20")), _f(r.get("MA60")),
+                        _f(r.get("MA200")), _f(r.get("volume")), _f(r.get("VOL_MA20")),
+                        _f(r.get("BB_UPPER")), _f(r.get("BB_LOWER")))
+                    rows.append((r["date"][:10], symbol, signal_from_score(score),
+                                 score, _f(r.get("close")), _f(r.get("RSI"))))
+                    prev_hist = _f(r.get("HIST"))
+            conn.executemany(
+                "INSERT OR REPLACE INTO daily_signal "
+                "(date, symbol, signal, score, close, rsi) VALUES (?,?,?,?,?,?)", rows)
+            total += len(rows)
+        conn.commit()
+    return total
+
+
+def fetch_fear_greed_history(limit: int = 0) -> int:
+    """
+    從 alternative.me 抓恐懼貪婪指數歷史填入 fear_greed(limit=0 取全部,可追溯至 2018)。
+    需要網路;失敗會丟出例外由呼叫端處理。
+    """
+    import datetime as dt
+    import requests
+    resp = requests.get(f"https://api.alternative.me/fng/?limit={limit}", timeout=20)
+    resp.raise_for_status()
+    data = resp.json().get("data", [])
+    rows = []
+    for d in data:
+        ts = int(d["timestamp"])
+        date = dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%Y-%m-%d")
+        rows.append((date, int(d["value"]), d.get("value_classification", "")))
+    with _connect() as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO fear_greed (date, value, label) VALUES (?,?,?)", rows)
+        conn.commit()
+    return len(rows)
 
 
 # ── 預設資料 ─────────────────────────────────────────────────────────────────

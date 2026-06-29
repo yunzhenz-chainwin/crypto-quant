@@ -21,8 +21,9 @@ frontend/dist/
 
 # 動態產生的資料（頻繁變動，不追蹤）
 data/raw/
-data/news.db
-data/app.db
+data/*.db
+data/*.db-wal
+data/*.db-shm
 
 # 報告圖片（二進位檔，不追蹤）
 reports/*.png

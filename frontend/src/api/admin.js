@@ -60,3 +60,13 @@ export const deleteTask  = (id)         => adminSend(`/tasks/${id}`, 'DELETE')
 
 // 手動把最新 K 線 / 指標匯入資料庫
 export const ingestMarket = () => adminSend('/ingest', 'POST')
+
+// 資料庫檢視:列出資料表 / 讀某表的資料列
+export const fetchDbTables = () => adminGet('/db/tables')
+export const fetchDbTable = (name, { symbol = null, interval = null, limit = 50, offset = 0 } = {}) => {
+  const p = new URLSearchParams()
+  if (symbol)   p.set('symbol', symbol)
+  if (interval) p.set('interval', interval)
+  p.set('limit', limit); p.set('offset', offset)
+  return adminGet(`/db/table/${name}?${p}`)
+}

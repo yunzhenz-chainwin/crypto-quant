@@ -11,7 +11,10 @@ import subprocess
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.routers.sentiment import _fetch_and_save
-from backend.services.app_db import get_enabled_symbols, start_job, finish_job, ingest_market_data
+from backend.services.app_db import (
+    get_enabled_symbols, start_job, finish_job,
+    ingest_market_data, backfill_daily_signals, fetch_fear_greed_history,
+)
 
 # 專案根目錄（相對於本檔往上一層）
 ROOT   = Path(__file__).resolve().parent.parent
@@ -47,12 +50,17 @@ def run_pipeline():
         # 3) 重算相關性矩陣（同樣傳入幣種清單）
         subprocess.run([PYTHON, str(ROOT / "src" / "correlation.py"), *symbols], env=env)
 
-        # 4) 把最新 K 線 / 指標同步進資料庫（供後台查閱與後續分析）
+        # 4) 同步進資料庫:K線/指標 + 重算每日訊號歷史 + 更新恐懼貪婪歷史
         ing = ingest_market_data()
+        sig = backfill_daily_signals()
+        try:
+            fetch_fear_greed_history(0)
+        except Exception as e:
+            print(f"[scheduler] fear_greed history skip: {e}")
 
         finish_job(job_id, "success",
-                   f"{len(symbols)} 幣種 · 入庫 {ing['prices']} 筆行情")
-        print(f"[scheduler] daily pipeline done (ingested {ing['prices']} price rows)")
+                   f"{len(symbols)} 幣種 · 入庫 {ing['prices']} 筆 · 訊號 {sig} 筆")
+        print(f"[scheduler] daily pipeline done (prices {ing['prices']}, signals {sig})")
     except Exception as e:
         finish_job(job_id, "failed", str(e))
         print(f"[scheduler] daily pipeline failed: {e}")

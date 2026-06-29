@@ -239,3 +239,69 @@ def ingest(_: str = Depends(require_admin)):
     except Exception as e:
         app_db.finish_job(jid, "failed", str(e))
         return {"ok": False, "error": str(e)}
+
+
+# ── 資料庫檢視(唯讀瀏覽各表)─────────────────────────────────────────────────
+# 白名單:只允許看這些表,並標明它在哪個 DB 檔(避免任意表名 / SQL 注入)
+def _table_registry():
+    return {
+        "prices":       (app_db.DB_PATH,    "行情 K線"),
+        "indicators":   (app_db.DB_PATH,    "技術指標"),
+        "daily_signal": (app_db.DB_PATH,    "每日訊號"),
+        "fear_greed":   (app_db.DB_PATH,    "恐懼貪婪"),
+        "tasks":        (app_db.DB_PATH,    "工作項目"),
+        "app_config":   (app_db.DB_PATH,    "設定"),
+        "job_runs":     (app_db.DB_PATH,    "操作紀錄"),
+        "access_log":   (app_db.DB_PATH,    "使用紀錄"),
+        "news":         (news_store.DB_PATH, "新聞"),
+    }
+
+
+@router.get("/admin/db/tables")
+def db_table_list(_: str = Depends(require_admin)):
+    out = []
+    for name, (path, label) in _table_registry().items():
+        out.append({"name": name, "label": label, "rows": _table_count(path, name)})
+    return {"tables": out}
+
+
+@router.get("/admin/db/table/{name}")
+def db_table_rows(
+    name: str,
+    symbol:   Optional[str] = None,
+    interval: Optional[str] = None,
+    limit:    int = 50,
+    offset:   int = 0,
+    _: str = Depends(require_admin),
+):
+    reg = _table_registry()
+    if name not in reg:                       # 只允許白名單內的表
+        raise HTTPException(status_code=404, detail="未知或不允許的資料表")
+    path, label = reg[name]
+    limit = max(1, min(int(limit), 500))      # 一次最多 500 筆
+    offset = max(0, int(offset))
+
+    with sqlite3.connect(str(path)) as c:
+        c.row_factory = sqlite3.Row
+        cols = [r[1] for r in c.execute(f"PRAGMA table_info({name})").fetchall()]
+        where, params = [], []
+        if symbol and "symbol" in cols:
+            where.append("symbol = ?"); params.append(symbol.upper())
+        if interval and "interval" in cols:
+            where.append("interval = ?"); params.append(interval)
+        wsql = (" WHERE " + " AND ".join(where)) if where else ""
+        # 排序欄:優先時間,其次 id;皆無則用第一欄
+        order = "ts" if "ts" in cols else "date" if "date" in cols else \
+                "fetched_at" if "fetched_at" in cols else "id" if "id" in cols else cols[0]
+        total = c.execute(f"SELECT COUNT(*) FROM {name}{wsql}", params).fetchone()[0]
+        rows = c.execute(
+            f"SELECT * FROM {name}{wsql} ORDER BY {order} DESC LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        ).fetchall()
+
+    return {
+        "name": name, "label": label, "columns": cols,
+        "rows": [dict(r) for r in rows], "total": total,
+        "limit": limit, "offset": offset,
+        "has_symbol": "symbol" in cols, "has_interval": "interval" in cols,
+    }

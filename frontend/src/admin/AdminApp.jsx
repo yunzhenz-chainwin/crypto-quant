@@ -11,6 +11,7 @@ import {
   adminLogin, getToken, setToken, clearToken,
   fetchHealth, fetchDbStats, fetchJobs,
   fetchTasks, createTask, updateTask, deleteTask, ingestMarket,
+  fetchDbTables, fetchDbTable,
 } from '../api/admin'
 
 // ── 登入頁 ──────────────────────────────────────────────────────────────────
@@ -102,7 +103,8 @@ function AdminHeader({ tab, setTab, onLogout }) {
                 onClick={() => setTab('monitor')}>監控</button>
         <button className={`admin-tab ${tab === 'tasks' ? 'active' : ''}`}
                 onClick={() => setTab('tasks')}>工作項目</button>
-        <button className="admin-tab" disabled title="P3">管理（即將推出）</button>
+        <button className={`admin-tab ${tab === 'db' ? 'active' : ''}`}
+                onClick={() => setTab('db')}>資料庫</button>
         <button className="admin-tab" disabled title="P3">分析（即將推出）</button>
       </div>
       <div className="admin-header-right">
@@ -523,6 +525,187 @@ function TasksPage({ onLogout }) {
   )
 }
 
+// ── 資料庫檢視頁(唯讀瀏覽各表,友善欄位名 + 色彩標記)─────────────────────────
+const TABLE_ICONS = {
+  prices: '📈', indicators: '📊', daily_signal: '🚦', fear_greed: '😱',
+  tasks: '🗂️', app_config: '⚙️', job_runs: '🛠️', access_log: '🌐', news: '📰',
+}
+const TABLE_DESC = {
+  prices: '每根 K 線的開高低收量', indicators: '各項技術指標數值',
+  daily_signal: '逐日逐幣的信心分數與多空', fear_greed: '市場恐懼貪婪指數歷史',
+  tasks: '後台工作項目與進度', app_config: '系統集中設定',
+  job_runs: '排程 / 操作執行紀錄', access_log: 'API 使用紀錄', news: '新聞文章',
+}
+const COLUMN_LABELS = {
+  symbol: '幣種', interval: '週期', ts: '時間', date: '日期',
+  open: '開盤', high: '最高', low: '最低', close: '收盤', volume: '成交量',
+  ma20: 'MA20', ma60: 'MA60', ma200: 'MA200', rsi: 'RSI', macd: 'MACD',
+  signal: '多空', hist: '柱狀', bb_upper: '布林上軌', bb_lower: '布林下軌', vol_ma20: '均量(20)',
+  score: '信心分數', value: '指數', label: '等級',
+  id: '#', title: '標題', detail: '說明', notes: '備註', status: '狀態', phase: '分類',
+  planned_date: '預計日', done_date: '完成日', sort_order: '排序',
+  created_at: '建立時間', updated_at: '更新時間',
+  url: '連結', domain: '來源', category: '分類', sentiment: '情緒',
+  published_at: '發布日', fetched_at: '存入時間',
+  job_type: '類型', started_at: '開始', finished_at: '結束', message: '訊息',
+  key: '設定鍵', value_json: '設定值', path: '路徑', status_code: '狀態碼', latency_ms: '耗時(ms)',
+}
+const NUMERIC_COLS = new Set([
+  'open', 'high', 'low', 'close', 'volume', 'ma20', 'ma60', 'ma200', 'rsi', 'macd', 'hist',
+  'bb_upper', 'bb_lower', 'vol_ma20', 'score', 'value', 'latency_ms', 'sort_order', 'status_code', 'id',
+])
+const DB_SIG  = { BULL: { t: '多頭', c: '#22c55e' }, BEAR: { t: '空頭', c: '#ef4444' }, NEUTRAL: { t: '中立', c: '#f59e0b' } }
+const DB_SENT = { bullish: { t: '看多', c: '#22c55e' }, bearish: { t: '看空', c: '#ef4444' }, neutral: { t: '中立', c: '#94a3b8' } }
+
+function DbBadge({ text, color }) {
+  return <span className="db-badge" style={{ color, borderColor: color + '66', background: color + '1a' }}>{text}</span>
+}
+function fmtNum(col, v) {
+  if (col === 'volume' || col === 'vol_ma20') {
+    const a = Math.abs(v)
+    if (a >= 1e6) return (v / 1e6).toFixed(2) + 'M'
+    if (a >= 1e3) return (v / 1e3).toFixed(1) + 'K'
+    return v.toFixed(2)
+  }
+  return Number(v).toLocaleString(undefined, { maximumFractionDigits: 4 })
+}
+// 依欄位/表別,把原始值渲染成好讀的內容(徽章、色彩、千分位…)
+function renderCell(col, val, table) {
+  if (val === null || val === undefined || val === '') return <span className="db-null">—</span>
+  if (col === 'signal' && DB_SIG[val]) return <DbBadge text={DB_SIG[val].t} color={DB_SIG[val].c} />
+  if (col === 'sentiment' && DB_SENT[val]) return <DbBadge text={DB_SENT[val].t} color={DB_SENT[val].c} />
+  if (col === 'status' && table === 'tasks' && TASK_STATUS[val])
+    return <DbBadge text={TASK_STATUS[val].t} color={TASK_STATUS[val].c} />
+  if (col === 'score') {
+    const n = Number(val), c = n >= 65 ? '#22c55e' : n >= 50 ? '#84cc16' : n >= 35 ? '#f59e0b' : '#ef4444'
+    return <b style={{ color: c }}>{n}</b>
+  }
+  if (col === 'value' && table === 'fear_greed') {
+    const n = Number(val), c = n <= 25 ? '#ef4444' : n <= 45 ? '#f97316' : n <= 55 ? '#f59e0b' : n <= 75 ? '#84cc16' : '#22c55e'
+    return <b style={{ color: c }}>{n}</b>
+  }
+  if (col === 'url') return <a href={val} target="_blank" rel="noreferrer" className="db-link">開啟 ↗</a>
+  if (typeof val === 'number') return fmtNum(col, val)
+  const s = String(val)
+  return s.length > 64 ? <span title={s}>{s.slice(0, 64)}…</span> : s
+}
+
+function DbViewer({ onLogout }) {
+  const [tables, setTables] = useState([])
+  const [active, setActive] = useState('prices')
+  const [data, setData]     = useState(null)
+  const [symbol, setSymbol] = useState('')
+  const [limit, setLimit]   = useState(50)
+  const [offset, setOffset] = useState(0)
+  const [err, setErr]       = useState('')
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    fetchDbTables()
+      .then(r => setTables(r.tables ?? []))
+      .catch(e => { if (e.message === 'UNAUTH') onLogout() })
+  }, [onLogout])
+
+  const load = useCallback(async () => {
+    setErr(''); setLoading(true)
+    try {
+      setData(await fetchDbTable(active, { symbol: symbol || null, limit, offset }))
+    } catch (e) {
+      if (e.message === 'UNAUTH') { onLogout(); return }
+      setErr('讀取失敗:' + e.message)
+    } finally { setLoading(false) }
+  }, [active, symbol, limit, offset, onLogout])
+
+  useEffect(() => { load() }, [load])
+
+  const changeTable = (name) => { setActive(name); setSymbol(''); setOffset(0) }
+  const page = data ? Math.floor(data.offset / data.limit) + 1 : 1
+
+  return (
+    <div className="admin-body">
+      {/* 視覺化選表 */}
+      <div className="db-tabs">
+        {tables.map(t => (
+          <button key={t.name}
+            className={`db-tab ${active === t.name ? 'active' : ''}`}
+            onClick={() => changeTable(t.name)}>
+            <span className="db-tab-icon">{TABLE_ICONS[t.name] ?? '🗃️'}</span>
+            <span className="db-tab-name">{t.label}</span>
+            <span className="db-tab-count">{t.rows.toLocaleString()}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="admin-toolbar">
+        <div className="task-filter-bar">
+          {data && <span className="db-desc">{TABLE_ICONS[active]} {TABLE_DESC[active] ?? ''}</span>}
+          {data?.has_symbol && (
+            <label className="task-filter-label">幣種
+              <input className="admin-input" style={{ width: 150 }}
+                     placeholder="如 BTCUSDT(留空全部)"
+                     value={symbol} onChange={e => { setSymbol(e.target.value); setOffset(0) }} />
+            </label>
+          )}
+          <label className="task-filter-label">每頁
+            <select className="admin-select" value={limit}
+                    onChange={e => { setLimit(+e.target.value); setOffset(0) }}>
+              {[50, 100, 200, 500].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+        </div>
+        <button className="admin-link" onClick={load} disabled={loading}>
+          {loading ? '載入中…' : '↻ 重新整理'}
+        </button>
+      </div>
+
+      {err && <div className="admin-error">{err}</div>}
+
+      {data && (
+        <>
+          <div className="admin-count-line" style={{ marginBottom: 8 }}>
+            共 <b>{data.total.toLocaleString()}</b> 筆
+            {data.total > 0 && <>,顯示第 {data.offset + 1}–{Math.min(data.offset + data.limit, data.total)} 筆</>}
+          </div>
+          <div className="admin-table-wrap">
+            <table className="admin-table db-table">
+              <thead><tr>
+                {data.columns.map(c => (
+                  <th key={c} className={NUMERIC_COLS.has(c) ? 'db-num-cell' : ''}>
+                    {COLUMN_LABELS[c] ?? c}
+                  </th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {data.rows.length === 0 && (
+                  <tr><td colSpan={data.columns.length} style={{ color: '#94a3b8' }}>沒有資料</td></tr>
+                )}
+                {data.rows.map((row, i) => (
+                  <tr key={i}>
+                    {data.columns.map(c => (
+                      <td key={c} className={NUMERIC_COLS.has(c) ? 'db-num-cell' : ''}>
+                        {renderCell(c, row[c], active)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-toolbar" style={{ marginTop: 10 }}>
+            <span className="admin-count-line">第 {page} 頁</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="admin-mini-btn" disabled={data.offset <= 0}
+                      onClick={() => setOffset(Math.max(0, offset - limit))}>← 上一頁</button>
+              <button className="admin-mini-btn" disabled={data.offset + data.limit >= data.total}
+                      onClick={() => setOffset(offset + limit)}>下一頁 →</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── 入口 ────────────────────────────────────────────────────────────────────
 export default function AdminApp() {
   const [authed, setAuthed] = useState(!!getToken())
@@ -535,7 +718,9 @@ export default function AdminApp() {
   return (
     <div className="admin-app">
       <AdminHeader tab={tab} setTab={setTab} onLogout={logout} />
-      {tab === 'monitor' ? <Dashboard onLogout={logout} /> : <TasksPage onLogout={logout} />}
+      {tab === 'monitor' ? <Dashboard onLogout={logout} />
+        : tab === 'tasks' ? <TasksPage onLogout={logout} />
+        : <DbViewer onLogout={logout} />}
     </div>
   )
 }
