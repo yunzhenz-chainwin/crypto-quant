@@ -55,6 +55,9 @@ export const fetchJobs    = () => adminGet('/jobs')
 // 指標交叉驗證(用獨立演算法逐點比對)
 export const fetchVerifyIndicators = () => adminGet('/verify/indicators')
 
+// 訊號預測力(成績單:現行訊號有沒有 forward edge)
+export const fetchSignalScorecard = () => adminGet('/signal/scorecard')
+
 // 工作項目 / 進度追蹤
 export const fetchTasks  = () => adminGet('/tasks')
 export const createTask  = (task)       => adminSend('/tasks', 'POST', task)

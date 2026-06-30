@@ -312,3 +312,10 @@ def db_table_rows(
 def verify_indicators(_: str = Depends(require_admin)):
     from src.verify_indicators import cached_result
     return cached_result()              # 與前台 /status 共用同一份快取
+
+
+# ── 訊號預測力(成績單,即時看現行訊號有沒有 forward edge)──────────────────────
+@router.get("/admin/signal/scorecard")
+def signal_scorecard(_: str = Depends(require_admin)):
+    from src.signal_eval import cached_scorecard
+    return cached_scorecard()           # 快取鍵含 scoring.py mtime,改訊號後自動重算

@@ -11,7 +11,7 @@ import {
   adminLogin, getToken, setToken, clearToken,
   fetchHealth, fetchDbStats, fetchJobs,
   fetchTasks, createTask, updateTask, deleteTask, ingestMarket,
-  fetchDbTables, fetchDbTable, fetchVerifyIndicators,
+  fetchDbTables, fetchDbTable, fetchVerifyIndicators, fetchSignalScorecard,
 } from '../api/admin'
 
 // ── 登入頁 ──────────────────────────────────────────────────────────────────
@@ -105,6 +105,8 @@ function AdminHeader({ tab, setTab, onLogout }) {
                 onClick={() => setTab('tasks')}>工作項目</button>
         <button className={`admin-tab ${tab === 'db' ? 'active' : ''}`}
                 onClick={() => setTab('db')}>資料庫</button>
+        <button className={`admin-tab ${tab === 'status' ? 'active' : ''}`}
+                onClick={() => setTab('status')}>現況</button>
         <button className="admin-tab" disabled title="P3">分析（即將推出）</button>
       </div>
       <div className="admin-header-right">
@@ -768,6 +770,262 @@ function DbViewer({ onLogout }) {
   )
 }
 
+// ── 現況頁（給主管：直接看做了什麼、還有哪些問題）─────────────────────────────
+function StatusPage({ onLogout }) {
+  const [score, setScore]   = useState(null)
+  const [health, setHealth] = useState(null)
+  const [verify, setVerify] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr]       = useState('')
+
+  const load = useCallback(async () => {
+    setErr(''); setLoading(true)
+    try {
+      const [s, h, v] = await Promise.all([
+        fetchSignalScorecard(), fetchHealth(), fetchVerifyIndicators(),
+      ])
+      setScore(s); setHealth(h); setVerify(v)
+    } catch (e) {
+      if (e.message === 'UNAUTH') { onLogout(); return }
+      setErr('讀取失敗:' + e.message)
+    } finally { setLoading(false) }
+  }, [onLogout])
+
+  useEffect(() => { load() }, [load])
+
+  // 盡量由即時資料推導「問題 / 正常」，避免寫死過時內容
+  const problems = []
+  const goods = []
+  if (score) {
+    if (!score.ok) problems.push({
+      sev: 'high',
+      title: '訊號目前「無預測力」，不可作為買賣依據',
+      detail: `現行訊號出現後，之後漲跌機率不比隨機進場高（${score.verdict}）。已測 6 種改良方向皆無效，下一步改用「跨幣動量」研究。`,
+    })
+    else goods.push({ title: '訊號具預測力（edge）', detail: score.verdict })
+  }
+  if (health) {
+    const stale = (health.coins || []).filter(c => c.stale)
+    if (stale.length) problems.push({
+      sev: 'mid',
+      title: `${stale.length} 支幣資料已停止更新`,
+      detail: stale.map(c => `${c.symbol.replace('USDT', '')}（停在 ${c.last_date}）`).join('、')
+              + ' — 多為已下市 / 改名（如 MATIC→POL），建議汰換。',
+    })
+    const lp = health.last_pipeline || {}
+    if (lp.status && lp.status !== 'success') problems.push({
+      sev: 'high', title: '每日資料排程最近一次失敗', detail: lp.message || '',
+    })
+    goods.push({
+      title: `${health.symbols_fresh ?? 0}/${health.symbols_total ?? 0} 幣資料即時更新`,
+      detail: `每日 01:00 自動抓取，排程狀態：${lp.status || '—'}`,
+    })
+  }
+  if (verify) {
+    if (verify.ok) goods.push({
+      title: `指標數值正確（交叉驗證 ${verify.passed}/${verify.total}）`,
+      detail: '用獨立演算法逐點比對一致 — 指標「算得對」，只是不能預測未來。',
+    })
+    else problems.push({ sev: 'mid', title: '指標交叉驗證有不一致', detail: `${verify.passed}/${verify.total} 通過` })
+  }
+
+  const hasHigh = problems.some(p => p.sev === 'high')
+  const tldr = !score ? '載入中…'
+    : (score.ok
+        ? '資料每日自動更新；訊號已具預測力。'
+        : '資料管線已修復且每日自動更新、指標數值正確；但「訊號目前沒有預測力」，不應作為投資依據（正在研究改進）。')
+  const bannerTone = hasHigh ? 'bad' : (problems.length ? 'warn' : 'good')
+  const sevMap = { high: { c: '#ef4444', t: '嚴重' }, mid: { c: '#f59e0b', t: '注意' } }
+
+  return (
+    <div className="admin-body">
+      <div className="admin-toolbar">
+        <span className="admin-section-title" style={{ margin: 0 }}>📋 現況總覽（給主管）</span>
+        <button className="admin-link" onClick={load} disabled={loading}>
+          {loading ? '更新中…' : '↻ 重新整理'}
+        </button>
+      </div>
+
+      {err && <div className="admin-error">{err}</div>}
+
+      {/* 一句話現況 */}
+      <div className={`admin-card tone-${bannerTone}`} style={{ marginBottom: 16 }}>
+        <div className="admin-card-label">一句話現況</div>
+        <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.5, marginTop: 4 }}>{tldr}</div>
+      </div>
+
+      {/* 已知問題 */}
+      <h2 className="admin-section-title">⚠️ 已知問題（{problems.length}）</h2>
+      {problems.length === 0
+        ? <div className="admin-count-line">目前沒有已知問題 🎉</div>
+        : problems.map((p, i) => {
+            const s = sevMap[p.sev] || sevMap.mid
+            return (
+              <div key={i} className="admin-card" style={{ borderLeft: `4px solid ${s.c}`, marginBottom: 10 }}>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>
+                  <span style={{ color: s.c }}>● {s.t}</span>　{p.title}
+                </div>
+                <div className="admin-card-sub" style={{ marginTop: 4 }}>{p.detail}</div>
+              </div>
+            )
+          })}
+
+      {/* 運作正常 */}
+      <h2 className="admin-section-title">✅ 運作正常</h2>
+      <div className="admin-table-wrap" style={{ padding: '0 14px' }}>
+        {goods.length === 0
+          ? <div className="admin-count-line">載入中…</div>
+          : goods.map((g, i) => (
+              <div key={i} style={{ padding: '7px 0', borderBottom: '1px solid #1f2937' }}>
+                <b style={{ color: '#22c55e' }}>✓ {g.title}</b>
+                <span className="admin-card-sub">　{g.detail}</span>
+              </div>
+            ))}
+      </div>
+
+      {/* 訊號預測力 成績單（問題的數據佐證）*/}
+      <h2 className="admin-section-title">訊號預測力（成績單）— 上面問題的數據佐證</h2>
+      {!score
+        ? <div className="admin-count-line">{loading ? '評估中…' : '尚未評估'}</div>
+        : (
+          <>
+            <div className="admin-grid">
+              <StatCard label="訊號預測力"
+                value={score.ok ? '有 edge' : '無預測力'}
+                sub={score.verdict} tone={score.tone} />
+              <StatCard label="評估範圍"
+                value={`${score.coins} 幣`}
+                sub={`資料至 ${score.as_of} · 對照「任一天進場」基準`} />
+            </div>
+            <div className="admin-table-wrap">
+              <table className="admin-table db-table">
+                <thead><tr>
+                  <th>持有期</th>
+                  <th className="db-num-cell">訊號樣本</th>
+                  <th className="db-num-cell">命中率</th>
+                  <th className="db-num-cell">vs 基準</th>
+                  <th className="db-num-cell">平均報酬</th>
+                  <th className="db-num-cell">vs 基準</th>
+                </tr></thead>
+                <tbody>
+                  {score.horizons.map(h => (
+                    <tr key={h.n}>
+                      <td>{h.n} 天</td>
+                      <td className="db-num-cell">{h.samples}</td>
+                      <td className="db-num-cell">{h.hit}%</td>
+                      <td className="db-num-cell" style={{ color: h.hit_vs_base >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
+                        {h.hit_vs_base >= 0 ? '+' : ''}{h.hit_vs_base}pp
+                      </td>
+                      <td className="db-num-cell">{h.avg >= 0 ? '+' : ''}{h.avg}%</td>
+                      <td className="db-num-cell" style={{ color: h.avg_vs_base >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
+                        {h.avg_vs_base >= 0 ? '+' : ''}{h.avg_vs_base}pp
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="task-form-hint">
+              💡「vs 基準」為正、且跨持有期一致 = 訊號有預測力；紅色 = 比隨機進場還差。指標數值正確 ≠ 訊號能預測。
+            </div>
+          </>
+        )}
+
+      {/* 各因子預測力（誰準誰不准）*/}
+      {score && score.factors && score.factors.length > 0 && (
+        <>
+          <h2 className="admin-section-title">各因子預測力（誰「準」、誰「不准」）</h2>
+          <div className="admin-table-wrap">
+            <table className="admin-table db-table">
+              <thead><tr>
+                <th>因子</th>
+                <th className="db-num-cell">樣本</th>
+                <th className="db-num-cell">命中 vs基準</th>
+                <th className="db-num-cell">edge（報酬 vs基準）</th>
+                <th>判定</th>
+              </tr></thead>
+              <tbody>
+                {score.factors.map(f => {
+                  const c = f.verdict === '有預測力' ? '#22c55e' : f.verdict === '無預測力' ? '#ef4444' : '#94a3b8'
+                  return (
+                    <tr key={f.key}>
+                      <td>{f.label}</td>
+                      <td className="db-num-cell">{f.samples}</td>
+                      <td className="db-num-cell" style={{ color: f.hit_vs_base >= 0 ? '#22c55e' : '#ef4444' }}>
+                        {f.hit_vs_base >= 0 ? '+' : ''}{f.hit_vs_base}pp
+                      </td>
+                      <td className="db-num-cell" style={{ color: f.edge >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
+                        {f.edge >= 0 ? '+' : ''}{f.edge}pp
+                      </td>
+                      <td style={{ color: c, fontWeight: 700 }}>{f.verdict}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="task-form-hint">
+            💡 每個因子「單獨」看：它轉多頭後 10 天的表現 vs 隨機進場。edge 正（綠）= 有方向性資訊；負（紅）= 反指標 / 無用。
+            ⚠ 這是「數值正確」的指標各自的「預測力」——<b>數值對 ≠ 能預測</b>。
+          </div>
+        </>
+      )}
+
+      {/* 離「有意義」還有多遠 */}
+      {score && score.gap && (
+        <>
+          <h2 className="admin-section-title">離「有意義」還有多遠</h2>
+          <div className="admin-grid">
+            <StatCard label="目前 edge（10天）"
+              value={`${score.gap.current_edge_pp >= 0 ? '+' : ''}${score.gap.current_edge_pp}pp`}
+              sub="訊號比隨機進場多賺 / 少賺" tone={score.gap.current_edge_pp > 0 ? 'good' : 'bad'} />
+            <StatCard label="有意義門檻（估）"
+              value={`+${score.gap.useful_threshold_pp}pp`} sub="約覆蓋來回成本 ~0.3%" />
+            <StatCard label="還差"
+              value={`${score.gap.gap_pp}pp`} sub="距「扣成本還有賺」"
+              tone={score.gap.gap_pp > 0 ? 'warn' : 'good'} />
+          </div>
+          <div className="task-form-hint">
+            💡 edge = 訊號比「隨便哪天買」多賺多少（百分點）。<b>0 = 跟隨機沒兩樣</b>；要扣手續費還有賺，至少 &gt; +{score.gap.useful_threshold_pp}pp。
+            目前 {score.gap.current_edge_pp}pp，<b>還差約 {score.gap.gap_pp}pp</b> 才碰到門檻，而且要「跨持有期一致為正」才算真 edge。
+            ⚠ 老實說：用日線技術指標補正這個 gap 且穩定為正，難度很高，通常得換維度（見下方建議）。
+          </div>
+        </>
+      )}
+
+      {/* 改善建議（全部）*/}
+      <h2 className="admin-section-title">改善建議（全部）</h2>
+      <div className="admin-table-wrap" style={{ padding: '4px 14px' }}>
+        <div style={{ padding: '8px 0 4px', color: '#94a3b8', fontWeight: 700 }}>已測試 · 確認無效</div>
+        {[['反向操作（抄底）', '10天 edge −0.4pp'], ['只在趨勢盤聽訊號', '−1.1pp'],
+          ['不追高（濾過熱）', '−1.1pp'], ['買在極度恐懼', '−1.4pp']].map(([t, d], i) => (
+          <div key={i} style={{ padding: '5px 0', borderBottom: '1px solid #1f2937' }}>
+            <span style={{ color: '#ef4444' }}>✗ {t}</span><span className="admin-card-sub">　{d}</span>
+          </div>
+        ))}
+        <div style={{ padding: '12px 0 4px', color: '#94a3b8', fontWeight: 700 }}>建議嘗試 · 換維度</div>
+        {[['⭐ 跨幣動量（排名做多最強 / 放空最弱）', '天花板最高，資料已在手，工程中等'],
+          ['幣圈原生資料（資金費率 / 未平倉 / 基差）', '有文獻支持的 edge，需接新資料源'],
+          ['重新定位為「風控 + 教育」工具', '不主打預測，以風險管理 / 誠實度為賣點']].map(([t, d], i) => (
+          <div key={i} style={{ padding: '5px 0', borderBottom: '1px solid #1f2937' }}>
+            <span style={{ color: '#84cc16' }}>○ {t}</span><span className="admin-card-sub">　{d}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* 這平台有沒有意義 */}
+      <h2 className="admin-section-title">這平台有沒有意義？（誠實評估）</h2>
+      <div className="admin-card" style={{ borderLeft: '4px solid #f59e0b', lineHeight: 1.8 }}>
+        <div className="admin-card-sub">
+          <b style={{ color: '#ef4444' }}>作為「預測訊號」產品：</b>目前訊號無 edge → <b>還不能宣稱有投資意義</b>，不應拿來實際下單。<br />
+          <b style={{ color: '#22c55e' }}>作為「資料平台 + 誠實研究工具」：</b>有價值 —— 自動資料管線、指標數值正確（已交叉驗證）、嚴謹的 forward 驗證、會自己抓異常（像這頁）。<br />
+          <b>結論：</b>平台的「基礎建設與誠實度」已有意義；「訊號 alpha」還在找，下一步是跨幣動量。
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── 入口 ────────────────────────────────────────────────────────────────────
 export default function AdminApp() {
   const [authed, setAuthed] = useState(!!getToken())
@@ -782,6 +1040,7 @@ export default function AdminApp() {
       <AdminHeader tab={tab} setTab={setTab} onLogout={logout} />
       {tab === 'monitor' ? <Dashboard onLogout={logout} />
         : tab === 'tasks' ? <TasksPage onLogout={logout} />
+        : tab === 'status' ? <StatusPage onLogout={logout} />
         : <DbViewer onLogout={logout} />}
     </div>
   )
