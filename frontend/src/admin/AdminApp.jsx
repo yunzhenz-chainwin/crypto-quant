@@ -306,6 +306,36 @@ function Dashboard({ onLogout }) {
         </>
       )}
 
+      {/* 指標計算方法（公開透明）*/}
+      <h2 className="admin-section-title">指標怎麼算的（計算方法，公開透明）</h2>
+      <div className="admin-table-wrap">
+        <table className="admin-table">
+          <thead><tr>
+            <th>指標</th><th>怎麼算</th><th>看什麼</th>
+          </tr></thead>
+          <tbody>
+            {[
+              ['均線 MA20/60/200', '過去 N 天收盤價的「簡單平均」(SMA)', '平滑價格、看趨勢方向'],
+              ['RSI(14天)', '用 Wilder 平滑算「上漲力道 ÷ 下跌力道」= RS，RSI = 100 − 100 ÷ (1 + RS)', '0~100；>70 超買、<30 超賣'],
+              ['MACD', '快線 EMA12 − 慢線 EMA26；訊號線 = MACD 的 EMA9；柱狀 = MACD − 訊號線', '看動能加速 / 減速、黃金 / 死亡交叉'],
+              ['布林通道', '中軌 = 20日均線；上 / 下軌 = 中軌 ± 2 ×(20日標準差)', '隨波動自動縮放的價格通道'],
+              ['量能均線', '過去 20 天成交量的「簡單平均」(SMA)', '比較放量 / 縮量、確認訊號'],
+            ].map(([name, how, what], i) => (
+              <tr key={i}>
+                <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{name}</td>
+                <td style={{ color: '#cbd5e1' }}>{how}</td>
+                <td style={{ color: '#94a3b8' }}>{what}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="task-form-hint">
+        💡 SMA = 簡單平均；EMA = 指數移動平均(近期權重較高)。以上算法的程式碼在 <b>src/indicators.py</b>。
+        上方「資料正確性」是用<b>另一套獨立演算法</b>重算後逐點比對，確認這些值算得對(非寫死)——
+        等於「方法公開 ＋ 結果驗證」雙保險。
+      </div>
+
       {/* 最近工作紀錄 */}
       <h2 className="admin-section-title">最近工作紀錄</h2>
       <div className="admin-table-wrap">
@@ -876,7 +906,7 @@ function StatusPage({ onLogout }) {
     : (score.ok ? '訊號具 edge、資料健全' : (dataOk ? '資料穩 · 訊號未達標' : '資料與訊號都待補'))
   const gradeColor = grade === 'A' ? '#22c55e' : grade === 'C' ? '#f59e0b' : grade === 'D' ? '#ef4444' : '#94a3b8'
   const G = score?.gap || {}
-  const col2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }
+  const col2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18, marginBottom: 22 }
 
   return (
     <div className="admin-body">
@@ -890,13 +920,13 @@ function StatusPage({ onLogout }) {
       {err && <div className="admin-error">{err}</div>}
 
       {/* 評級 + KPI 列 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 200px) 1fr', gap: 14, marginBottom: 14 }}>
-        <div className="admin-card" style={{ borderLeft: `5px solid ${gradeColor}`, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(170px, 210px) 1fr', gap: 18, marginBottom: 22 }}>
+        <div className="admin-card" style={{ borderLeft: `5px solid ${gradeColor}`, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '16px 18px' }}>
           <div className="admin-card-label">平台評級</div>
-          <div style={{ fontSize: 52, fontWeight: 800, color: gradeColor, lineHeight: 1.05 }}>{grade}</div>
+          <div style={{ fontSize: 52, fontWeight: 800, color: gradeColor, lineHeight: 1.1, margin: '4px 0' }}>{grade}</div>
           <div className="admin-card-sub">{gradeNote}</div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14 }}>
           <StatCard label="訊號 edge（10天）"
             value={score ? `${(G.current_edge_pp ?? 0) >= 0 ? '+' : ''}${G.current_edge_pp ?? 0}pp` : '—'}
             sub="vs 隨機進場" tone={score ? (score.ok ? 'good' : 'bad') : null} />
@@ -913,9 +943,9 @@ function StatusPage({ onLogout }) {
       </div>
 
       {/* 一句話現況 */}
-      <div className={`admin-card tone-${bannerTone}`} style={{ marginBottom: 16 }}>
+      <div className={`admin-card tone-${bannerTone}`} style={{ marginBottom: 22, padding: '14px 18px' }}>
         <div className="admin-card-label">一句話現況</div>
-        <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.5, marginTop: 4 }}>{tldr}</div>
+        <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.6, marginTop: 6 }}>{tldr}</div>
       </div>
 
       {/* 問題 / 正常 — 雙欄 */}
