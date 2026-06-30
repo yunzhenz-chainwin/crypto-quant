@@ -633,6 +633,18 @@ const TABLE_DESC = {
   tasks: '後台工作項目與進度', app_config: '系統集中設定',
   job_runs: '排程 / 操作執行紀錄', access_log: 'API 使用紀錄', news: '新聞文章',
 }
+// 每張表「怎麼算 / 怎麼來的」（透明說明，點選該表時顯示）
+const TABLE_HOWTO = {
+  prices: '從 Binance API 抓的原始日線（開／高／低／收／量），每天 01:00 自動更新。屬市場真實成交資料，不是算出來的。',
+  indicators: '用 prices 的收盤價／成交量算出來：MA＝過去 N 天平均、RSI＝Wilder 平滑(漲力道÷跌力道)、MACD＝EMA12−EMA26、布林＝20日均 ± 2×標準差、量能均線＝20日量平均。程式 src/indicators.py，且經獨立交叉驗證確認算得對。',
+  daily_signal: '把每天每幣的指標丟進「6 因子信心分數」計算（src/scoring.py）：RSI／MACD／均線／MA200／量／布林 各打分加總成 0~100，≥65 偏多、≤35 偏空。',
+  fear_greed: '從 alternative.me 抓的「市場恐懼貪婪指數」(0~100)，屬外部資料源，不是我們算的。',
+  news: '從各加密新聞 RSS 每 30 分鐘抓取的文章（標題／來源／發布日／分類）。',
+  tasks: '後台工作項目與進度，由人工／系統維護，非計算資料。',
+  app_config: '系統集中設定（如追蹤幣種清單），非計算資料。',
+  job_runs: '排程／手動操作每次執行的紀錄（開始、結束、狀態、訊息），自動寫入。',
+  access_log: 'API 被呼叫的紀錄（路徑、狀態碼、耗時），自動寫入。',
+}
 const COLUMN_LABELS = {
   symbol: '幣種', interval: '週期', ts: '時間', date: '日期',
   open: '開盤', high: '最高', low: '最低', close: '收盤', volume: '成交量',
@@ -756,6 +768,12 @@ function DbViewer({ onLogout }) {
       </div>
 
       {err && <div className="admin-error">{err}</div>}
+
+      {data && TABLE_HOWTO[active] && (
+        <div className="task-form-hint" style={{ marginBottom: 10 }}>
+          <b>📐 這張表怎麼來的：</b>{TABLE_HOWTO[active]}
+        </div>
+      )}
 
       {data && (
         <>
