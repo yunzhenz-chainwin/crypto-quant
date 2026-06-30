@@ -13,6 +13,9 @@ import {
   fetchTasks, createTask, updateTask, deleteTask, ingestMarket,
   fetchDbTables, fetchDbTable, fetchVerifyIndicators, fetchSignalScorecard,
 } from '../api/admin'
+import {
+  ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, ReferenceLine, Tooltip, LabelList,
+} from 'recharts'
 
 // ── 登入頁 ──────────────────────────────────────────────────────────────────
 function Login({ onSuccess }) {
@@ -771,6 +774,34 @@ function DbViewer({ onLogout }) {
 }
 
 // ── 現況頁（給主管：直接看做了什麼、還有哪些問題）─────────────────────────────
+// 半圓「評級儀表」：指針指在「無用 ↔ 有意義」之間
+function EdgeGauge({ cur, thr }) {
+  const lo = Math.min(cur, 0) - 0.5, hi = Math.max(thr, cur) + 0.5
+  const W = 260, H = 150, cx = 130, cy = 128, r = 102
+  const frac = (v) => Math.max(0, Math.min(1, (v - lo) / (hi - lo)))
+  const ang = (v) => Math.PI * (1 - frac(v))
+  const pt = (v, rr = r) => [cx + rr * Math.cos(ang(v)), cy - rr * Math.sin(ang(v))]
+  const arc = (a, b, rr = r) => {
+    const [x1, y1] = pt(a, rr), [x2, y2] = pt(b, rr)
+    return `M ${x1} ${y1} A ${rr} ${rr} 0 0 ${frac(b) > frac(a) ? 1 : 0} ${x2} ${y2}`
+  }
+  const [nx, ny] = pt(cur, r - 18)
+  const col = cur >= thr ? '#22c55e' : cur >= 0 ? '#f59e0b' : '#ef4444'
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: 300, display: 'block', margin: '0 auto' }}>
+      <path d={arc(lo, hi)} fill="none" stroke="#334155" strokeWidth="15" strokeLinecap="round" />
+      <path d={arc(lo, 0)} fill="none" stroke="#7f1d1d" strokeWidth="15" strokeLinecap="round" />
+      <path d={arc(thr, hi)} fill="none" stroke="#15803d" strokeWidth="15" strokeLinecap="round" />
+      <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={col} strokeWidth="3.5" strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r="6" fill={col} />
+      <text x="6" y={cy + 2} fill="#ef4444" fontSize="11">無用</text>
+      <text x={W - 46} y={cy + 2} fill="#22c55e" fontSize="11">有意義</text>
+      <text x={cx} y={cy - 34} fill={col} fontSize="20" fontWeight="800" textAnchor="middle">{cur >= 0 ? '+' : ''}{cur}pp</text>
+      <text x={cx} y={cy - 16} fill="#94a3b8" fontSize="11" textAnchor="middle">目前 edge（10天）</text>
+    </svg>
+  )
+}
+
 function StatusPage({ onLogout }) {
   const [score, setScore]   = useState(null)
   const [health, setHealth] = useState(null)
@@ -837,6 +868,16 @@ function StatusPage({ onLogout }) {
   const bannerTone = hasHigh ? 'bad' : (problems.length ? 'warn' : 'good')
   const sevMap = { high: { c: '#ef4444', t: '嚴重' }, mid: { c: '#f59e0b', t: '注意' } }
 
+  // 平台評級（簡單合成：資料 / 指標健全 + 訊號是否有 edge）
+  const dataOk = !!(health && verify && verify.ok &&
+    (health.symbols_fresh ?? 0) / Math.max(1, health.symbols_total ?? 1) >= 0.8)
+  const grade = !score ? '—' : (score.ok ? 'A' : (dataOk ? 'C' : 'D'))
+  const gradeNote = !score ? '評估中…'
+    : (score.ok ? '訊號具 edge、資料健全' : (dataOk ? '資料穩 · 訊號未達標' : '資料與訊號都待補'))
+  const gradeColor = grade === 'A' ? '#22c55e' : grade === 'C' ? '#f59e0b' : grade === 'D' ? '#ef4444' : '#94a3b8'
+  const G = score?.gap || {}
+  const col2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }
+
   return (
     <div className="admin-body">
       <div className="admin-toolbar">
@@ -848,150 +889,124 @@ function StatusPage({ onLogout }) {
 
       {err && <div className="admin-error">{err}</div>}
 
+      {/* 評級 + KPI 列 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 200px) 1fr', gap: 14, marginBottom: 14 }}>
+        <div className="admin-card" style={{ borderLeft: `5px solid ${gradeColor}`, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div className="admin-card-label">平台評級</div>
+          <div style={{ fontSize: 52, fontWeight: 800, color: gradeColor, lineHeight: 1.05 }}>{grade}</div>
+          <div className="admin-card-sub">{gradeNote}</div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))', gap: 10 }}>
+          <StatCard label="訊號 edge（10天）"
+            value={score ? `${(G.current_edge_pp ?? 0) >= 0 ? '+' : ''}${G.current_edge_pp ?? 0}pp` : '—'}
+            sub="vs 隨機進場" tone={score ? (score.ok ? 'good' : 'bad') : null} />
+          <StatCard label="資料新鮮度"
+            value={health ? `${health.symbols_fresh ?? 0}/${health.symbols_total ?? 0}` : '—'}
+            sub="幣即時更新" tone={health ? (health.symbols_fresh === health.symbols_total ? 'good' : 'warn') : null} />
+          <StatCard label="指標正確性"
+            value={verify ? `${verify.passed}/${verify.total}` : '—'}
+            sub="交叉驗證一致" tone={verify ? (verify.ok ? 'good' : 'bad') : null} />
+          <StatCard label="離有意義門檻"
+            value={score ? `${G.gap_pp ?? 0}pp` : '—'}
+            sub="還差多少" tone={score ? ((G.gap_pp ?? 0) > 0 ? 'warn' : 'good') : null} />
+        </div>
+      </div>
+
       {/* 一句話現況 */}
       <div className={`admin-card tone-${bannerTone}`} style={{ marginBottom: 16 }}>
         <div className="admin-card-label">一句話現況</div>
         <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.5, marginTop: 4 }}>{tldr}</div>
       </div>
 
-      {/* 已知問題 */}
-      <h2 className="admin-section-title">⚠️ 已知問題（{problems.length}）</h2>
-      {problems.length === 0
-        ? <div className="admin-count-line">目前沒有已知問題 🎉</div>
-        : problems.map((p, i) => {
-            const s = sevMap[p.sev] || sevMap.mid
-            return (
-              <div key={i} className="admin-card" style={{ borderLeft: `4px solid ${s.c}`, marginBottom: 10 }}>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>
-                  <span style={{ color: s.c }}>● {s.t}</span>　{p.title}
-                </div>
-                <div className="admin-card-sub" style={{ marginTop: 4 }}>{p.detail}</div>
-              </div>
-            )
-          })}
-
-      {/* 運作正常 */}
-      <h2 className="admin-section-title">✅ 運作正常</h2>
-      <div className="admin-table-wrap" style={{ padding: '0 14px' }}>
-        {goods.length === 0
-          ? <div className="admin-count-line">載入中…</div>
-          : goods.map((g, i) => (
-              <div key={i} style={{ padding: '7px 0', borderBottom: '1px solid #1f2937' }}>
-                <b style={{ color: '#22c55e' }}>✓ {g.title}</b>
-                <span className="admin-card-sub">　{g.detail}</span>
-              </div>
-            ))}
+      {/* 問題 / 正常 — 雙欄 */}
+      <div style={col2}>
+        <div>
+          <h2 className="admin-section-title">⚠️ 已知問題（{problems.length}）</h2>
+          {problems.length === 0
+            ? <div className="admin-count-line">目前沒有已知問題 🎉</div>
+            : problems.map((p, i) => {
+                const s = sevMap[p.sev] || sevMap.mid
+                return (
+                  <div key={i} className="admin-card" style={{ borderLeft: `4px solid ${s.c}`, marginBottom: 10 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>
+                      <span style={{ color: s.c }}>● {s.t}</span>　{p.title}
+                    </div>
+                    <div className="admin-card-sub" style={{ marginTop: 4 }}>{p.detail}</div>
+                  </div>
+                )
+              })}
+        </div>
+        <div>
+          <h2 className="admin-section-title">✅ 運作正常</h2>
+          <div className="admin-table-wrap" style={{ padding: '0 14px' }}>
+            {goods.length === 0
+              ? <div className="admin-count-line">載入中…</div>
+              : goods.map((g, i) => (
+                  <div key={i} style={{ padding: '7px 0', borderBottom: '1px solid #1f2937' }}>
+                    <b style={{ color: '#22c55e' }}>✓ {g.title}</b>
+                    <span className="admin-card-sub">　{g.detail}</span>
+                  </div>
+                ))}
+          </div>
+        </div>
       </div>
 
-      {/* 訊號預測力 成績單（問題的數據佐證）*/}
-      <h2 className="admin-section-title">訊號預測力（成績單）— 上面問題的數據佐證</h2>
-      {!score
-        ? <div className="admin-count-line">{loading ? '評估中…' : '尚未評估'}</div>
-        : (
-          <>
-            <div className="admin-grid">
-              <StatCard label="訊號預測力"
-                value={score.ok ? '有 edge' : '無預測力'}
-                sub={score.verdict} tone={score.tone} />
-              <StatCard label="評估範圍"
-                value={`${score.coins} 幣`}
-                sub={`資料至 ${score.as_of} · 對照「任一天進場」基準`} />
-            </div>
-            <div className="admin-table-wrap">
-              <table className="admin-table db-table">
-                <thead><tr>
-                  <th>持有期</th>
-                  <th className="db-num-cell">訊號樣本</th>
-                  <th className="db-num-cell">命中率</th>
-                  <th className="db-num-cell">vs 基準</th>
-                  <th className="db-num-cell">平均報酬</th>
-                  <th className="db-num-cell">vs 基準</th>
-                </tr></thead>
-                <tbody>
-                  {score.horizons.map(h => (
-                    <tr key={h.n}>
-                      <td>{h.n} 天</td>
-                      <td className="db-num-cell">{h.samples}</td>
-                      <td className="db-num-cell">{h.hit}%</td>
-                      <td className="db-num-cell" style={{ color: h.hit_vs_base >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
-                        {h.hit_vs_base >= 0 ? '+' : ''}{h.hit_vs_base}pp
-                      </td>
-                      <td className="db-num-cell">{h.avg >= 0 ? '+' : ''}{h.avg}%</td>
-                      <td className="db-num-cell" style={{ color: h.avg_vs_base >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
-                        {h.avg_vs_base >= 0 ? '+' : ''}{h.avg_vs_base}pp
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="task-form-hint">
-              💡「vs 基準」為正、且跨持有期一致 = 訊號有預測力；紅色 = 比隨機進場還差。指標數值正確 ≠ 訊號能預測。
-            </div>
-          </>
-        )}
-
-      {/* 各因子預測力（誰準誰不准）*/}
-      {score && score.factors && score.factors.length > 0 && (
-        <>
-          <h2 className="admin-section-title">各因子預測力（誰「準」、誰「不准」）</h2>
-          <div className="admin-table-wrap">
-            <table className="admin-table db-table">
-              <thead><tr>
-                <th>因子</th>
-                <th className="db-num-cell">樣本</th>
-                <th className="db-num-cell">命中 vs基準</th>
-                <th className="db-num-cell">edge（報酬 vs基準）</th>
-                <th>判定</th>
-              </tr></thead>
-              <tbody>
-                {score.factors.map(f => {
-                  const c = f.verdict === '有預測力' ? '#22c55e' : f.verdict === '無預測力' ? '#ef4444' : '#94a3b8'
-                  return (
-                    <tr key={f.key}>
-                      <td>{f.label}</td>
-                      <td className="db-num-cell">{f.samples}</td>
-                      <td className="db-num-cell" style={{ color: f.hit_vs_base >= 0 ? '#22c55e' : '#ef4444' }}>
-                        {f.hit_vs_base >= 0 ? '+' : ''}{f.hit_vs_base}pp
-                      </td>
-                      <td className="db-num-cell" style={{ color: f.edge >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
-                        {f.edge >= 0 ? '+' : ''}{f.edge}pp
-                      </td>
-                      <td style={{ color: c, fontWeight: 700 }}>{f.verdict}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+      {/* 圖表雙欄：各因子 edge | 評級儀表 */}
+      {score && (
+        <div style={col2}>
+          <div>
+            <h2 className="admin-section-title">各因子預測力（誰「準」、誰「不准」）</h2>
+            {score.factors && score.factors.length > 0 && (
+              <div className="admin-table-wrap" style={{ padding: '12px 6px' }}>
+                <ResponsiveContainer width="100%" height={Math.max(190, score.factors.length * 36)}>
+                  <BarChart layout="vertical" data={score.factors} margin={{ top: 6, right: 64, bottom: 6, left: 16 }}>
+                    <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 11 }} unit="pp" />
+                    <YAxis type="category" dataKey="label" width={108} tick={{ fill: '#cbd5e1', fontSize: 12 }} />
+                    <ReferenceLine x={0} stroke="#64748b" />
+                    <Tooltip cursor={{ fill: '#1e293b55' }}
+                             contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+                             formatter={(v, n, p) => [(v >= 0 ? '+' : '') + v + 'pp · ' + (p?.payload?.verdict ?? ''), 'edge vs 基準']} />
+                    <Bar dataKey="edge" radius={[0, 3, 3, 0]} isAnimationActive={false}>
+                      {score.factors.map((f, i) => (<Cell key={i} fill={f.edge >= 0 ? '#22c55e' : '#ef4444'} />))}
+                      <LabelList dataKey="edge" position="right" formatter={(v) => (v >= 0 ? '+' : '') + v + 'pp'} fill="#cbd5e1" fontSize={11} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="admin-card-sub" style={{ padding: '0 8px 6px' }}>綠 = 有方向性、紅 = 反指標 / 無用；0 = 隨機。數值對 ≠ 能預測。</div>
+              </div>
+            )}
           </div>
-          <div className="task-form-hint">
-            💡 每個因子「單獨」看：它轉多頭後 10 天的表現 vs 隨機進場。edge 正（綠）= 有方向性資訊；負（紅）= 反指標 / 無用。
-            ⚠ 這是「數值正確」的指標各自的「預測力」——<b>數值對 ≠ 能預測</b>。
+          <div>
+            <h2 className="admin-section-title">離「有意義」還有多遠</h2>
+            {score.gap && (
+              <div className="admin-table-wrap" style={{ padding: '10px 6px' }}>
+                <EdgeGauge cur={score.gap.current_edge_pp} thr={score.gap.useful_threshold_pp} />
+                <div className="admin-card-sub" style={{ textAlign: 'center', padding: '2px 10px 10px' }}>
+                  隨機線 0 · 門檻 +{score.gap.useful_threshold_pp}pp（約覆蓋成本）·
+                  <b style={{ color: '#f59e0b' }}> 還差 {score.gap.gap_pp}pp</b>
+                </div>
+                <div className="admin-card-label" style={{ paddingLeft: 8, marginBottom: 2 }}>各持有期 edge（pp）</div>
+                <ResponsiveContainer width="100%" height={128}>
+                  <BarChart data={score.horizons} margin={{ top: 14, right: 16, bottom: 0, left: 0 }}>
+                    <XAxis dataKey="n" tickFormatter={(v) => v + '天'} tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                    <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} width={40} unit="pp" />
+                    <ReferenceLine y={0} stroke="#64748b" />
+                    <Bar dataKey="avg_vs_base" radius={[3, 3, 0, 0]} isAnimationActive={false}>
+                      {score.horizons.map((h, i) => (<Cell key={i} fill={h.avg_vs_base >= 0 ? '#22c55e' : '#ef4444'} />))}
+                      <LabelList dataKey="avg_vs_base" position="top" formatter={(v) => (v >= 0 ? '+' : '') + v + 'pp'} fill="#cbd5e1" fontSize={10} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
-        </>
+        </div>
       )}
 
-      {/* 離「有意義」還有多遠 */}
-      {score && score.gap && (
-        <>
-          <h2 className="admin-section-title">離「有意義」還有多遠</h2>
-          <div className="admin-grid">
-            <StatCard label="目前 edge（10天）"
-              value={`${score.gap.current_edge_pp >= 0 ? '+' : ''}${score.gap.current_edge_pp}pp`}
-              sub="訊號比隨機進場多賺 / 少賺" tone={score.gap.current_edge_pp > 0 ? 'good' : 'bad'} />
-            <StatCard label="有意義門檻（估）"
-              value={`+${score.gap.useful_threshold_pp}pp`} sub="約覆蓋來回成本 ~0.3%" />
-            <StatCard label="還差"
-              value={`${score.gap.gap_pp}pp`} sub="距「扣成本還有賺」"
-              tone={score.gap.gap_pp > 0 ? 'warn' : 'good'} />
-          </div>
-          <div className="task-form-hint">
-            💡 edge = 訊號比「隨便哪天買」多賺多少（百分點）。<b>0 = 跟隨機沒兩樣</b>；要扣手續費還有賺，至少 &gt; +{score.gap.useful_threshold_pp}pp。
-            目前 {score.gap.current_edge_pp}pp，<b>還差約 {score.gap.gap_pp}pp</b> 才碰到門檻，而且要「跨持有期一致為正」才算真 edge。
-            ⚠ 老實說：用日線技術指標補正這個 gap 且穩定為正，難度很高，通常得換維度（見下方建議）。
-          </div>
-        </>
-      )}
+      <div className="task-form-hint">
+        💡 edge = 訊號比「隨便哪天買」多賺多少（pp）；<b>0 = 跟隨機沒兩樣</b>，要扣成本還有賺至少 &gt; +{G.useful_threshold_pp ?? 0.5}pp。
+        ⚠ 用日線技術指標補正這段差距且穩定為正，難度很高，通常得換維度（見下方建議）。
+      </div>
 
       {/* 改善建議（全部）*/}
       <h2 className="admin-section-title">改善建議（全部）</h2>
