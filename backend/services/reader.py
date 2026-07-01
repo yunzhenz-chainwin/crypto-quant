@@ -58,12 +58,13 @@ def _range_clause(days: int | None, start: str | None, end: str | None,
 
 
 def available_symbols() -> list[str]:
+    # 只回傳「設定啟用 + DB 有資料」的幣種:啟用清單(app_config 的 coins)為單一來源,
+    # 已停用的幣即使 DB 仍有歷史也不顯示(例如已停止交易、換代號的 MATIC)。
+    from backend.services.app_db import get_enabled_symbols
     with _connect() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT symbol FROM prices WHERE interval=? ORDER BY symbol",
-            (INTERVAL,),
-        ).fetchall()
-    return [r["symbol"] for r in rows]
+        have = {r["symbol"] for r in conn.execute(
+            "SELECT DISTINCT symbol FROM prices WHERE interval=?", (INTERVAL,)).fetchall()}
+    return sorted(s for s in get_enabled_symbols() if s in have)
 
 
 def load_prices(symbol: str, days: int = None,
@@ -135,13 +136,15 @@ def load_correlation() -> dict:
 
 
 def last_updated() -> dict:
+    # 與 available_symbols() 一致:只回傳「啟用中」的幣種(不含已停用的 MATIC 等)
+    avail = set(available_symbols())
     with _connect() as conn:
         rows = conn.execute(
             "SELECT symbol, substr(MAX(ts),1,10) AS d FROM prices "
             "WHERE interval=? GROUP BY symbol ORDER BY symbol",
             (INTERVAL,),
         ).fetchall()
-    return {r["symbol"]: r["d"] for r in rows}
+    return {r["symbol"]: r["d"] for r in rows if r["symbol"] in avail}
 
 
 def load_signal_history(symbol: str, days: int = None,

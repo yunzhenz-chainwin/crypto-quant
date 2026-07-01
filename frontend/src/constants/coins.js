@@ -21,7 +21,7 @@ export const COIN_INFO = {
   AVAXUSDT: { zh: '雪崩幣',  ticker: 'AVAX', },
   DOTUSDT:  { zh: '波卡',    ticker: 'DOT',  },
   ATOMUSDT: { zh: '宇宙幣',  ticker: 'ATOM', },
-  MATICUSDT:{ zh: '馬蹄幣',  ticker: 'MATIC',},
+  POLUSDT:  { zh: 'Polygon', ticker: 'POL',  },
   UNIUSDT:  { zh: 'Uniswap', ticker: 'UNI',  },
   LTCUSDT:  { zh: '萊特幣',  ticker: 'LTC',  },
   NEARUSDT: { zh: 'Near幣',  ticker: 'NEAR', },

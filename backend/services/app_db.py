@@ -35,7 +35,7 @@ DEFAULT_COINS = [
     {"symbol": "AVAXUSDT", "zh": "雪崩幣",  "ticker": "AVAX",  "enabled": True},
     {"symbol": "DOTUSDT",  "zh": "波卡",    "ticker": "DOT",   "enabled": True},
     {"symbol": "ATOMUSDT", "zh": "宇宙幣",  "ticker": "ATOM",  "enabled": True},
-    {"symbol": "MATICUSDT","zh": "馬蹄幣",  "ticker": "MATIC", "enabled": True},
+    {"symbol": "POLUSDT",  "zh": "Polygon", "ticker": "POL",   "enabled": True},
     {"symbol": "UNIUSDT",  "zh": "Uniswap", "ticker": "UNI",   "enabled": True},
     {"symbol": "LTCUSDT",  "zh": "萊特幣",  "ticker": "LTC",   "enabled": True},
     {"symbol": "NEARUSDT", "zh": "Near幣",  "ticker": "NEAR",  "enabled": True},
