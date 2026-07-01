@@ -29,6 +29,30 @@ function sma(prices, period) {
   return out
 }
 
+// 指數移動平均 EMA：對近期價格加權更重、反應較快;以前 period 根的 SMA 當起始值
+function ema(prices, period) {
+  const out = []
+  const k = 2 / (period + 1)
+  let prev = null
+  for (let i = 0; i < prices.length; i++) {
+    if (i === period - 1) {
+      let sum = 0
+      for (let j = 0; j < period; j++) sum += prices[j].close
+      prev = sum / period
+      out.push({ time: prices[i].date, value: prev })
+    } else if (i >= period) {
+      prev = prices[i].close * k + prev * (1 - k)
+      out.push({ time: prices[i].date, value: prev })
+    }
+  }
+  return out
+}
+
+// 依類型回傳 SMA 或 EMA
+function movingAvg(prices, period, type) {
+  return type === 'EMA' ? ema(prices, period) : sma(prices, period)
+}
+
 // KDJ（9 日）：RSV → K(快) → D(慢) → J=3K-2D，K/D 起始 50
 function kdj(prices, n = 9) {
   const out = []
@@ -142,11 +166,13 @@ const OSC_LIST = ['RSI', 'MACD', 'KDJ', 'DMI', 'BIAS', '無']
 
 export default function CandlestickChart({ prices, indicators, trades }) {
   const containerRef = useRef(null)
-  const [fastP,   setFastP]   = useState(5)
-  const [slowP,   setSlowP]   = useState(20)
-  const [showFast, setShowFast] = useState(true)
-  const [showSlow, setShowSlow] = useState(true)
-  const [showMA200, setShowMA200] = useState(false)
+  const [maType, setMaType] = useState('EMA')   // 均線類型:SMA / EMA
+  const [ma1P, setMa1P] = useState(5)           // 快線
+  const [ma2P, setMa2P] = useState(20)          // 中線
+  const [ma3P, setMa3P] = useState(60)          // 慢線
+  const [showMA1, setShowMA1] = useState(true)
+  const [showMA2, setShowMA2] = useState(true)
+  const [showMA3, setShowMA3] = useState(true)
   const [showBB,   setShowBB]   = useState(true)
   const [showVol,  setShowVol]  = useState(true)
   const [showMarkers, setShowMarkers] = useState(true)
@@ -183,9 +209,9 @@ export default function CandlestickChart({ prices, indicators, trades }) {
     const pin100 = () => ({ priceRange: { minValue: 0, maxValue: 100 } })
 
     // ── 均線（可調天數）+ 布林帶 + 成交量（主面板）────────────────
-    if (showFast)  addLine(sma(prices, fastP), { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: `快線MA${fastP}` })
-    if (showSlow)  addLine(sma(prices, slowP), { color: '#818cf8', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: `慢線MA${slowP}` })
-    if (showMA200) addLine(sma(prices, 200),   { color: '#38bdf8', lineWidth: 1, lineStyle: 1, priceLineVisible: false, lastValueVisible: true, title: 'MA200' })
+    if (showMA1) addLine(movingAvg(prices, ma1P, maType), { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: `${maType}${ma1P}` })
+    if (showMA2) addLine(movingAvg(prices, ma2P, maType), { color: '#818cf8', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: `${maType}${ma2P}` })
+    if (showMA3) addLine(movingAvg(prices, ma3P, maType), { color: '#38bdf8', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: `${maType}${ma3P}` })
     if (showBB) {
       addLine(getInd('BB_UPPER'), { color: 'rgba(248,113,113,0.55)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, title: 'BB+' })
       addLine(getInd('BB_LOWER'), { color: 'rgba(74,222,128,0.55)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, title: 'BB-' })
@@ -273,7 +299,7 @@ export default function CandlestickChart({ prices, indicators, trades }) {
     }
     window.addEventListener('resize', handleResize)
     return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', handleResize); chart.remove() }
-  }, [prices, indicators, trades, fastP, slowP, showFast, showSlow, showMA200, showBB, showVol, showMarkers, osc])
+  }, [prices, indicators, trades, maType, ma1P, ma2P, ma3P, showMA1, showMA2, showMA3, showBB, showVol, showMarkers, osc])
 
   if (!prices || prices.length === 0) return <div className="chart-empty">載入中…</div>
 
@@ -281,9 +307,10 @@ export default function CandlestickChart({ prices, indicators, trades }) {
     <div style={{ position: 'relative' }}>
       <div className="chart-toolbar">
         <span className="toolbar-lbl">圖層：</span>
-        <MAToggle label="快線" period={fastP} setPeriod={setFastP} on={showFast} toggle={() => setShowFast(v => !v)} color="#f59e0b" />
-        <MAToggle label="慢線" period={slowP} setPeriod={setSlowP} on={showSlow} toggle={() => setShowSlow(v => !v)} color="#818cf8" />
-        <Toggle on={showMA200}   onClick={() => setShowMA200(v => !v)}   color="#38bdf8">MA200</Toggle>
+        <button className="matype-btn" onClick={() => setMaType(t => t === 'SMA' ? 'EMA' : 'SMA')} title="切換 簡單(SMA)/指數(EMA) 移動平均">均線:{maType}</button>
+        <MAToggle label="快線" period={ma1P} setPeriod={setMa1P} on={showMA1} toggle={() => setShowMA1(v => !v)} color="#f59e0b" />
+        <MAToggle label="中線" period={ma2P} setPeriod={setMa2P} on={showMA2} toggle={() => setShowMA2(v => !v)} color="#818cf8" />
+        <MAToggle label="慢線" period={ma3P} setPeriod={setMa3P} on={showMA3} toggle={() => setShowMA3(v => !v)} color="#38bdf8" />
         <Toggle on={showBB}      onClick={() => setShowBB(v => !v)}      color="#f87171">布林帶</Toggle>
         <Toggle on={showVol}     onClick={() => setShowVol(v => !v)}     color="#94a3b8">成交量</Toggle>
         <Toggle on={showMarkers} onClick={() => setShowMarkers(v => !v)} color="#22c55e">買賣標記</Toggle>

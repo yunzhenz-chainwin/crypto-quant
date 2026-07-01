@@ -745,6 +745,11 @@ body { background: var(--bg); }
 
 /* 可調天數的均線控制(快線/慢線)*/
 .ma-toggle { display: inline-flex; align-items: center; gap: 3px; }
+.matype-btn {
+  background: #1e293b; border: 1px solid var(--border); border-radius: 6px;
+  padding: 3px 10px; font-size: 12px; color: #e2e8f0; cursor: pointer; transition: border-color .12s;
+}
+.matype-btn:hover { border-color: #475569; }
 .ma-period {
   width: 44px; background: #0f172a; border: 1px solid var(--border);
   border-radius: 4px; color: #e2e8f0; font-size: 12px; padding: 2px 4px; text-align: center;
