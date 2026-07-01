@@ -742,6 +742,14 @@ body { background: var(--bg); }
 }
 .layer-toggle.on { opacity: 1; }
 .layer-toggle:hover { opacity: 0.85; }
+
+/* 可調天數的均線控制(快線/慢線)*/
+.ma-toggle { display: inline-flex; align-items: center; gap: 3px; }
+.ma-period {
+  width: 44px; background: #0f172a; border: 1px solid var(--border);
+  border-radius: 4px; color: #e2e8f0; font-size: 12px; padding: 2px 4px; text-align: center;
+}
+.ma-period::-webkit-inner-spin-button { opacity: 0.4; }
 .chart-empty      { padding: 40px; text-align: center; color: var(--muted); }
 
 /* 圖例列 */
