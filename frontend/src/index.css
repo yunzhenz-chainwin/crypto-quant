@@ -750,6 +750,16 @@ body { background: var(--bg); }
   border-radius: 4px; color: #e2e8f0; font-size: 12px; padding: 2px 4px; text-align: center;
 }
 .ma-period::-webkit-inner-spin-button { opacity: 0.4; }
+
+/* 擺盪指標分頁選擇器(方案 B:單一擺盪副面板,切換要看哪一個)*/
+.osc-selector { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--border); }
+.osc-lbl { font-size: 12px; color: var(--muted); }
+.osc-tab {
+  background: transparent; border: 1px solid var(--border); border-radius: 6px;
+  padding: 3px 10px; font-size: 12px; color: #94a3b8; cursor: pointer; transition: all .12s;
+}
+.osc-tab.active { background: #1e293b; color: #e2e8f0; border-color: #475569; }
+.osc-tab:hover { color: #e2e8f0; }
 .chart-empty      { padding: 40px; text-align: center; color: var(--muted); }
 
 /* 圖例列 */
