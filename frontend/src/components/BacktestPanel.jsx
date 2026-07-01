@@ -16,12 +16,11 @@
  * Props：
  *   symbol  幣種代號，例如 'BTCUSDT'
  */
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   ResponsiveContainer, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, Legend,
 } from 'recharts'
-import { fetchBacktest } from '../api/client'
 import IndicatorCards from './IndicatorCards'
 
 // 資產倍數曲線圖：X 軸是第幾筆交易，Y 軸是資產倍數（1.0 = 起始本金）
@@ -190,34 +189,11 @@ function VerdictBanner({ data }) {
   )
 }
 
-export default function BacktestPanel({ symbol, signal }) {
-  const [data,       setData]       = useState(null)
-  const [stopLoss,   setStopLoss]   = useState(-0.06)   // 預設停損 -6%
-  const [takeProfit, setTakeProfit] = useState(0.20)    // 預設停利 +20%
-  const [feeRate,    setFeeRate]    = useState(0.001)   // 單邊手續費 0.1%
-  const [slippage,   setSlippage]   = useState(0.0005)  // 單邊滑價 0.05%
-  const [loading,    setLoading]    = useState(false)
+// 回測資料與參數由父層(App)集中管理,面板為受控元件:
+//   - 與 K 線買賣標記共用同一份回測(不再各抓一次)
+//   - 調整停損/停利時,K 線上的箭頭會跟著一起變
+export default function BacktestPanel({ signal, data, loading, params, onParamsChange }) {
   const [showDetail, setShowDetail] = useState(false)   // 交易明細預設收起
-
-  // 換幣種或調整參數時重新計算回測
-  useEffect(() => {
-    if (!symbol) return
-    let alive = true
-    async function loadBacktest() {
-      setLoading(true)
-      setData(null)
-      try {
-        const result = await fetchBacktest(symbol, stopLoss, takeProfit, feeRate, slippage)
-        if (alive) setData(result)
-      } catch {
-        if (alive) setData(null)
-      } finally {
-        if (alive) setLoading(false)
-      }
-    }
-    loadBacktest()
-    return () => { alive = false }
-  }, [symbol, stopLoss, takeProfit, feeRate, slippage])
 
   const m = data?.metrics
   // beatsHold=true 表示策略報酬 > 單純買入持有，用來決定顯示綠色還是警告色
@@ -235,28 +211,28 @@ export default function BacktestPanel({ symbol, signal }) {
         </div>
         <div className="param-row">
           <label>停損<Info text="跌幅達多少就認賠出場，保護本金。例如 -6% = 買進後跌 6% 就賣。" />
-            <select value={stopLoss} onChange={e => setStopLoss(+e.target.value)}>
+            <select value={params.stopLoss} onChange={e => onParamsChange({ stopLoss: +e.target.value })}>
               {[-0.03, -0.05, -0.06, -0.08, -0.10, -0.15].map(v => (
                 <option key={v} value={v}>{(v * 100).toFixed(0)}%</option>
               ))}
             </select>
           </label>
           <label>停利<Info text="漲幅達多少就獲利了結。例如 +20% = 買進後漲 20% 就賣。" />
-            <select value={takeProfit} onChange={e => setTakeProfit(+e.target.value)}>
+            <select value={params.takeProfit} onChange={e => onParamsChange({ takeProfit: +e.target.value })}>
               {[0.10, 0.15, 0.20, 0.25, 0.30, 0.50].map(v => (
                 <option key={v} value={v}>+{(v * 100).toFixed(0)}%</option>
               ))}
             </select>
           </label>
           <label>手續費<Info text="每次買或賣交易所收取的成本，單邊計算。一般現貨約 0.1%。" />
-            <select value={feeRate} onChange={e => setFeeRate(+e.target.value)}>
+            <select value={params.feeRate} onChange={e => onParamsChange({ feeRate: +e.target.value })}>
               {[0, 0.0005, 0.001, 0.002].map(v => (
                 <option key={v} value={v}>{(v * 100).toFixed(2)}%</option>
               ))}
             </select>
           </label>
           <label>滑價<Info text="實際成交價與預期價的落差（市場波動造成）。模擬越保守可設越高。" />
-            <select value={slippage} onChange={e => setSlippage(+e.target.value)}>
+            <select value={params.slippage} onChange={e => onParamsChange({ slippage: +e.target.value })}>
               {[0, 0.0005, 0.001, 0.0025, 0.005].map(v => (
                 <option key={v} value={v}>{(v * 100).toFixed(2)}%</option>
               ))}

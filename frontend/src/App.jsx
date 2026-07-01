@@ -14,7 +14,6 @@ import {
 } from './api/client'
 import StatusBar        from './components/StatusBar'
 import CandlestickChart from './components/CandlestickChart'
-import IndicatorChart   from './components/IndicatorChart'
 import CorrelationHeatmap from './components/CorrelationHeatmap'
 import BacktestPanel    from './components/BacktestPanel'
 import CoinSidebar      from './components/CoinSidebar'
@@ -56,9 +55,12 @@ export default function App() {
   const [ohlc,        setOhlc]        = useState([])
   const [indicators,  setIndicators]  = useState([])
   const [backtest,    setBacktest]    = useState(null)
+  const [btParams,    setBtParams]    = useState({ stopLoss: -0.06, takeProfit: 0.20, feeRate: 0.001, slippage: 0.0005 })
+  const [btLoading,   setBtLoading]   = useState(false)
   const [correlation, setCorrelation] = useState(null)
-  const [showIndicators,  setShowIndicators]  = useState(false)
   const [showCorrelation, setShowCorrelation] = useState(false)
+  const [showSentiment,   setShowSentiment]   = useState(false)
+  const [showBacktest,    setShowBacktest]    = useState(false)
 
   // 刷新市場摘要資料（訊號 + 恐懼貪婪）
   const refreshMarket = useCallback(async (showSpinner = true) => {
@@ -98,8 +100,21 @@ export default function App() {
       : { days }
     fetchOHLC(active, opts).then(setOhlc).catch(() => {})
     fetchIndicators(active, opts).then(setIndicators).catch(() => {})
-    fetchBacktest(active).then(setBacktest).catch(() => {})
   }, [active, days, startDate, endDate, dateMode, view])
+
+  // 回測只與幣種 + 回測參數有關（與日期範圍無關），獨立抓一次；
+  // K 線買賣標記與回測面板共用這一份，改參數時箭頭跟著變（消除原本各抓一次的雙抓）
+  useEffect(() => {
+    if (view !== 'detail' || !active) return
+    let alive = true
+    setBtLoading(true)
+    setBacktest(null)
+    fetchBacktest(active, btParams.stopLoss, btParams.takeProfit, btParams.feeRate, btParams.slippage)
+      .then(r => { if (alive) setBacktest(r) })
+      .catch(() => { if (alive) setBacktest(null) })
+      .finally(() => { if (alive) setBtLoading(false) })
+    return () => { alive = false }
+  }, [active, btParams, view])
 
   const handleSelectCoin = (symbol) => {
     setActive(symbol)
@@ -224,15 +239,28 @@ export default function App() {
               />
             </section>
 
-            <SentimentPanel symbol={active} />
-            <BacktestPanel symbol={active} signal={activeSignal} />
+            <section className="collapsible-section">
+              <button className="collapse-toggle" onClick={() => setShowSentiment(v => !v)}>
+                <span>市場情緒 / 新聞</span>
+                <span className="collapse-arrow">{showSentiment ? '▲' : '▼'}</span>
+              </button>
+              {showSentiment && <SentimentPanel symbol={active} />}
+            </section>
 
             <section className="collapsible-section">
-              <button className="collapse-toggle" onClick={() => setShowIndicators(v => !v)}>
-                <span>技術指標細節（RSI / MACD）</span>
-                <span className="collapse-arrow">{showIndicators ? '▲' : '▼'}</span>
+              <button className="collapse-toggle" onClick={() => setShowBacktest(v => !v)}>
+                <span>策略回測</span>
+                <span className="collapse-arrow">{showBacktest ? '▲' : '▼'}</span>
               </button>
-              {showIndicators && <IndicatorChart data={indicators} symbol={active} />}
+              {showBacktest && (
+                <BacktestPanel
+                  signal={activeSignal}
+                  data={backtest}
+                  loading={btLoading}
+                  params={btParams}
+                  onParamsChange={patch => setBtParams(p => ({ ...p, ...patch }))}
+                />
+              )}
             </section>
 
             <section className="collapsible-section">

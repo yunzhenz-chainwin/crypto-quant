@@ -1,69 +1,121 @@
-from pathlib import Path
-import pandas as pd
-import numpy as np
+"""
+reader.py — 前台資料讀取層（單一資料來源：SQLite）
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-CLEAN_DIR = ROOT / "data" / "clean"
-REPORT_DIR = ROOT / "reports"
+資料來源：data/app.db 的 prices / indicators 表。
+（2026-07 起由「讀 CSV」改為「讀 DB」，前後台統一資料來源；CSV 仍由每日排程
+ 產出，退居中繼／備援，不再是前台的讀取來源。）
+
+為什麼要對映欄位名：
+  DB 存的是小寫欄名 + `ts`（例如 ma20、rsi、hist、ts），但前端圖表與 src/scoring
+  沿用舊 CSV 的大寫欄名（MA20、RSI、HIST、date）。因此所有查詢一律用 SQL alias
+  把欄名還原成前端既有的大寫 / date，確保「換資料來源、但回傳形狀 100% 不變」，
+  前端與訊號引擎零改動。
+
+為什麼 indicators 要 JOIN prices：
+  indicators 表只存指標欄（close + 各指標），沒有 open/high/low/volume；
+  舊的 reports CSV 卻含這些欄。故 load_indicators 以 (symbol, interval, ts) JOIN
+  prices 表補回 OHLCV，維持與舊 CSV 相同的 16 欄輸出。
+
+日期範圍語意：沿用舊版「end 往後含一天」的邊界行為（見 _range_clause），
+  確保與改動前輸出逐列一致，是可驗證的等價替換、非行為變更。
+"""
+import sqlite3
+from pathlib import Path
+import numpy as np
+import pandas as pd
+
+ROOT    = Path(__file__).resolve().parent.parent.parent
+DB_PATH = ROOT / "data" / "app.db"
 INTERVAL = "1d"
 
 
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _range_clause(days: int | None, start: str | None, end: str | None,
+                  tscol: str = "ts") -> tuple[str, list, bool]:
+    """
+    依 days / start / end 產生時間篩選 SQL 片段。
+    回傳 (sql_tail, params, reverse)：
+      - start/end：範圍過濾，升冪；end 用 date(?, '+1 day') 沿用舊版含界行為。
+      - days     ：取最近 N 筆 → DESC LIMIT，呼叫端需再反轉回升冪（reverse=True）。
+      - 皆無     ：全部，升冪。
+    tscol 讓 load_indicators 能指定用 i.ts（JOIN 後需限定表別名）。
+    """
+    if start or end:
+        tail, params = "", []
+        if start:
+            tail += f" AND date({tscol}) >= date(?)"; params.append(start)
+        if end:
+            tail += f" AND date({tscol}) <= date(?, '+1 day')"; params.append(end)
+        return tail + f" ORDER BY {tscol}", params, False
+    if days:
+        return f" ORDER BY {tscol} DESC LIMIT ?", [days], True
+    return f" ORDER BY {tscol}", [], False
+
+
 def available_symbols() -> list[str]:
-    return sorted([
-        p.stem.replace(f"_{INTERVAL}", "")
-        for p in CLEAN_DIR.glob(f"*_{INTERVAL}.csv")
-    ])
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT symbol FROM prices WHERE interval=? ORDER BY symbol",
+            (INTERVAL,),
+        ).fetchall()
+    return [r["symbol"] for r in rows]
 
 
 def load_prices(symbol: str, days: int = None,
                 start: str = None, end: str = None) -> list[dict]:
-    path = CLEAN_DIR / f"{symbol}_{INTERVAL}.csv"
-    if not path.exists():
-        return []
-    df = pd.read_csv(path, parse_dates=["date"])
-    df = df.sort_values("date").reset_index(drop=True)
-    if start or end:
-        # CSV 日期帶 UTC timezone，比較對象也需要 tz-aware
-        tz = df["date"].dt.tz
-        if start:
-            df = df[df["date"] >= pd.Timestamp(start, tz=tz)]
-        if end:
-            df = df[df["date"] <= pd.Timestamp(end, tz=tz) + pd.Timedelta(days=1)]
-    elif days:
-        df = df.tail(days)
-    df["date"] = df["date"].dt.strftime("%Y-%m-%d")
-    return df.to_dict(orient="records")
+    tail, rparams, reverse = _range_clause(days, start, end, tscol="ts")
+    sql = (
+        "SELECT substr(ts,1,10) AS date, open, high, low, close, volume "
+        "FROM prices WHERE symbol=? AND interval=?" + tail
+    )
+    with _connect() as conn:
+        rows = conn.execute(sql, [symbol, INTERVAL, *rparams]).fetchall()
+    if reverse:
+        rows = rows[::-1]           # DESC LIMIT 取最近 N 筆後，反轉回升冪
+    return [dict(r) for r in rows]
 
 
 def load_indicators(symbol: str, days: int = None,
                     start: str = None, end: str = None) -> list[dict]:
-    path = REPORT_DIR / f"indicators_{symbol}_{INTERVAL}.csv"
-    if not path.exists():
-        return []
-    df = pd.read_csv(path, parse_dates=["date"])
-    df = df.sort_values("date").reset_index(drop=True)
-    if start or end:
-        tz = df["date"].dt.tz
-        if start:
-            df = df[df["date"] >= pd.Timestamp(start, tz=tz)]
-        if end:
-            df = df[df["date"] <= pd.Timestamp(end, tz=tz) + pd.Timedelta(days=1)]
-    elif days:
-        df = df.tail(days)
-    df["date"] = df["date"].dt.strftime("%Y-%m-%d")
-    df = df.replace({np.nan: None})
-    return df.to_dict(orient="records")
+    tail, rparams, reverse = _range_clause(days, start, end, tscol="i.ts")
+    # indicators 只有指標欄 → JOIN prices 補 open/high/low/volume；
+    # 欄名一律 alias 回舊 CSV 的大寫，close 取自 prices（與 indicators 同一根 K 棒，值相同）。
+    sql = (
+        "SELECT substr(i.ts,1,10) AS date, p.open, p.high, p.low, p.close, p.volume, "
+        "i.ma20 AS MA20, i.ma60 AS MA60, i.ma200 AS MA200, i.rsi AS RSI, "
+        "i.macd AS MACD, i.signal AS SIGNAL, i.hist AS HIST, "
+        "i.bb_upper AS BB_UPPER, i.bb_lower AS BB_LOWER, i.vol_ma20 AS VOL_MA20 "
+        "FROM indicators i "
+        "JOIN prices p ON p.symbol=i.symbol AND p.interval=i.interval AND p.ts=i.ts "
+        "WHERE i.symbol=? AND i.interval=?" + tail
+    )
+    with _connect() as conn:
+        rows = conn.execute(sql, [symbol, INTERVAL, *rparams]).fetchall()
+    if reverse:
+        rows = rows[::-1]
+    # DB 的 NULL → Python None（缺值如暖身期 MA200），與舊版 NaN→None 語意一致
+    return [dict(r) for r in rows]
 
 
 def load_correlation() -> dict:
+    # 逐幣取 close 序列（以日期字串為索引；ISO 日期字串排序即時間序），
+    # 沿用舊版：以 available_symbols() 順序建 dict，確保相關性矩陣欄位順序一致。
     closes = {}
-    symbols = available_symbols()
-    for sym in symbols:
-        path = CLEAN_DIR / f"{sym}_{INTERVAL}.csv"
-        df = pd.read_csv(path, parse_dates=["date"])
-        s = df.set_index("date")["close"]
-        s.index = s.index.tz_convert(None)  # UTC-aware → naive
-        closes[sym.replace("USDT", "")] = s
+    with _connect() as conn:
+        for sym in available_symbols():
+            rows = conn.execute(
+                "SELECT substr(ts,1,10) AS date, close FROM prices "
+                "WHERE symbol=? AND interval=? ORDER BY ts",
+                (sym, INTERVAL),
+            ).fetchall()
+            closes[sym.replace("USDT", "")] = pd.Series(
+                {r["date"]: r["close"] for r in rows}
+            )
 
     wide = pd.DataFrame(closes).dropna()
     returns = wide.pct_change().dropna()
@@ -75,17 +127,49 @@ def load_correlation() -> dict:
         "matrix": corr.values.tolist(),
         "volatility": vol.to_dict(),
         "period": {
-            "start": str(wide.index.min().date()),
-            "end": str(wide.index.max().date()),
+            "start": str(wide.index.min()),
+            "end": str(wide.index.max()),
             "days": len(wide),
         },
     }
 
 
 def last_updated() -> dict:
-    result = {}
-    for sym in available_symbols():
-        path = CLEAN_DIR / f"{sym}_{INTERVAL}.csv"
-        df = pd.read_csv(path, parse_dates=["date"])
-        result[sym] = str(df["date"].max().date())
-    return result
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT symbol, substr(MAX(ts),1,10) AS d FROM prices "
+            "WHERE interval=? GROUP BY symbol ORDER BY symbol",
+            (INTERVAL,),
+        ).fetchall()
+    return {r["symbol"]: r["d"] for r in rows}
+
+
+def load_signal_history(symbol: str, days: int = None,
+                        start: str = None, end: str = None) -> list[dict]:
+    """
+    信心分數歷史(每日多空訊號 + 0~100 分數),供前台走勢圖。
+    來源:daily_signal 表(排程 backfill_daily_signals 用歷史指標逐日重算填入)。
+    date 欄本身即 'YYYY-MM-DD',故時間篩選直接用 date 欄。
+    """
+    tail, rparams, reverse = _range_clause(days, start, end, tscol="date")
+    sql = "SELECT date, signal, score, close, rsi FROM daily_signal WHERE symbol=?" + tail
+    with _connect() as conn:
+        rows = conn.execute(sql, [symbol, *rparams]).fetchall()
+    if reverse:
+        rows = rows[::-1]
+    return [dict(r) for r in rows]
+
+
+def load_fear_greed_history(days: int = None,
+                            start: str = None, end: str = None) -> list[dict]:
+    """
+    恐懼貪婪指數歷史(0=極度恐慌,100=極度貪婪),全市場單一序列。
+    來源:fear_greed 表(排程從 alternative.me 回補,可追溯至 2018)。
+    """
+    tail, rparams, reverse = _range_clause(days, start, end, tscol="date")
+    sql = "SELECT date, value, label FROM fear_greed WHERE 1=1" + tail
+    with _connect() as conn:
+        rows = conn.execute(sql, rparams).fetchall()
+    if reverse:
+        rows = rows[::-1]
+    return [dict(r) for r in rows]

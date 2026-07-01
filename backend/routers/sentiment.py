@@ -17,6 +17,7 @@ import feedparser
 import requests
 from fastapi import APIRouter
 from backend.services.news_store import save_articles, query_by_date, available_dates, total_count
+from backend.services.reader import load_fear_greed_history
 
 router = APIRouter()
 
@@ -199,6 +200,13 @@ def fear_greed(limit: int = 30):
     data = resp.json().get("data", [])
     _cache[key] = {"ts": now, "data": data}
     return data
+
+
+# ── 恐懼貪婪歷史(讀 DB,供前台歷史走勢圖)────────────────────────────────────
+@router.get("/sentiment/fear_greed/history")
+def fear_greed_history(days: int = 365):
+    """恐懼貪婪指數歷史(全市場),來源 fear_greed 表(排程回補,可追溯至 2018)。"""
+    return load_fear_greed_history(days=days)
 
 
 # ── 最新新聞 ─────────────────────────────────────────────────────────────────

@@ -58,6 +58,18 @@ export const fetchBacktest = (
 export const fetchFearGreed = (limit = 30) =>
   get(`/sentiment/fear_greed?limit=${limit}`)
 
+// 取得信心分數歷史（讀 DB daily_signal，支援 days 或 start/end）
+export const fetchSignalHistory = (symbol, { days = 360, start = null, end = null } = {}) => {
+  const p = new URLSearchParams()
+  if (start && end) { p.set('start', start); p.set('end', end) }
+  else               { p.set('days', days) }
+  return get(`/signals/${symbol}/history?${p}`)
+}
+
+// 取得恐懼貪婪指數歷史（讀 DB fear_greed，全市場）
+export const fetchFearGreedHistory = (days = 365) =>
+  get(`/sentiment/fear_greed/history?days=${days}`)
+
 // 取得最新新聞（RSS 即時抓取並存入資料庫）
 export const fetchNews = (symbol = null) =>
   get(`/sentiment/news${symbol ? `?symbol=${symbol}` : ''}`)
