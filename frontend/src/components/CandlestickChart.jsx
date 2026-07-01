@@ -32,6 +32,15 @@ function Toggle({ on, onClick, color, children }) {
 
 const OSC_LIST = ['RSI', 'MACD', 'KDJ', 'DMI', 'BIAS', '無']
 
+// 各擺盪指標「怎麼看」的白話說明（選到哪個就顯示哪個）
+const OSC_HELP = {
+  RSI:  '相對強弱指標（0~100）：衡量漲跌力道。>70 超買（漲多、易回檔）、<30 超賣（跌多、易反彈），50 為多空分界。價格創新高但 RSI 沒跟上（背離）代表動能轉弱。',
+  MACD: '指數平滑異同均線：看動能與轉折。MACD 線（藍）上穿訊號線（橘）＝ 黃金交叉偏多、下穿 ＝ 死亡交叉偏空；柱狀由負轉正代表動能增強、轉負代表轉弱。',
+  KDJ:  '隨機指標（0~100，J 可超出）：K 上穿 D 偏多、下穿偏空；>80 超買、<20 超賣。J 最敏感、常領先 K/D 反轉，適合抓短線轉折點。',
+  DMI:  '趨向指標：判斷方向與強度。+DI（綠）在 -DI（紅）之上 ＝ 多方主導、反之空方；ADX（黃）>25 代表趨勢明確（不分多空）、<20 為盤整、方向不明。',
+  BIAS: '乖離率（%）：價格偏離均線的幅度。正 ＝ 在均線上方、負 ＝ 下方；絕對值過大代表短線乖離過度、有「回歸均線」的壓力，常作為反轉參考。',
+}
+
 export default function CandlestickChart({ prices, indicators, trades }) {
   const containerRef = useRef(null)
   const [maType, setMaType] = useState('EMA')   // 均線類型:SMA / EMA
@@ -197,6 +206,12 @@ export default function CandlestickChart({ prices, indicators, trades }) {
         </span>
       </div>
       <div ref={containerRef} className="candlestick-wrap" />
+      {osc !== '無' && OSC_HELP[osc] && (
+        <div className="osc-help">
+          <span className="osc-help-tag">📖 怎麼看 {osc}</span>
+          {OSC_HELP[osc]}
+        </div>
+      )}
     </div>
   )
 }

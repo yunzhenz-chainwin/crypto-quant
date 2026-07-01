@@ -765,6 +765,14 @@ body { background: var(--bg); }
 }
 .osc-tab.active { background: #1e293b; color: #e2e8f0; border-color: #475569; }
 .osc-tab:hover { color: #e2e8f0; }
+
+/* 選到的擺盪指標「怎麼看」說明框 */
+.osc-help {
+  margin-top: 8px; padding: 9px 12px; font-size: 12.5px; line-height: 1.7;
+  color: #94a3b8; background: #0f172a; border: 1px solid var(--border);
+  border-left: 3px solid #38bdf8; border-radius: 8px;
+}
+.osc-help-tag { color: #38bdf8; font-weight: 700; margin-right: 6px; }
 .chart-empty      { padding: 40px; text-align: center; color: var(--muted); }
 
 /* 圖例列 */
