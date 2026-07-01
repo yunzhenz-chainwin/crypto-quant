@@ -1,0 +1,5 @@
+# 開發／驗證用相依(正式執行 app 不需要)
+#
+# 前端指標正確性驗證 scripts/verify_frontend_indicators.py 需要獨立第三方庫
+# 當作參考,與 frontend/src/lib/indicators.js 的計算逐點比對:
+pandas_ta
