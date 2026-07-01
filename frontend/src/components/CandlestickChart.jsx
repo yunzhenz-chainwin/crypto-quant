@@ -29,22 +29,22 @@ function Toggle({ on, onClick, color, children }) {
   )
 }
 
-// 可調天數的均線開關（開關 + 數字輸入框）
-function MAToggle({ label, period, setPeriod, on, toggle, color }) {
+// 單條可調均線控制（開關點 + 天數輸入框;顏色對應圖上的線）
+function MALine({ ma, onToggle, onPeriod }) {
   return (
     <span className="ma-toggle">
       <button
-        className={`layer-toggle ${on ? 'on' : ''}`}
-        style={{ color: on ? color : '#64748b', borderColor: on ? color : 'var(--border)' }}
-        onClick={toggle}
+        className={`layer-toggle ${ma.on ? 'on' : ''}`}
+        style={{ color: ma.on ? ma.color : '#64748b', borderColor: ma.on ? ma.color : 'var(--border)' }}
+        onClick={onToggle}
       >
-        {on ? '●' : '○'} {label}
+        {ma.on ? '●' : '○'}
       </button>
       <input
-        type="number" className="ma-period" value={period} min={2} max={250}
+        type="number" className="ma-period" value={ma.p} min={2} max={250}
         onChange={e => {
           const v = parseInt(e.target.value, 10)
-          if (Number.isFinite(v)) setPeriod(Math.max(2, Math.min(250, v)))
+          if (Number.isFinite(v)) onPeriod(Math.max(2, Math.min(250, v)))
         }}
       />
     </span>
@@ -56,12 +56,14 @@ const OSC_LIST = ['RSI', 'MACD', 'KDJ', 'DMI', 'BIAS', '無']
 export default function CandlestickChart({ prices, indicators, trades }) {
   const containerRef = useRef(null)
   const [maType, setMaType] = useState('EMA')   // 均線類型:SMA / EMA
-  const [ma1P, setMa1P] = useState(5)           // 快線
-  const [ma2P, setMa2P] = useState(20)          // 中線
-  const [ma3P, setMa3P] = useState(60)          // 慢線
-  const [showMA1, setShowMA1] = useState(true)
-  const [showMA2, setShowMA2] = useState(true)
-  const [showMA3, setShowMA3] = useState(true)
+  // 多條可調均線(天數可改、可逐條開關;顏色對應圖上的線)
+  const [mas, setMas] = useState([
+    { p: 5,   on: true,  color: '#f59e0b' },
+    { p: 10,  on: true,  color: '#22d3ee' },
+    { p: 20,  on: true,  color: '#818cf8' },
+    { p: 60,  on: false, color: '#38bdf8' },
+    { p: 120, on: false, color: '#ec4899' },
+  ])
   const [showBB,   setShowBB]   = useState(true)
   const [showVol,  setShowVol]  = useState(true)
   const [showMarkers, setShowMarkers] = useState(true)
@@ -98,9 +100,9 @@ export default function CandlestickChart({ prices, indicators, trades }) {
     const pin100 = () => ({ priceRange: { minValue: 0, maxValue: 100 } })
 
     // ── 均線（可調天數）+ 布林帶 + 成交量（主面板）────────────────
-    if (showMA1) addLine(movingAvg(prices, ma1P, maType), { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: `${maType}${ma1P}` })
-    if (showMA2) addLine(movingAvg(prices, ma2P, maType), { color: '#818cf8', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: `${maType}${ma2P}` })
-    if (showMA3) addLine(movingAvg(prices, ma3P, maType), { color: '#38bdf8', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: `${maType}${ma3P}` })
+    mas.forEach(ma => {
+      if (ma.on) addLine(movingAvg(prices, ma.p, maType), { color: ma.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: `${maType}${ma.p}` })
+    })
     if (showBB) {
       addLine(getInd('BB_UPPER'), { color: 'rgba(248,113,113,0.55)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, title: 'BB+' })
       addLine(getInd('BB_LOWER'), { color: 'rgba(74,222,128,0.55)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, title: 'BB-' })
@@ -188,7 +190,7 @@ export default function CandlestickChart({ prices, indicators, trades }) {
     }
     window.addEventListener('resize', handleResize)
     return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', handleResize); chart.remove() }
-  }, [prices, indicators, trades, maType, ma1P, ma2P, ma3P, showMA1, showMA2, showMA3, showBB, showVol, showMarkers, osc])
+  }, [prices, indicators, trades, maType, mas, showBB, showVol, showMarkers, osc])
 
   if (!prices || prices.length === 0) return <div className="chart-empty">載入中…</div>
 
@@ -197,9 +199,13 @@ export default function CandlestickChart({ prices, indicators, trades }) {
       <div className="chart-toolbar">
         <span className="toolbar-lbl">圖層：</span>
         <button className="matype-btn" onClick={() => setMaType(t => t === 'SMA' ? 'EMA' : 'SMA')} title="切換 簡單(SMA)/指數(EMA) 移動平均">均線:{maType}</button>
-        <MAToggle label="快線" period={ma1P} setPeriod={setMa1P} on={showMA1} toggle={() => setShowMA1(v => !v)} color="#f59e0b" />
-        <MAToggle label="中線" period={ma2P} setPeriod={setMa2P} on={showMA2} toggle={() => setShowMA2(v => !v)} color="#818cf8" />
-        <MAToggle label="慢線" period={ma3P} setPeriod={setMa3P} on={showMA3} toggle={() => setShowMA3(v => !v)} color="#38bdf8" />
+        {mas.map((ma, i) => (
+          <MALine
+            key={i} ma={ma}
+            onToggle={() => setMas(arr => arr.map((m, j) => j === i ? { ...m, on: !m.on } : m))}
+            onPeriod={p => setMas(arr => arr.map((m, j) => j === i ? { ...m, p } : m))}
+          />
+        ))}
         <Toggle on={showBB}      onClick={() => setShowBB(v => !v)}      color="#f87171">布林帶</Toggle>
         <Toggle on={showVol}     onClick={() => setShowVol(v => !v)}     color="#94a3b8">成交量</Toggle>
         <Toggle on={showMarkers} onClick={() => setShowMarkers(v => !v)} color="#22c55e">買賣標記</Toggle>
