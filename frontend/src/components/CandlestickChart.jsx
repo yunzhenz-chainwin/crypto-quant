@@ -29,27 +29,6 @@ function Toggle({ on, onClick, color, children }) {
   )
 }
 
-// 單條可調均線控制（開關點 + 天數輸入框;顏色對應圖上的線）
-function MALine({ ma, onToggle, onPeriod }) {
-  return (
-    <span className="ma-toggle">
-      <button
-        className={`layer-toggle ${ma.on ? 'on' : ''}`}
-        style={{ color: ma.on ? ma.color : '#64748b', borderColor: ma.on ? ma.color : 'var(--border)' }}
-        onClick={onToggle}
-      >
-        {ma.on ? '●' : '○'}
-      </button>
-      <input
-        type="number" className="ma-period" value={ma.p} min={2} max={250}
-        onChange={e => {
-          const v = parseInt(e.target.value, 10)
-          if (Number.isFinite(v)) onPeriod(Math.max(2, Math.min(250, v)))
-        }}
-      />
-    </span>
-  )
-}
 
 const OSC_LIST = ['RSI', 'MACD', 'KDJ', 'DMI', 'BIAS', '無']
 
@@ -200,11 +179,12 @@ export default function CandlestickChart({ prices, indicators, trades }) {
         <span className="toolbar-lbl">圖層：</span>
         <button className="matype-btn" onClick={() => setMaType(t => t === 'SMA' ? 'EMA' : 'SMA')} title="切換 簡單(SMA)/指數(EMA) 移動平均">均線:{maType}</button>
         {mas.map((ma, i) => (
-          <MALine
-            key={i} ma={ma}
-            onToggle={() => setMas(arr => arr.map((m, j) => j === i ? { ...m, on: !m.on } : m))}
-            onPeriod={p => setMas(arr => arr.map((m, j) => j === i ? { ...m, p } : m))}
-          />
+          <Toggle
+            key={i} on={ma.on} color={ma.color}
+            onClick={() => setMas(arr => arr.map((m, j) => j === i ? { ...m, on: !m.on } : m))}
+          >
+            {maType}{ma.p}
+          </Toggle>
         ))}
         <Toggle on={showBB}      onClick={() => setShowBB(v => !v)}      color="#f87171">布林帶</Toggle>
         <Toggle on={showVol}     onClick={() => setShowVol(v => !v)}     color="#94a3b8">成交量</Toggle>
