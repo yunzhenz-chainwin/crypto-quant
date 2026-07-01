@@ -12,6 +12,7 @@ import {
   fetchHealth, fetchDbStats, fetchJobs,
   fetchTasks, createTask, updateTask, deleteTask, ingestMarket,
   fetchDbTables, fetchDbTable, fetchVerifyIndicators, fetchSignalScorecard, fetchStrategy,
+  fetchCoins, addCoin, updateCoin, deleteCoin,
 } from '../api/admin'
 import {
   ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, ReferenceLine, Tooltip, LabelList,
@@ -104,6 +105,8 @@ function AdminHeader({ tab, setTab, onLogout }) {
       <div className="admin-tabs">
         <button className={`admin-tab ${tab === 'monitor' ? 'active' : ''}`}
                 onClick={() => setTab('monitor')}>監控</button>
+        <button className={`admin-tab ${tab === 'coins' ? 'active' : ''}`}
+                onClick={() => setTab('coins')}>幣種</button>
         <button className={`admin-tab ${tab === 'tasks' ? 'active' : ''}`}
                 onClick={() => setTab('tasks')}>工作項目</button>
         <button className={`admin-tab ${tab === 'db' ? 'active' : ''}`}
@@ -1151,6 +1154,128 @@ function StatusPage({ onLogout }) {
   )
 }
 
+// ── 幣種管理頁（新增 / 啟用停用 / 編輯名稱 / 移除）──────────────────────────────
+function CoinsPage({ onLogout }) {
+  const [coins, setCoins]     = useState([])
+  const [err, setErr]         = useState('')
+  const [loading, setLoading] = useState(false)
+  const [sym, setSym]         = useState('')
+  const [zh, setZh]           = useState('')
+  const [ticker, setTicker]   = useState('')
+  const [adding, setAdding]   = useState(false)
+  const [addMsg, setAddMsg]   = useState('')
+
+  const load = useCallback(async () => {
+    setErr(''); setLoading(true)
+    try { const r = await fetchCoins(); setCoins(r.coins ?? []) }
+    catch (e) { if (e.message === 'UNAUTH') { onLogout(); return } setErr('讀取失敗：' + e.message) }
+    finally { setLoading(false) }
+  }, [onLogout])
+  useEffect(() => { load() }, [load])
+
+  const guard = async (fn) => {
+    try { await fn(); await load() }
+    catch (e) { if (e.message === 'UNAUTH') onLogout(); else setErr(e.message) }
+  }
+
+  const add = async (e) => {
+    e.preventDefault()
+    if (!sym.trim() || adding) return
+    setAdding(true); setErr(''); setAddMsg('抓取歷史資料 → 算指標 → 入庫中，約需 10~30 秒…')
+    try {
+      const r = await addCoin({ symbol: sym.trim(), zh: zh.trim(), ticker: ticker.trim() })
+      setAddMsg(`✓ 已新增 ${r.symbol}（${r.rows} 筆，最新 ${r.last_date}）`)
+      setSym(''); setZh(''); setTicker('')
+      await load()
+    } catch (e) {
+      if (e.message === 'UNAUTH') onLogout()
+      else { setErr('新增失敗：' + e.message); setAddMsg('') }
+    } finally { setAdding(false) }
+  }
+
+  const enabledCount = coins.filter(c => c.enabled).length
+
+  return (
+    <div className="admin-body">
+      <div className="admin-toolbar">
+        <span className="admin-section-title" style={{ margin: 0 }}>🪙 幣種管理
+          <span style={{ fontSize: 13, fontWeight: 400, color: '#94a3b8' }}>啟用 {enabledCount} / {coins.length}</span>
+        </span>
+        <button className="admin-link" onClick={load} disabled={loading}>{loading ? '更新中…' : '↻ 重新整理'}</button>
+      </div>
+
+      {err && <div className="admin-error">{err}</div>}
+
+      {/* 新增幣種 */}
+      <form className="admin-taskform" onSubmit={add}>
+        <span className="tf-lead">➕ 新增幣種</span>
+        <input className="admin-input" style={{ width: 140 }} placeholder="代號 如 SUIUSDT" value={sym}
+               onChange={e => setSym(e.target.value)} />
+        <input className="admin-input" style={{ width: 120 }} placeholder="中文名（選填）" value={zh}
+               onChange={e => setZh(e.target.value)} />
+        <input className="admin-input" style={{ width: 90 }} placeholder="代碼（選填）" value={ticker}
+               onChange={e => setTicker(e.target.value)} />
+        <button className="admin-btn" type="submit" disabled={adding}>{adding ? '抓取中…' : '新增'}</button>
+      </form>
+      <div className="task-form-hint">
+        💡 只要輸入代號（可只打 <b>SUI</b>，會自動補成 SUIUSDT），系統會自動<b>抓歷史資料 → 算指標 → 入庫</b>，完成後前台就能選。
+        {addMsg && <span style={{ color: addMsg.startsWith('✓') ? '#22c55e' : '#f59e0b' }}>　{addMsg}</span>}
+      </div>
+
+      {/* 清單 */}
+      <div className="admin-table-wrap">
+        <table className="admin-table">
+          <thead><tr>
+            <th>啟用</th><th>幣種</th><th>中文名</th><th>代碼</th>
+            <th>資料筆數</th><th>最新資料日</th><th>狀態</th><th>動作</th>
+          </tr></thead>
+          <tbody>
+            {coins.length === 0 && (
+              <tr><td colSpan={8} style={{ color: '#94a3b8' }}>{loading ? '載入中…' : '尚無幣種'}</td></tr>
+            )}
+            {coins.map(c => (
+              <tr key={c.symbol} style={{ opacity: c.enabled ? 1 : 0.55 }}>
+                <td>
+                  <button className="admin-mini-btn"
+                    style={{ color: c.enabled ? '#22c55e' : '#64748b', borderColor: c.enabled ? '#22c55e66' : undefined, minWidth: 66 }}
+                    onClick={() => guard(() => updateCoin(c.symbol, { enabled: !c.enabled }))}
+                    title={c.enabled ? '點擊停用（前台隱藏、保留資料）' : '點擊啟用'}>
+                    {c.enabled ? '● 啟用' : '○ 停用'}
+                  </button>
+                </td>
+                <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{c.symbol}</td>
+                <td>
+                  <input className="admin-input" style={{ width: 100 }} defaultValue={c.zh}
+                    onBlur={e => { const v = e.target.value.trim(); if (v !== c.zh) guard(() => updateCoin(c.symbol, { zh: v })) }} />
+                </td>
+                <td>
+                  <input className="admin-input" style={{ width: 70 }} defaultValue={c.ticker}
+                    onBlur={e => { const v = e.target.value.trim(); if (v !== c.ticker) guard(() => updateCoin(c.symbol, { ticker: v })) }} />
+                </td>
+                <td>{c.rows ? c.rows.toLocaleString() : <span style={{ color: '#ef4444' }}>無</span>}</td>
+                <td>{c.last_date || '—'}</td>
+                <td style={{ color: !c.has_data ? '#ef4444' : c.stale ? '#f59e0b' : '#22c55e', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  {!c.has_data ? '✗ 無資料' : c.stale ? `⚠ 落後 ${c.lag_days} 天` : '✓ 最新'}
+                </td>
+                <td>
+                  <button className="admin-del-btn"
+                    onClick={() => { if (window.confirm(`確定移除 ${c.symbol}？\n（歷史資料仍保留在資料庫，只從清單移除）`)) guard(() => deleteCoin(c.symbol)) }}>
+                    移除
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="task-form-hint">
+        💡「停用」＝ 前台隱藏但保留資料（可隨時再啟用）；「移除」＝ 從清單刪掉（歷史資料仍留在資料庫）。
+        中文名 / 代碼改完點空白處即存。啟用 / 停用<b>即時生效、不需重啟</b>。
+      </div>
+    </div>
+  )
+}
+
 // ── 入口 ────────────────────────────────────────────────────────────────────
 export default function AdminApp() {
   const [authed, setAuthed] = useState(!!getToken())
@@ -1164,6 +1289,7 @@ export default function AdminApp() {
     <div className="admin-app">
       <AdminHeader tab={tab} setTab={setTab} onLogout={logout} />
       {tab === 'monitor' ? <Dashboard onLogout={logout} />
+        : tab === 'coins' ? <CoinsPage onLogout={logout} />
         : tab === 'tasks' ? <TasksPage onLogout={logout} />
         : tab === 'status' ? <StatusPage onLogout={logout} />
         : <DbViewer onLogout={logout} />}

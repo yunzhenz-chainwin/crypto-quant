@@ -70,6 +70,12 @@ export const deleteTask  = (id)         => adminSend(`/tasks/${id}`, 'DELETE')
 // 手動把最新 K 線 / 指標匯入資料庫
 export const ingestMarket = () => adminSend('/ingest', 'POST')
 
+// 幣種管理:列出 / 新增(觸發抓取管線)/ 編輯或啟用停用 / 移除
+export const fetchCoins = () => adminGet('/coins')
+export const addCoin    = (coin)           => adminSend('/coins', 'POST', coin)
+export const updateCoin = (symbol, fields) => adminSend(`/coins/${symbol}`, 'PUT', fields)
+export const deleteCoin = (symbol)         => adminSend(`/coins/${symbol}`, 'DELETE')
+
 // 資料庫檢視:列出資料表 / 讀某表的資料列
 export const fetchDbTables = () => adminGet('/db/tables')
 export const fetchDbTable = (name, { symbol = null, interval = null, limit = 50, offset = 0 } = {}) => {

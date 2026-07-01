@@ -15,7 +15,9 @@ app_db.py — 後台 / 系統用的 SQLite（data/app.db）
 """
 import csv
 import json
+import os
 import sqlite3
+import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -188,6 +190,16 @@ def get_coins() -> list[dict]:
 def get_enabled_symbols() -> list[str]:
     """目前啟用要追蹤的幣種代號清單，給排程 / 抓取流程用。"""
     return [c["symbol"] for c in get_coins() if c.get("enabled", True)]
+
+
+def coin_data_status(interval: str = "1d") -> dict:
+    """每個幣在 prices 表的資料狀態（筆數 + 最新日期）；給後台幣種管理頁。"""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT symbol, COUNT(*) AS rows, substr(MAX(ts),1,10) AS last_date "
+            "FROM prices WHERE interval=? GROUP BY symbol", (interval,),
+        ).fetchall()
+    return {r["symbol"]: {"rows": r["rows"], "last_date": r["last_date"]} for r in rows}
 
 
 # ── 操作 / 排程紀錄（job_runs）──────────────────────────────────────────────
@@ -399,6 +411,33 @@ def ingest_market_data(interval: str = "1d") -> dict:
                 i_rows += len(ibatch)
         conn.commit()
     return {"interval": interval, "symbols": syms, "prices": p_rows, "indicators": i_rows}
+
+
+# 專案根目錄與 venv Python（給後台「新增幣種」觸發抓取管線用，與排程同一套）
+_ROOT_DIR = DB_PATH.parent.parent
+_PYTHON = str(_ROOT_DIR / ".venv" / "Scripts" / "python.exe")
+
+
+def fetch_and_ingest_symbol(symbol: str) -> dict:
+    """
+    為單一新幣跑「抓取 → 算指標 → 入庫」（後台新增幣種用）。
+    與每日排程用同一批 src 腳本與 venv Python；任一步失敗會丟出例外。
+    回傳該幣入庫後的狀態 {symbol, rows, last_date}。
+    """
+    symbol = symbol.strip().upper()
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    for name, args in (
+        ("fetch_binance", [_PYTHON, str(_ROOT_DIR / "src" / "fetch_binance.py"), symbol]),
+        ("indicators",    [_PYTHON, str(_ROOT_DIR / "src" / "indicators.py"), symbol]),
+    ):
+        proc = subprocess.run(args, env=env, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace")
+        if proc.returncode != 0:
+            tail = "\n".join((proc.stderr or proc.stdout or "").strip().splitlines()[-6:])
+            raise RuntimeError(f"{name} 失敗：{tail}")
+    ingest_market_data()
+    st = coin_data_status().get(symbol, {})
+    return {"symbol": symbol, "rows": st.get("rows", 0), "last_date": st.get("last_date")}
 
 
 def market_stats() -> dict:

@@ -241,6 +241,102 @@ def ingest(_: str = Depends(require_admin)):
         return {"ok": False, "error": str(e)}
 
 
+# ── 幣種管理（新增 / 啟用停用 / 編輯 / 移除；啟用停用即時生效，不需重啟）──────
+class CoinAddReq(BaseModel):
+    symbol: str
+    zh: str = ""
+    ticker: str = ""
+
+
+class CoinPatchReq(BaseModel):
+    zh: Optional[str] = None
+    ticker: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+@router.get("/admin/coins")
+def coins_list(_: str = Depends(require_admin)):
+    coins = app_db.get_coins()
+    status = app_db.coin_data_status()
+    today = datetime.now(timezone.utc).date()
+    out = []
+    for c in coins:
+        st = status.get(c["symbol"], {})
+        last = st.get("last_date")
+        lag = None
+        if last:
+            try:
+                lag = (today - date.fromisoformat(last)).days
+            except Exception:
+                lag = None
+        out.append({
+            "symbol": c["symbol"], "zh": c.get("zh", ""), "ticker": c.get("ticker", ""),
+            "enabled": c.get("enabled", True),
+            "rows": st.get("rows", 0), "last_date": last, "lag_days": lag,
+            "stale": (lag is not None and lag > 2), "has_data": st.get("rows", 0) > 0,
+        })
+    return {"coins": out, "enabled": sum(1 for c in out if c["enabled"])}
+
+
+@router.post("/admin/coins")
+def coins_add(body: CoinAddReq, _: str = Depends(require_admin)):
+    symbol = body.symbol.strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="請輸入幣種代號")
+    if not symbol.endswith("USDT"):        # 只輸入 BTC 也接受，自動補 USDT
+        symbol += "USDT"
+    coins = app_db.get_coins()
+    if any(c["symbol"] == symbol for c in coins):
+        raise HTTPException(status_code=400, detail=f"{symbol} 已在清單中")
+    jid = app_db.start_job("add_coin")
+    try:
+        r = app_db.fetch_and_ingest_symbol(symbol)
+        if not r.get("rows"):
+            raise RuntimeError("抓不到任何資料，代號可能不存在於 Binance")
+        base = symbol.replace("USDT", "")
+        coins.append({
+            "symbol": symbol,
+            "zh": body.zh.strip() or base,
+            "ticker": body.ticker.strip() or base,
+            "enabled": True,
+        })
+        app_db.set_config("coins", coins)
+        app_db.finish_job(jid, "success", f"{symbol} · {r['rows']} 筆 · 最新 {r['last_date']}")
+        return {"ok": True, **r}
+    except Exception as e:
+        app_db.finish_job(jid, "failed", str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/admin/coins/{symbol}")
+def coins_update(symbol: str, body: CoinPatchReq, _: str = Depends(require_admin)):
+    symbol = symbol.upper()
+    coins = app_db.get_coins()
+    hit = False
+    for c in coins:
+        if c["symbol"] == symbol:
+            if body.zh is not None:      c["zh"] = body.zh.strip()
+            if body.ticker is not None:  c["ticker"] = body.ticker.strip()
+            if body.enabled is not None: c["enabled"] = bool(body.enabled)
+            hit = True
+            break
+    if not hit:
+        raise HTTPException(status_code=404, detail=f"{symbol} 不存在")
+    app_db.set_config("coins", coins)
+    return {"ok": True}
+
+
+@router.delete("/admin/coins/{symbol}")
+def coins_remove(symbol: str, _: str = Depends(require_admin)):
+    symbol = symbol.upper()
+    coins = app_db.get_coins()
+    kept = [c for c in coins if c["symbol"] != symbol]
+    if len(kept) == len(coins):
+        raise HTTPException(status_code=404, detail=f"{symbol} 不存在")
+    app_db.set_config("coins", kept)
+    return {"ok": True, "removed": symbol, "note": "已從清單移除（歷史資料仍保留在資料庫）"}
+
+
 # ── 資料庫檢視(唯讀瀏覽各表)─────────────────────────────────────────────────
 # 白名單:只允許看這些表,並標明它在哪個 DB 檔(避免任意表名 / SQL 注入)
 def _table_registry():
