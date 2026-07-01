@@ -35,6 +35,11 @@ def load_panels():
         s = df.set_index("date")
         closes[sym] = s["close"].astype(float); opens[sym] = s["open"].astype(float)
     C = pd.DataFrame(closes).sort_index()
+    # 對齊尾端:某幣可能比別人多抓一天（例如剛換上、已抓到今天的 POL），會讓最後一列
+    # 只有它有值、其他幣含 BTC 為 NaN → regime 均線變 NaN。以 BTC 最後有效日截斷。
+    last = C["BTCUSDT"].last_valid_index() if "BTCUSDT" in C.columns else None
+    if last is not None:
+        C = C.loc[:last]
     O = pd.DataFrame(opens).sort_index().reindex(C.index)
     return C, O
 
@@ -48,8 +53,10 @@ def today_signal(C, O):
     on = (ma_px is not None) and (btc_px > ma_px)
 
     if not on:
+        reason = (f"BTC {btc_px:,.0f} < 100日均 {ma_px:,.0f}（空頭）" if ma_px is not None
+                  else f"BTC {btc_px:,.0f}（100日均資料不足，保守抱現金）")
         return {"date": date, "regime": "cash",
-                "regime_reason": f"BTC {btc_px:,.0f} < 100日均 {ma_px:,.0f}（空頭）",
+                "regime_reason": reason,
                 "exposure_pct": 0, "cash_pct": 100, "picks": [],
                 "note": "空頭 → 建議抱現金、不進場"}
 
