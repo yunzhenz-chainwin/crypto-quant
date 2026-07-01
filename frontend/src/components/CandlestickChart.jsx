@@ -32,13 +32,58 @@ function Toggle({ on, onClick, color, children }) {
 
 const OSC_LIST = ['RSI', 'MACD', 'KDJ', 'DMI', 'BIAS', '無']
 
-// 各擺盪指標「怎麼看」的白話說明（選到哪個就顯示哪個）
-const OSC_HELP = {
-  RSI:  '相對強弱指標（0~100）：衡量漲跌力道。>70 超買（漲多、易回檔）、<30 超賣（跌多、易反彈），50 為多空分界。價格創新高但 RSI 沒跟上（背離）代表動能轉弱。',
-  MACD: '指數平滑異同均線：看動能與轉折。MACD 線（藍）上穿訊號線（橘）＝ 黃金交叉偏多、下穿 ＝ 死亡交叉偏空；柱狀由負轉正代表動能增強、轉負代表轉弱。',
-  KDJ:  '隨機指標（0~100，J 可超出）：K 上穿 D 偏多、下穿偏空；>80 超買、<20 超賣。J 最敏感、常領先 K/D 反轉，適合抓短線轉折點。',
-  DMI:  '趨向指標：判斷方向與強度。+DI（綠）在 -DI（紅）之上 ＝ 多方主導、反之空方；ADX（黃）>25 代表趨勢明確（不分多空）、<20 為盤整、方向不明。',
-  BIAS: '乖離率（%）：價格偏離均線的幅度。正 ＝ 在均線上方、負 ＝ 下方；絕對值過大代表短線乖離過度、有「回歸均線」的壓力，常作為反轉參考。',
+// 各擺盪指標的說明：summary（一句話）＋ sections（按「看詳細」展開的完整教學）
+const OSC_DETAIL = {
+  RSI: {
+    summary: '相對強弱指標（0~100）：衡量漲跌力道，判斷超買超賣與動能。',
+    sections: [
+      ['是什麼', '衡量近期「上漲力道 vs 下跌力道」的動能指標，數值固定在 0~100 之間。'],
+      ['怎麼算', '取 14 天，分別平均上漲日的漲幅與下跌日的跌幅（Wilder 平滑），相對強度 RS ＝ 平均漲幅 ÷ 平均跌幅，RSI ＝ 100 − 100 ÷ (1 + RS)。'],
+      ['怎麼看', '>70 ＝ 超買（漲多、隨時可能回檔）；<30 ＝ 超賣（跌多、可能反彈）；50 為多空分界。'],
+      ['實戰訊號', '① 由 <30 向上突破 30：偏多參考。② 由 >70 向下跌破 70：偏空 / 減碼參考。③ 背離最重要：價格創新高、RSI 沒創新高 → 動能轉弱（頂背離、警戒回檔）；價創新低、RSI 沒創新低 → 底背離（偏多）。'],
+      ['注意', '強勢多頭時 RSI 可長時間停在 70 以上（鈍化），超買不等於馬上跌；盤整時雜訊多。務必搭配趨勢與其他指標，別單獨使用。'],
+    ],
+  },
+  MACD: {
+    summary: '指數平滑異同均線：看動能強弱與趨勢轉折（交叉）。',
+    sections: [
+      ['是什麼', '用兩條不同速度的指數均線之差，捕捉「動能的加速與減速」與趨勢轉折。'],
+      ['怎麼算', 'MACD 線 ＝ EMA12 − EMA26（快減慢）；訊號線 ＝ MACD 的 EMA9；柱狀圖 ＝ MACD 線 − 訊號線。'],
+      ['怎麼看', 'MACD 線在 0 軸上方偏多、下方偏空；柱狀越長動能越強、縮短代表動能減弱。'],
+      ['實戰訊號', '① 黃金交叉：MACD 線由下往上穿訊號線 → 偏多。② 死亡交叉：由上往下穿 → 偏空。③ 柱狀由負轉正 ＝ 動能翻多的早期訊號。④ 價格與 MACD 背離 → 趨勢可能反轉。'],
+      ['注意', 'MACD 用均線計算、屬「落後指標」，盤整時常出現假交叉；趨勢明確時最好用。'],
+    ],
+  },
+  KDJ: {
+    summary: '隨機指標（0~100）：抓短線超買超賣與轉折，反應快。',
+    sections: [
+      ['是什麼', '看「收盤價在近期高低區間的相對位置」，對短線轉折反應靈敏。'],
+      ['怎麼算', '取 9 天，RSV ＝（收盤 − 最低）÷（最高 − 最低）× 100；K ＝ RSV 的平滑、D ＝ K 的平滑、J ＝ 3K − 2D（最敏感）。'],
+      ['怎麼看', '>80 超買、<20 超賣；K、D、J 三線中，J 擺動最大、最領先。'],
+      ['實戰訊號', '① K 由下往上穿 D（低檔黃金交叉，尤其 20 以下）→ 偏多。② K 由上往下穿 D（高檔死亡交叉，尤其 80 以上）→ 偏空。③ J 衝破 100 或跌破 0，常是短線過熱 / 過冷的極端。'],
+      ['注意', '訊號較「快」也較「雜」，強趨勢中容易鈍化；適合短線、震盪盤，搭配趨勢指標較穩。'],
+    ],
+  },
+  DMI: {
+    summary: '趨向指標：判斷「有沒有趨勢、往哪個方向、多強」。',
+    sections: [
+      ['是什麼', '同時判斷「方向」（多還是空）與「趨勢強度」的指標。'],
+      ['怎麼算', '比較每天創新高 / 新低的幅度算出 +DM / −DM，經 14 天 Wilder 平滑得 +DI、−DI；再由兩者差距算出 ADX（趨勢強度）。'],
+      ['怎麼看', '+DI（綠）在 −DI（紅）之上 ＝ 多方主導、反之空方；ADX（黃）>25 趨勢明確、<20 盤整。'],
+      ['實戰訊號', '① +DI 上穿 −DI 且 ADX 上升 → 多方趨勢成形。② −DI 上穿 +DI → 空方趨勢。③ ADX 由低往上 ＝ 趨勢啟動；ADX 走平 / 下滑 ＝ 趨勢轉弱或進入盤整。'],
+      ['注意', 'ADX 只看「強度」不分多空（大跌時 ADX 也很高）；盤整時（ADX<20）方向訊號不可靠。'],
+    ],
+  },
+  BIAS: {
+    summary: '乖離率（%）：價格偏離均線多遠，抓過度乖離的回歸。',
+    sections: [
+      ['是什麼', '衡量目前價格「偏離均線」的百分比，判斷是否漲 / 跌過頭。'],
+      ['怎麼算', 'BIAS ＝（收盤 − N 日均線）÷ N 日均線 × 100%。圖上為 6 日與 24 日兩條。'],
+      ['怎麼看', '正值 ＝ 價在均線上方（偏強）、負值 ＝ 下方（偏弱）；絕對值越大代表偏離越多。'],
+      ['實戰訊號', '① 正乖離過大 → 短線漲多、易拉回均線（偏空回檔）。② 負乖離過大 → 跌深、易反彈回均線（偏多）。③「過大」無絕對值，需看該幣歷史區間相對判斷。'],
+      ['注意', '強趨勢中乖離可持續很大，不代表馬上反轉；門檻因幣而異，宜參考該幣過去的乖離區間。'],
+    ],
+  },
 }
 
 export default function CandlestickChart({ prices, indicators, trades }) {
@@ -56,6 +101,7 @@ export default function CandlestickChart({ prices, indicators, trades }) {
   const [showVol,  setShowVol]  = useState(true)
   const [showMarkers, setShowMarkers] = useState(true)
   const [osc, setOsc] = useState('RSI')   // 單一擺盪指標槽
+  const [oscDetail, setOscDetail] = useState(false)  // 指標詳細說明是否展開
 
   useEffect(() => {
     if (!containerRef.current || !prices || prices.length === 0) return
@@ -206,10 +252,24 @@ export default function CandlestickChart({ prices, indicators, trades }) {
         </span>
       </div>
       <div ref={containerRef} className="candlestick-wrap" />
-      {osc !== '無' && OSC_HELP[osc] && (
+      {osc !== '無' && OSC_DETAIL[osc] && (
         <div className="osc-help">
-          <span className="osc-help-tag">📖 怎麼看 {osc}</span>
-          {OSC_HELP[osc]}
+          <div className="osc-help-row">
+            <span><span className="osc-help-tag">📖 怎麼看 {osc}</span>{OSC_DETAIL[osc].summary}</span>
+            <button className="osc-help-more" onClick={() => setOscDetail(v => !v)}>
+              {oscDetail ? '收合 ▲' : '看詳細 ▾'}
+            </button>
+          </div>
+          {oscDetail && (
+            <div className="osc-help-detail">
+              {OSC_DETAIL[osc].sections.map(([label, text]) => (
+                <div key={label} className="osc-help-sec">
+                  <span className="osc-help-sec-label">{label}</span>
+                  <span className="osc-help-sec-text">{text}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
