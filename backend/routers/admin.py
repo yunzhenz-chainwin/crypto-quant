@@ -319,3 +319,10 @@ def verify_indicators(_: str = Depends(require_admin)):
 def signal_scorecard(_: str = Depends(require_admin)):
     from src.signal_eval import cached_scorecard
     return cached_scorecard()           # 快取鍵含 scoring.py mtime,改訊號後自動重算
+
+
+# ── 防禦型跨幣動量「正式策略訊號」(今日建議 + 績效)──────────────────────────
+@router.get("/admin/strategy")
+def strategy(_: str = Depends(require_admin)):
+    from src.momentum_signal import cached_strategy
+    return cached_strategy()

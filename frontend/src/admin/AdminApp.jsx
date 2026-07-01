@@ -11,7 +11,7 @@ import {
   adminLogin, getToken, setToken, clearToken,
   fetchHealth, fetchDbStats, fetchJobs,
   fetchTasks, createTask, updateTask, deleteTask, ingestMarket,
-  fetchDbTables, fetchDbTable, fetchVerifyIndicators, fetchSignalScorecard,
+  fetchDbTables, fetchDbTable, fetchVerifyIndicators, fetchSignalScorecard, fetchStrategy,
 } from '../api/admin'
 import {
   ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, ReferenceLine, Tooltip, LabelList,
@@ -854,16 +854,17 @@ function StatusPage({ onLogout }) {
   const [score, setScore]   = useState(null)
   const [health, setHealth] = useState(null)
   const [verify, setVerify] = useState(null)
+  const [strat, setStrat]   = useState(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr]       = useState('')
 
   const load = useCallback(async () => {
     setErr(''); setLoading(true)
     try {
-      const [s, h, v] = await Promise.all([
-        fetchSignalScorecard(), fetchHealth(), fetchVerifyIndicators(),
+      const [s, h, v, st] = await Promise.all([
+        fetchSignalScorecard(), fetchHealth(), fetchVerifyIndicators(), fetchStrategy(),
       ])
-      setScore(s); setHealth(h); setVerify(v)
+      setScore(s); setHealth(h); setVerify(v); setStrat(st)
     } catch (e) {
       if (e.message === 'UNAUTH') { onLogout(); return }
       setErr('讀取失敗:' + e.message)
@@ -909,20 +910,24 @@ function StatusPage({ onLogout }) {
   }
 
   const hasHigh = problems.some(p => p.sev === 'high')
+  // 是否已有「驗證過、樣本外正且贏市場」的策略
+  const stratOk = !!(strat && strat.perf && strat.perf.oos_cagr > 0 &&
+    strat.perf.oos_cagr > (strat.perf.market_cagr ?? -999))
   const tldr = !score ? '載入中…'
-    : (score.ok
-        ? '資料每日自動更新；訊號已具預測力。'
-        : '資料管線已修復且每日自動更新、指標數值正確；但「訊號目前沒有預測力」，不應作為投資依據（正在研究改進）。')
-  const bannerTone = hasHigh ? 'bad' : (problems.length ? 'warn' : 'good')
+    : (stratOk
+        ? '已接入「防禦型跨幣動量」策略：回測樣本外正報酬、大幅贏過市場（仍為回測、未經實盤）。原 6 因子訊號無 edge，下方為其診斷。'
+        : '資料管線已修復且每日自動更新、指標數值正確；但原訊號沒有預測力。')
+  const bannerTone = stratOk ? 'good' : (hasHigh ? 'bad' : (problems.length ? 'warn' : 'good'))
   const sevMap = { high: { c: '#ef4444', t: '嚴重' }, mid: { c: '#f59e0b', t: '注意' } }
 
-  // 平台評級（簡單合成：資料 / 指標健全 + 訊號是否有 edge）
+  // 平台評級（資料 / 指標健全 + 是否有「驗證過的策略」）
   const dataOk = !!(health && verify && verify.ok &&
     (health.symbols_fresh ?? 0) / Math.max(1, health.symbols_total ?? 1) >= 0.8)
-  const grade = !score ? '—' : (score.ok ? 'A' : (dataOk ? 'C' : 'D'))
+  const grade = !score ? '—' : (stratOk ? 'B' : (score.ok ? 'A' : (dataOk ? 'C' : 'D')))
   const gradeNote = !score ? '評估中…'
-    : (score.ok ? '訊號具 edge、資料健全' : (dataOk ? '資料穩 · 訊號未達標' : '資料與訊號都待補'))
-  const gradeColor = grade === 'A' ? '#22c55e' : grade === 'C' ? '#f59e0b' : grade === 'D' ? '#ef4444' : '#94a3b8'
+    : (stratOk ? '已有驗證過的策略（回測）' : (score.ok ? '訊號具 edge' : (dataOk ? '資料穩 · 訊號未達標' : '資料與訊號都待補')))
+  const gradeColor = grade === 'A' ? '#22c55e' : grade === 'B' ? '#84cc16'
+    : grade === 'C' ? '#f59e0b' : grade === 'D' ? '#ef4444' : '#94a3b8'
   const G = score?.gap || {}
   const col2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18, marginBottom: 22 }
 
@@ -937,6 +942,61 @@ function StatusPage({ onLogout }) {
 
       {err && <div className="admin-error">{err}</div>}
 
+      {/* 📈 今日策略訊號 + 績效（接進平台的新動量策略）*/}
+      {strat && (
+        <>
+          <h2 className="admin-section-title" style={{ marginTop: 0 }}>📈 今日策略訊號　<span style={{ fontSize: 13, fontWeight: 400, color: '#94a3b8' }}>{strat.strategy}</span></h2>
+          <div style={col2}>
+            <div className="admin-card" style={{ borderLeft: `5px solid ${strat.today.regime === 'cash' ? '#94a3b8' : '#22c55e'}`, padding: '14px 18px' }}>
+              <div className="admin-card-label">今日建議（資料至 {strat.today.date}）</div>
+              {strat.today.regime === 'cash' ? (
+                <>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: '#cbd5e1', margin: '6px 0' }}>🛑 抱現金（空倉）</div>
+                  <div className="admin-card-sub">{strat.today.regime_reason}　→　{strat.today.note}</div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#22c55e', margin: '6px 0' }}>
+                    持有 {strat.today.picks.length} 幣（投入 {strat.today.exposure_pct}% · 現金 {strat.today.cash_pct}%）
+                  </div>
+                  <div className="admin-card-sub" style={{ marginBottom: 8 }}>{strat.today.regime_reason}</div>
+                  <table className="admin-table" style={{ fontSize: 13 }}>
+                    <thead><tr><th>幣</th><th className="db-num-cell">動量(30天)</th><th className="db-num-cell">建議部位</th></tr></thead>
+                    <tbody>
+                      {strat.today.picks.map(p => (
+                        <tr key={p.symbol}>
+                          <td style={{ fontWeight: 700 }}>{p.symbol}</td>
+                          <td className="db-num-cell">{p.momentum >= 0 ? '+' : ''}{p.momentum}%</td>
+                          <td className="db-num-cell">{p.weight}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </div>
+            <div>
+              <div className="admin-card-label" style={{ paddingLeft: 2, marginBottom: 6 }}>策略績效（回測驗證，未實盤）</div>
+              <div className="admin-grid">
+                <StatCard label="樣本外年化報酬"
+                  value={`${strat.perf.oos_cagr >= 0 ? '+' : ''}${strat.perf.oos_cagr}%`}
+                  sub={`對照市場 ${strat.perf.market_cagr}%`} tone={strat.perf.oos_cagr > 0 ? 'good' : 'bad'} />
+                <StatCard label="樣本外最大回撤"
+                  value={`${strat.perf.oos_mdd}%`} sub="風險可控" tone="warn" />
+                <StatCard label="Sharpe（樣本外）"
+                  value={strat.perf.oos_sharpe} sub="風險調整後報酬" tone={strat.perf.oos_sharpe >= 0.5 ? 'good' : 'warn'} />
+                <StatCard label="全期年化"
+                  value={`${strat.perf.cagr >= 0 ? '+' : ''}${strat.perf.cagr}%`}
+                  sub={`回撤 ${strat.perf.mdd}%`} tone={strat.perf.cagr > 0 ? 'good' : 'bad'} />
+              </div>
+              <div className="task-form-hint" style={{ marginTop: 8 }}>
+                ⚠️ <b>防禦型</b>：崩盤保命、牛市偏弱。數字為<b>回測、偏樂觀、未經實盤</b>，僅供參考、<b>非績效承諾</b>。
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* 評級 + KPI 列 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(170px, 210px) 1fr', gap: 18, marginBottom: 22 }}>
         <div className="admin-card" style={{ borderLeft: `5px solid ${gradeColor}`, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '16px 18px' }}>
@@ -945,18 +1005,18 @@ function StatusPage({ onLogout }) {
           <div className="admin-card-sub">{gradeNote}</div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14 }}>
-          <StatCard label="訊號 edge（10天）"
-            value={score ? `${(G.current_edge_pp ?? 0) >= 0 ? '+' : ''}${G.current_edge_pp ?? 0}pp` : '—'}
-            sub="vs 隨機進場" tone={score ? (score.ok ? 'good' : 'bad') : null} />
+          <StatCard label="策略樣本外年化"
+            value={strat ? `${strat.perf.oos_cagr >= 0 ? '+' : ''}${strat.perf.oos_cagr}%` : '—'}
+            sub={strat ? `對照市場 ${strat.perf.market_cagr}%` : ''} tone={strat ? (stratOk ? 'good' : 'bad') : null} />
           <StatCard label="資料新鮮度"
             value={health ? `${health.symbols_fresh ?? 0}/${health.symbols_total ?? 0}` : '—'}
             sub="幣即時更新" tone={health ? (health.symbols_fresh === health.symbols_total ? 'good' : 'warn') : null} />
           <StatCard label="指標正確性"
             value={verify ? `${verify.passed}/${verify.total}` : '—'}
             sub="交叉驗證一致" tone={verify ? (verify.ok ? 'good' : 'bad') : null} />
-          <StatCard label="離有意義門檻"
-            value={score ? `${G.gap_pp ?? 0}pp` : '—'}
-            sub="還差多少" tone={score ? ((G.gap_pp ?? 0) > 0 ? 'warn' : 'good') : null} />
+          <StatCard label="今日策略訊號"
+            value={strat ? (strat.today.regime === 'cash' ? '抱現金' : `持有 ${strat.today.picks.length} 幣`) : '—'}
+            sub={strat ? strat.today.date : ''} tone={strat ? (strat.today.regime === 'cash' ? null : 'good') : null} />
         </div>
       </div>
 
@@ -999,6 +1059,8 @@ function StatusPage({ onLogout }) {
         </div>
       </div>
 
+      {/* 原 6 因子訊號診斷（無 edge）*/}
+      <h2 className="admin-section-title">🔬 原始 6 因子訊號診斷　<span style={{ fontSize: 13, fontWeight: 400, color: '#94a3b8' }}>(無 edge — 這就是為什麼改用上方動量策略)</span></h2>
       {/* 圖表雙欄：各因子 edge | 評級儀表 */}
       {score && (
         <div style={col2}>

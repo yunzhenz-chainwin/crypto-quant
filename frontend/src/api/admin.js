@@ -58,6 +58,9 @@ export const fetchVerifyIndicators = () => adminGet('/verify/indicators')
 // 訊號預測力(成績單:現行訊號有沒有 forward edge)
 export const fetchSignalScorecard = () => adminGet('/signal/scorecard')
 
+// 防禦型跨幣動量「正式策略訊號」(今日建議 + 績效)
+export const fetchStrategy = () => adminGet('/strategy')
+
 // 工作項目 / 進度追蹤
 export const fetchTasks  = () => adminGet('/tasks')
 export const createTask  = (task)       => adminSend('/tasks', 'POST', task)
