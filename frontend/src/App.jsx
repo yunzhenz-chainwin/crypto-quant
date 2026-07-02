@@ -84,26 +84,8 @@ export default function App() {
   // 首次造訪自動開新手導覽；Header「❓ 導覽」可重看
   const [showTour, setShowTour] = useState(() => !localStorage.getItem('cq_tour_done'))
   const [showGlossary, setShowGlossary] = useState(false)
-  // 🌱簡易 / 📊專業 模式：簡易＝圖表固定常用圖層、回測只留白話與 preset。
-  // 首次造訪預設簡易（對新手直覺），選擇記在 localStorage。
-  const [simpleMode, setSimpleMode] = useState(
-    () => (localStorage.getItem('cq_view_mode') ?? 'simple') === 'simple')
   const [apiError, setApiError] = useState(false)   // API 失敗橫幅（輕量版 #22）
   const versionRef = useRef('')
-
-  const [modeToast, setModeToast] = useState(null)
-  const toggleMode = () => {
-    setSimpleMode(v => {
-      const next = !v
-      localStorage.setItem('cq_view_mode', next ? 'simple' : 'pro')
-      // 切換一定要有看得見的回饋（總覽頁也會即時變：卡片收起術語標籤）
-      setModeToast(next
-        ? '🌱 已切換「簡易模式」：卡片與圖表精簡、回測只留重點'
-        : '📊 已切換「專業模式」：完整指標、參數與進階表格全部展開')
-      setTimeout(() => setModeToast(null), 2600)
-      return next
-    })
-  }
 
   // 這顆幣有沒有時線資料（目前只開 BTC/ETH）
   const hasHourly = (intervals['1h'] ?? []).includes(active)
@@ -240,13 +222,6 @@ export default function App() {
           <button className="nav-btn" onClick={() => setShowTour(true)} title="重看新手導覽">
             ❓ 導覽
           </button>
-          {/* 兩段式切換：亮著的是目前模式，點另一邊切換（單顆按鈕會讓人誤會） */}
-          <div className="mode-seg" title="簡易＝白話重點；專業＝完整指標與參數">
-            <button className={`mode-seg-btn ${simpleMode ? 'active' : ''}`}
-                    onClick={() => !simpleMode && toggleMode()}>🌱 簡易</button>
-            <button className={`mode-seg-btn ${!simpleMode ? 'active' : ''}`}
-                    onClick={() => simpleMode && toggleMode()}>📊 專業</button>
-          </div>
         </nav>
         <StatusBar />
       </header>
@@ -277,12 +252,9 @@ export default function App() {
       {/* ── 市場總覽模式 ────────────────────────────────────────────────── */}
       {view === 'overview' && (
         <div className="overview-layout">
-          <MarketOverview signals={signals} onSelect={handleSelectCoin} simple={simpleMode} />
+          <MarketOverview signals={signals} onSelect={handleSelectCoin} />
         </div>
       )}
-
-      {/* 模式切換回饋 toast */}
-      {modeToast && <div className="mode-toast">{modeToast}</div>}
 
       {/* ── 幣種詳細模式 ────────────────────────────────────────────────── */}
       {view === 'detail' && (
@@ -295,7 +267,7 @@ export default function App() {
           />
 
           <main className="main-content">
-            <HeroSignal signal={activeSignal} symbol={active} simple={simpleMode} />
+            <HeroSignal signal={activeSignal} symbol={active} />
 
             <section className="chart-section">
               <div className="chart-section-header">
@@ -391,7 +363,6 @@ export default function App() {
                 indicators={indicators}
                 trades={interval === '1d' ? (backtest?.recent_trades ?? []) : []}
                 interval={interval}
-                simple={simpleMode}
               />
             </section>
 
@@ -423,25 +394,20 @@ export default function App() {
                   loading={btLoading}
                   params={btParams}
                   onParamsChange={patch => setBtParams(p => ({ ...p, ...patch }))}
-                  simple={simpleMode}
                 />
               )}
             </section>
-
-            {/* 相關性矩陣屬進階內容：簡易模式整段隱藏，切專業才出現 */}
-            {!simpleMode && (
-              <section className="collapsible-section">
-                <button className="collapse-toggle" onClick={() => setShowCorrelation(v => !v)}>
-                  <span>幣種相關性分析</span>
-                  <span className="collapse-arrow">{showCorrelation ? '▲' : '▼'}</span>
-                </button>
-                {showCorrelation && (
-                  <div className="correlation-body">
-                    <CorrelationHeatmap data={correlation} />
-                  </div>
-                )}
-              </section>
-            )}
+            <section className="collapsible-section">
+              <button className="collapse-toggle" onClick={() => setShowCorrelation(v => !v)}>
+                <span>幣種相關性分析</span>
+                <span className="collapse-arrow">{showCorrelation ? '▲' : '▼'}</span>
+              </button>
+              {showCorrelation && (
+                <div className="correlation-body">
+                  <CorrelationHeatmap data={correlation} />
+                </div>
+              )}
+            </section>
           </main>
         </div>
       )}

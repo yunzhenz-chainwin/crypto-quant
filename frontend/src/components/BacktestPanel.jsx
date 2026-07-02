@@ -199,7 +199,7 @@ const PRESETS = [
   { key: '積極', hint: '拉大停損停利抱久一點', p: { stopLoss: -0.10, takeProfit: 0.30, feeRate: 0.001, slippage: 0.0005 } },
 ]
 
-export default function BacktestPanel({ signal, data, loading, params, onParamsChange, simple = false }) {
+export default function BacktestPanel({ signal, data, loading, params, onParamsChange }) {
   const [showDetail, setShowDetail] = useState(false)   // 交易明細預設收起
   const activePreset = PRESETS.find(pr =>
     pr.p.stopLoss === params.stopLoss && pr.p.takeProfit === params.takeProfit &&
@@ -231,7 +231,6 @@ export default function BacktestPanel({ signal, data, loading, params, onParamsC
           ))}
           {!activePreset && <span className="preset-custom">自訂中</span>}
         </div>
-        {!simple && (
         <div className="param-row">
           <label>停損<Info text="跌幅達多少就認賠出場，保護本金。例如 -6% = 買進後跌 6% 就賣。" />
             <select value={params.stopLoss} onChange={e => onParamsChange({ stopLoss: +e.target.value })}>
@@ -262,7 +261,6 @@ export default function BacktestPanel({ signal, data, loading, params, onParamsC
             </select>
           </label>
         </div>
-        )}
         </div>
       </div>
 
@@ -336,27 +334,18 @@ export default function BacktestPanel({ signal, data, loading, params, onParamsC
             </div>
           </div>
 
-          {!simple && (
-            <div className="backtest-grid">
-              <ValidationTable validation={data.validation} />
-              <SweepTable rows={data.parameter_sweep} />
-            </div>
-          )}
+          <div className="backtest-grid">
+            <ValidationTable validation={data.validation} />
+            <SweepTable rows={data.parameter_sweep} />
+          </div>
 
-          {/* 資產曲線（簡易模式收起，切專業看完整） */}
-          {!simple && (
-            <div style={{ marginTop: 16 }}>
-              <div className="key-chart-title">
-                資產變化曲線:策略 vs 買入持有(每筆交易後的倍數,1.0 = 本金)
-              </div>
-              <EquityCurve data={data.equity_curve} />
+          {/* 資產曲線 */}
+          <div style={{ marginTop: 16 }}>
+            <div className="key-chart-title">
+              資產變化曲線:策略 vs 買入持有(每筆交易後的倍數,1.0 = 本金)
             </div>
-          )}
-          {simple && (
-            <div className="task-form-hint" style={{ marginTop: 10 }}>
-              🌱 簡易模式只顯示重點結論；想看樣本切分驗證、參數掃描與資產曲線，請切換右上角「📊 專業」。
-            </div>
-          )}
+            <EquityCurve data={data.equity_curve} />
+          </div>
 
           {/* 展開更多 */}
           <button className="detail-toggle" onClick={() => setShowDetail(v => !v)}>

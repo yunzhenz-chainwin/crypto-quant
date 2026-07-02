@@ -105,7 +105,7 @@ const OSC_DETAIL = {
   },
 }
 
-export default function CandlestickChart({ prices, indicators, trades, interval = '1d', simple = false }) {
+export default function CandlestickChart({ prices, indicators, trades, interval = '1d' }) {
   const containerRef = useRef(null)
   const [maType, setMaType] = useState('EMA')   // 均線類型:SMA / EMA
   // 多條可調均線(天數可改、可逐條開關;顏色對應圖上的線)
@@ -122,18 +122,11 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
   const [osc, setOsc] = useState('RSI')   // 單一擺盪指標槽
   const [oscDetail, setOscDetail] = useState(false)  // 指標詳細說明是否展開
 
-  // 🌱 簡易模式：固定最常用的組合（K線＋EMA20＋成交量＋RSI），
-  // 收起整排工具列，避免新手被 10+ 顆按鈕嚇到；切「📊 專業」即恢復全功能。
-  const effMas   = simple ? mas.map(m => ({ ...m, on: m.p === 20 })) : mas
-  const effBB    = simple ? false : showBB
-  const effVol   = simple ? true  : showVol
-  const effMark  = simple ? false : showMarkers
-  const effOsc   = simple ? 'RSI' : osc
 
   useEffect(() => {
     if (!containerRef.current || !prices || prices.length === 0) return
 
-    const oscOn = effOsc !== '無'
+    const oscOn = osc !== '無'
     const chart = createChart(containerRef.current, {
       layout: { background: { color: '#0f172a' }, textColor: '#94a3b8' },
       grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
@@ -166,14 +159,14 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
     const pin100 = () => ({ priceRange: { minValue: 0, maxValue: 100 } })
 
     // ── 均線（可調天數）+ 布林帶 + 成交量（主面板）────────────────
-    effMas.forEach(ma => {
+    mas.forEach(ma => {
       if (ma.on) addLine(movingAvg(P, ma.p, maType), { color: ma.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: `${maType}${ma.p}` })
     })
-    if (effBB) {
+    if (showBB) {
       addLine(getInd('BB_UPPER'), { color: 'rgba(248,113,113,0.55)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, title: 'BB+' })
       addLine(getInd('BB_LOWER'), { color: 'rgba(74,222,128,0.55)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, title: 'BB-' })
     }
-    if (effVol) {
+    if (showVol) {
       const vol = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: 'vol' })
       chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
       vol.setData(P.map(p => ({
@@ -185,7 +178,7 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
     // ── 單一擺盪指標副面板（pane 1;由 osc 決定顯示哪一個）──────────
     if (oscOn) {
       const pane = 1
-      if (effOsc === 'RSI') {
+      if (osc === 'RSI') {
         const rsiData = getInd('RSI')
         if (rsiData.length) {
           const rsi = chart.addSeries(LineSeries, { color: '#34d399', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'RSI', autoscaleInfoProvider: pin100 }, pane)
@@ -193,14 +186,14 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
           rsi.createPriceLine({ price: 70, color: 'rgba(239,68,68,0.6)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '70' })
           rsi.createPriceLine({ price: 30, color: 'rgba(34,197,94,0.6)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '30' })
         }
-      } else if (effOsc === 'MACD' && hasInd) {
+      } else if (osc === 'MACD' && hasInd) {
         const histData = IND.filter(d => d.HIST != null).map(d => ({ time: d.date, value: d.HIST, color: d.HIST >= 0 ? 'rgba(34,197,94,0.6)' : 'rgba(239,68,68,0.6)' }))
         if (histData.length) chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false, title: '柱' }, pane).setData(histData)
         const macdData = getInd('MACD')
         if (macdData.length) chart.addSeries(LineSeries, { color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'MACD' }, pane).setData(macdData)
         const signalData = getInd('SIGNAL')
         if (signalData.length) chart.addSeries(LineSeries, { color: '#f97316', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, title: '訊號' }, pane).setData(signalData)
-      } else if (effOsc === 'KDJ') {
+      } else if (osc === 'KDJ') {
         const kd = kdj(P, 9)
         if (kd.length) {
           const kS = chart.addSeries(LineSeries, { color: '#eab308', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'K', autoscaleInfoProvider: pin100 }, pane)
@@ -210,7 +203,7 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
           chart.addSeries(LineSeries, { color: '#22d3ee', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'D', autoscaleInfoProvider: pin100 }, pane).setData(kd.map(x => ({ time: x.time, value: x.d })))
           chart.addSeries(LineSeries, { color: '#f472b6', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'J', autoscaleInfoProvider: pin100 }, pane).setData(kd.map(x => ({ time: x.time, value: x.j })))
         }
-      } else if (effOsc === 'DMI') {
+      } else if (osc === 'DMI') {
         const dm = dmi(P, 14)
         if (dm.length) {
           chart.addSeries(LineSeries, { color: '#22c55e', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: '+DI', autoscaleInfoProvider: pin100 }, pane).setData(dm.map(x => ({ time: x.time, value: x.pdi })))
@@ -219,7 +212,7 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
           adxS.setData(dm.filter(x => x.adx != null).map(x => ({ time: x.time, value: x.adx })))
           adxS.createPriceLine({ price: 25, color: 'rgba(148,163,184,0.6)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '25' })
         }
-      } else if (effOsc === 'BIAS') {
+      } else if (osc === 'BIAS') {
         const b6 = bias(P, 6), b24 = bias(P, 24)
         if (b6.length) {
           const s = chart.addSeries(LineSeries, { color: '#fb923c', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'BIAS6' }, pane)
@@ -231,7 +224,7 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
     }
 
     // ── 買賣標記（回測是日線策略，僅日線圖顯示；時線時間軸型別也不相容）──
-    if (interval === '1d' && effMark && trades && trades.length > 0) {
+    if (interval === '1d' && showMarkers && trades && trades.length > 0) {
       const markers = []
       trades.forEach(t => {
         if (t.entry_date) markers.push({ time: t.entry_date, position: 'belowBar', color: '#22c55e', shape: 'arrowUp', text: `買入 $${Number(t.entry_price).toFixed(0)}` })
@@ -256,7 +249,7 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
     }
     window.addEventListener('resize', handleResize)
     return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', handleResize); chart.remove() }
-  }, [prices, indicators, trades, maType, mas, showBB, showVol, showMarkers, osc, interval, simple])
+  }, [prices, indicators, trades, maType, mas, showBB, showVol, showMarkers, osc, interval])
 
   if (!prices || prices.length === 0) {
     return (
@@ -269,12 +262,7 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
 
   return (
     <div style={{ position: 'relative' }}>
-      {simple ? (
-        <div className="chart-toolbar-simple">
-          🌱 簡易模式：K線＋EMA20 均線＋成交量＋RSI。想開更多指標？點右上角「📊 專業」。
-        </div>
-      ) : (
-      <div className="chart-toolbar">
+            <div className="chart-toolbar">
         <span className="toolbar-lbl">圖層：</span>
         <button className="matype-btn" onClick={() => setMaType(t => t === 'SMA' ? 'EMA' : 'SMA')} title="切換 簡單(SMA)/指數(EMA) 移動平均">均線:{maType}</button>
         {mas.map((ma, i) => (
@@ -299,19 +287,18 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
           ))}
         </span>
       </div>
-      )}
       <div ref={containerRef} className="candlestick-wrap" />
-      {effOsc !== '無' && OSC_DETAIL[effOsc] && (
+      {osc !== '無' && OSC_DETAIL[osc] && (
         <div className="osc-help">
           <div className="osc-help-row">
-            <span><span className="osc-help-tag">📖 怎麼看 {effOsc}</span>{OSC_DETAIL[effOsc].summary}</span>
+            <span><span className="osc-help-tag">📖 怎麼看 {osc}</span>{OSC_DETAIL[osc].summary}</span>
             <button className="osc-help-more" onClick={() => setOscDetail(v => !v)}>
               {oscDetail ? '收合 ▲' : '看詳細 ▾'}
             </button>
           </div>
           {oscDetail && (
             <div className="osc-help-detail">
-              {OSC_DETAIL[effOsc].sections.map(([label, text]) => (
+              {OSC_DETAIL[osc].sections.map(([label, text]) => (
                 <div key={label} className="osc-help-sec">
                   <span className="osc-help-sec-label">{label}</span>
                   <span className="osc-help-sec-text">{text}</span>

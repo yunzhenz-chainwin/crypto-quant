@@ -54,7 +54,7 @@ function RsiMini({ rsi }) {
   )
 }
 
-function CoinCard({ s, onSelect, simple }) {
+function CoinCard({ s, onSelect }) {
   const sig   = SIG[s.signal] ?? SIG.NEUTRAL
   const price = s.close
     ? `$${Number(s.close).toLocaleString(undefined, { maximumFractionDigits: 4 })}`
@@ -81,8 +81,7 @@ function CoinCard({ s, onSelect, simple }) {
       {/* RSI 條 */}
       <RsiMini rsi={s.rsi} />
 
-      {/* 因子術語標籤：簡易模式收起（RSI/MACD 對新手是雜訊），切專業展開 */}
-      {!simple && s.reasons?.length > 0 && (
+      {s.reasons?.length > 0 && (
         <div className="card-reasons">
           {s.reasons.slice(0, 2).map((r, i) => (
             <span key={i} className="card-reason-tag">{r}</span>
@@ -95,7 +94,7 @@ function CoinCard({ s, onSelect, simple }) {
   )
 }
 
-export default function MarketOverview({ signals, onSelect, simple = false }) {
+export default function MarketOverview({ signals, onSelect }) {
   // 先按分數排：高分 BULL → 低分 BEAR
   const sorted = [...(signals ?? [])].sort((a, b) => (b.score ?? 50) - (a.score ?? 50))
 
@@ -121,7 +120,7 @@ export default function MarketOverview({ signals, onSelect, simple = false }) {
     <section className="overview-section">
       <div className="overview-grid">
         {sorted.map(s => (
-          <CoinCard key={s.symbol} s={s} onSelect={onSelect} simple={simple} />
+          <CoinCard key={s.symbol} s={s} onSelect={onSelect} />
         ))}
       </div>
     </section>

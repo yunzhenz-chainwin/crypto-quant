@@ -84,19 +84,12 @@ function ScoreGauge({ score }) {
 
 // 指標白話卡已抽成共用元件,移至「策略回測」區塊顯示:見 ./IndicatorCards.jsx
 
-export default function HeroSignal({ signal, symbol, simple = false }) {
+export default function HeroSignal({ signal, symbol }) {
   const cfg   = SIGNAL_CONFIG[signal?.signal ?? 'UNKNOWN']
   const price = signal?.close
     ? `$${signal.close.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
     : '—'
 
-  // 簡易模式：分數量表換成「✅/⚠️ 白話因子清單」（哪些指標幫忙、哪些扯後腿）
-  const plainFactors = simple && signal?.factors
-    ? Object.values(signal.factors)
-        .filter(f => f.score !== 0 && f.note && f.note !== '無資料')
-        .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
-        .slice(0, 4)
-    : []
 
   return (
     <section className={`hero-signal ${cfg.cls}`}>
@@ -111,23 +104,10 @@ export default function HeroSignal({ signal, symbol, simple = false }) {
         <div className="hero-desc">{cfg.desc}</div>
       </div>
 
-      {/* 右：簡易＝白話因子清單；專業＝信心分數量表 */}
-      {simple ? (
-        <div className="hero-plain">
-          <div className="hero-plain-title">目前指標怎麼說</div>
-          {plainFactors.length > 0 ? plainFactors.map(f => (
-            <div key={f.label} className="hero-plain-item">
-              <span>{f.score > 0 ? '✅' : '⚠️'}</span>
-              <span><b>{f.label}</b>：{f.note}</span>
-            </div>
-          )) : <div className="hero-plain-item">資料載入中…</div>}
-          <div className="hero-plain-hint">想看完整分數與量表 → 右上角切「📊 專業」</div>
-        </div>
-      ) : (
-        <div className="hero-gauge-col">
-          <ScoreGauge score={signal?.score} />
-        </div>
-      )}
+      {/* 右：信心分數量表 */}
+      <div className="hero-gauge-col">
+        <ScoreGauge score={signal?.score} />
+      </div>
     </section>
   )
 }
