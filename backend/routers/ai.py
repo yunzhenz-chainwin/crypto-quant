@@ -49,15 +49,58 @@ def post_ask(body: AskReq):
     # ① 精確/錯字容忍偵測幣種 ② 偵測不到但「像在問某顆沒追蹤的幣」→ 誠實說沒資料，
     #    絕不默默用別的幣回答（答非所問比不回答更糟）③ 都不是 → 沿用聊天室目前的幣
     detected, guessed = ai_analyst.detect_symbol(q)
+    # 全站模式：聊天室沒綁定幣（總覽頁）且問題也沒提到幣 → 小Q 是「整個網站的」
+    # 小幫手，不預設任何一顆幣：行情/知識類反問哪顆幣、教學類以比特幣為例並註明。
+    market_mode = (not detected and not (body.symbol or "").strip()
+                   and not (body.context_symbol or "").strip())
     if not detected:
         unknown = ai_analyst.find_unknown_coin(q)
         if unknown:
             from backend.services.app_db import log_ai_chat
             answer = ai_analyst.unsupported_coin_reply(unknown)
-            log_ai_chat(fallback, q, answer, "local")
+            log_ai_chat("MARKET" if market_mode else fallback, q, answer, "local")
             return {"answer": answer, "source": "local",
-                    "symbol": fallback, "name_zh": ai_analyst._coin_zh(fallback),
+                    "symbol": None if market_mode else fallback,
+                    "name_zh": None if market_mode else ai_analyst._coin_zh(fallback),
                     "detected": False, "unsupported": unknown}
+
+    if market_mode:
+        from backend.services import canned_qa
+        from backend.services.app_db import log_ai_chat
+        mk = canned_qa.match_kind(q)
+        info = canned_qa.entry_info(mk) if mk else None
+        base = {"symbol": None, "name_zh": None, "detected": False, "guessed": False}
+
+        # 打招呼 → 全市場版開場白（不提任何單一幣）
+        if info and info["category"] == "閒聊" and info["example"].startswith("你好"):
+            answer = canned_qa.market_greeting()
+            log_ai_chat("MARKET", q, answer, "canned")
+            return {**base, "answer": answer, "source": "canned", "intent": "閒聊:全站打招呼"}
+
+        # 行情建議 / 幣種知識類但沒講幣 → 反問哪顆幣，絕不擅自替使用者選
+        if info and info["coin_specific"] and (info["kind"] == "knowledge"
+                                               or info["category"] == "行情"):
+            answer = canned_qa.ask_which_coin(q)
+            log_ai_chat("MARKET", q, answer, "canned")
+            return {**base, "answer": answer, "source": "canned", "intent": "全站:反問幣種"}
+
+        # 教學/觀念/平台/大盤等通用問題 → 照答；若引用了數據，註明以比特幣為例
+        note = "\n\n※ 以上數據以**比特幣**為例；想看特定幣，把幣名加進問題即可。"
+        canned = canned_qa.try_answer("BTCUSDT", q)
+        if canned:
+            answer = canned["answer"] + (note if canned.get("coin_specific") else "")
+            enhanced = ai_analyst.enhance_answer(q, answer, canned["intent"], "MARKET",
+                                                 ctx=canned.get("ctx"))
+            source = "canned+gpt" if enhanced else "canned"
+            log_ai_chat("MARKET", q, enhanced or answer, source)
+            return {**base, "answer": enhanced or answer, "source": source,
+                    "intent": canned["intent"]}
+
+        # 沒命中固定庫 → 走一般問答（以 BTC 數據為底），同樣註明
+        out = ai_analyst.ask("BTCUSDT", q, history=(body.history or [])[-3:])
+        out["answer"] = out["answer"] + note
+        out.update(base)
+        return out
 
     symbol = detected if (detected and detected in avail) else fallback
 

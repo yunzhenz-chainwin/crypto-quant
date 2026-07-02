@@ -1577,3 +1577,13 @@ body { background: var(--bg); }
   .bot-card { width: calc(100vw - 20px); height: 76vh; }
   .bot-fab svg { width: 76px; height: 82px; }   /* 手機上小Q稍微收小 */
 }
+
+/* 模式切換回饋 toast */
+.mode-toast {
+  position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+  z-index: 1300; background: var(--surface); border: 1px solid var(--accent);
+  color: var(--text); font-size: 13px; font-weight: 600;
+  padding: 10px 18px; border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5); animation: bot-pop .25s ease;
+  white-space: nowrap; max-width: calc(100vw - 24px); overflow: hidden; text-overflow: ellipsis;
+}

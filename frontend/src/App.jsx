@@ -91,10 +91,17 @@ export default function App() {
   const [apiError, setApiError] = useState(false)   // API 失敗橫幅（輕量版 #22）
   const versionRef = useRef('')
 
+  const [modeToast, setModeToast] = useState(null)
   const toggleMode = () => {
     setSimpleMode(v => {
-      localStorage.setItem('cq_view_mode', v ? 'pro' : 'simple')
-      return !v
+      const next = !v
+      localStorage.setItem('cq_view_mode', next ? 'simple' : 'pro')
+      // 切換一定要有看得見的回饋（總覽頁也會即時變：卡片收起術語標籤）
+      setModeToast(next
+        ? '🌱 已切換「簡易模式」：卡片與圖表精簡、回測只留重點'
+        : '📊 已切換「專業模式」：完整指標、參數與進階表格全部展開')
+      setTimeout(() => setModeToast(null), 2600)
+      return next
     })
   }
 
@@ -267,9 +274,12 @@ export default function App() {
       {/* ── 市場總覽模式 ────────────────────────────────────────────────── */}
       {view === 'overview' && (
         <div className="overview-layout">
-          <MarketOverview signals={signals} onSelect={handleSelectCoin} />
+          <MarketOverview signals={signals} onSelect={handleSelectCoin} simple={simpleMode} />
         </div>
       )}
+
+      {/* 模式切換回饋 toast */}
+      {modeToast && <div className="mode-toast">{modeToast}</div>}
 
       {/* ── 幣種詳細模式 ────────────────────────────────────────────────── */}
       {view === 'detail' && (
@@ -430,8 +440,9 @@ export default function App() {
         </div>
       )}
 
-      {/* ── 全站漂浮 AI 小幫手「小Q」（右下角，兩個模式都在；免選幣）──── */}
-      <BotWidget defaultSymbol={view === 'detail' ? active : 'BTCUSDT'} />
+      {/* ── 全站漂浮 AI 小幫手「小Q」（右下角）──────────────────────────
+          詳細頁＝跟隨當前幣；總覽頁＝全市場模式（不綁定任何幣） */}
+      <BotWidget defaultSymbol={view === 'detail' ? active : null} />
 
     </div>
   )

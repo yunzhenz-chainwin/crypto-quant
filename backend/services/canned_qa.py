@@ -44,7 +44,7 @@ QA_TEMPLATES = [
      "停損｜停利｜止損｜止盈｜出場點",
      "常見做法（擇一並堅持執行）：\n・**固定比例**：進場價 -6%～-10% 停損、+15%～+25% 分批停利（平台回測預設 -6%／+20%）\n・**技術位**：跌破 MA20（{幣名}目前 {MA20}）或前低出場\n・**移動停利**：從高點回落固定 % 出場，讓獲利奔跑\n\n重點不是哪個數字最完美，而是**進場前就設好、到了就執行**。" + DISCLAIM),
     ("行情", "主要風險是什麼？",
-     "風險｜要注意｜危險｜擔心｜地雷｜注意什麼",
+     "主要風險｜風險是什麼｜風險｜要注意｜危險｜擔心｜地雷｜注意什麼",
      "以目前數據，{幣名}的主要風險提醒：\n{風險清單}\n\n**技術快照**\n{技術快照}"),
     ("行情", "現在趨勢是多頭還是空頭？",
      "趨勢｜多頭｜空頭｜方向｜走勢｜盤勢怎麼看",
@@ -266,8 +266,11 @@ def _match(question: str):
     for intent, kws in KNOWLEDGE_INTENTS:
         for k in kws:
             if k and (k in q or k.lower() in ql):
-                if best is None or len(k) > best[0]:
-                    best = (len(k), "knowledge", intent)
+                # 「是什麼/是甚麼」太泛用（主要風險是什麼、趨勢是什麼…都含它），
+                # 競爭時降權成 1：只有在沒有任何具體條目命中時才走幣種小檔案。
+                w = 1 if k in ("是什麼", "是甚麼") else len(k)
+                if best is None or w > best[0]:
+                    best = (w, "knowledge", intent)
     return (best[1], best[2]) if best else None
 
 
@@ -435,23 +438,76 @@ def _knowledge_answer(symbol: str, intent: str) -> str | None:
 
 
 # ── 對外入口 ─────────────────────────────────────────────────────────────────
+# 模板中「幣種專屬」的變數：全市場模式下若答案用到這些，要註明「以比特幣為例」
+_COIN_VARS = ("{幣名}", "{代號}", "{價格}", "{立場}", "{分數}", "{RSI}", "{MA20}",
+              "{MA60}", "{MA200}", "{布林上軌}", "{布林下軌}", "{漲跌", "{趨勢說明}",
+              "{動能說明}", "{量能說明}", "{位置說明}", "{技術快照}", "{風險清單}",
+              "{操作參考}", "{短線摘要}", "{本幣", "{單幣情緒分}")
+
+
+def match_kind(question: str):
+    """公開的命中查詢：('qa', index) / ('knowledge', intent) / None。
+    全站（無幣種）模式的路由邏輯用它決定「該答、該反問哪顆幣、還是交棒」。"""
+    return _match(question)
+
+
+def entry_info(hit) -> dict:
+    """命中條目的中繼資料：分類 / 問題示例 / 是否幣種專屬（模板用到幣種變數）。"""
+    kind, key = hit
+    if kind == "knowledge":
+        return {"kind": "knowledge", "category": "幣種知識", "example": key,
+                "coin_specific": True}
+    cat, example, _, template = QA_TEMPLATES[key]
+    return {"kind": "qa", "category": cat, "example": example,
+            "coin_specific": any(v in template for v in _COIN_VARS)}
+
+
+def market_greeting() -> str:
+    """全站模式的打招呼：講整體市場，不預設任何一顆幣。"""
+    fg_txt = ""
+    try:
+        from backend.services.reader import load_fear_greed_history
+        fg = load_fear_greed_history(days=2)
+        if fg:
+            zh = {"Extreme Fear": "極度恐慌", "Fear": "恐慌", "Neutral": "中性",
+                  "Greed": "貪婪", "Extreme Greed": "極度貪婪"}
+            fg_txt = f"目前全市場恐懼貪婪指數 {fg[-1]['value']}（{zh.get(fg[-1]['label'], fg[-1]['label'])}）。\n\n"
+    except Exception:
+        pass
+    return (f"嗨！我是小Q，全站的量化小幫手 👋\n\n{fg_txt}"
+            "想看哪顆幣直接講名字就好（例：「比特幣現在如何？」「以太幣風險？」），\n"
+            "也可以問我教學問題（「RSI 是什麼？」）或大盤狀況（「市場情緒怎麼樣？」）。")
+
+
+def ask_which_coin(question: str) -> str:
+    """行情/知識類問題但沒講幣種時的反問（全站模式用），絕不擅自挑一顆幣回答。"""
+    from backend.services.app_db import get_coins
+    coins = [c for c in get_coins() if c.get("enabled", True)]
+    tks = "、".join((c.get("ticker") or c["symbol"].replace("USDT", "")) for c in coins[:8])
+    return (f"這題要看「哪一顆幣」喔！直接把幣名加進問題就行～\n\n"
+            f"例如：「**比特幣**{question.strip()[:20]}」「**以太幣**{question.strip()[:20]}」\n\n"
+            f"我支援 {len(coins)} 檔：{tks}…（完整清單可問「支援哪些幣」）")
+
+
 def try_answer(symbol: str, question: str) -> dict | None:
     """
-    固定問答入口。命中 → {answer(豐富固定答案), intent, ctx}；沒命中 → None。
-    回傳的 ctx 供 GPT 優化層引用（佐證數據），不外洩給前端。
+    固定問答入口。命中 → {answer(豐富固定答案), intent, ctx, coin_specific}；
+    沒命中 → None。ctx 供 GPT 優化層引用（佐證數據），不外洩給前端。
     """
     hit = _match(question)
     if not hit:
         return None
     kind, key = hit
+    info = entry_info(hit)
 
     if kind == "knowledge":
         ans = _knowledge_answer(symbol, key)
         if not ans:
             return None
-        return {"answer": ans, "intent": f"knowledge:{key}", "ctx": None}
+        return {"answer": ans, "intent": f"knowledge:{key}", "ctx": None,
+                "coin_specific": True}
 
     cat, example, _, template = QA_TEMPLATES[key]
     vars_ = _build_vars(symbol)
     return {"answer": _render(template, vars_), "intent": f"{cat}:{example}",
-            "ctx": vars_.get("_ctx")}
+            "ctx": vars_.get("_ctx"), "coin_specific": info["coin_specific"]}

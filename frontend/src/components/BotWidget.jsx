@@ -8,14 +8,17 @@
  *   - 快速問題 chips + 自由提問（走 /api/ai/ask，沒 GPT 金鑰自動降級規則引擎）
  *
  * Props：
- *   defaultSymbol  預設幣種（詳細頁跟隨當前幣；聊天中不強制）
+ *   defaultSymbol  詳細頁＝當前幣；總覽頁＝null（全市場模式：小Q 是整站的
+ *                  小幫手，不綁定任何幣，徽章顯示「全市場」、開場講大盤）
  */
 import { useState, useEffect, useRef } from 'react'
-import { fetchAIAnalysis, askAI } from '../api/client'
+import { fetchAIAnalysis, askAI, fetchFearGreed, fetchNewsSentiment } from '../api/client'
 import { coinZh, coinTicker } from '../constants/coins'
 import BotMascot, { stanceToMood } from './BotMascot'
 
-const QUICK = ['這顆幣是什麼？', '現在適合進場嗎？', '主要風險是什麼？', '大盤情緒怎麼樣？']
+// 快速問題：綁定幣時問該幣；全市場模式引導講幣名或問通用問題
+const QUICK_COIN   = ['這顆幣是什麼？', '現在適合進場嗎？', '主要風險是什麼？', '大盤情緒怎麼樣？']
+const QUICK_MARKET = ['大盤情緒怎麼樣？', '比特幣現在如何？', 'RSI 是什麼？', '支援哪些幣？']
 
 // 與 AIAnalystPanel 相同的極簡 markdown（粗體 + 條列），不用 innerHTML
 function Md({ text }) {
@@ -34,9 +37,10 @@ function Md({ text }) {
   return <div className="ai-md">{out}</div>
 }
 
-export default function BotWidget({ defaultSymbol = 'BTCUSDT' }) {
+export default function BotWidget({ defaultSymbol = null }) {
   const [open, setOpen]   = useState(false)
-  const [sym, setSym]     = useState(defaultSymbol)   // 目前聊的幣（黏性，提到別的幣會自動切換）
+  // 目前聊的幣：null=全市場模式（總覽頁預設）；提到幣名才會綁定
+  const [sym, setSym]     = useState(defaultSymbol)
   const [brief, setBrief] = useState(null)            // 規則引擎快評
   const [chat, setChat]   = useState([])              // [{q, a, source, coin}]
   const [q, setQ]         = useState('')
@@ -45,19 +49,29 @@ export default function BotWidget({ defaultSymbol = 'BTCUSDT' }) {
   const bodyRef = useRef(null)
   const seq = useRef(0)
 
-  // 詳細頁切幣時，小幫手跟著換（未打開對話時才自動跟隨，避免打斷聊天）
+  // 詳細頁切幣、回總覽 → 小幫手跟著切（未打開對話時才自動跟隨，避免打斷聊天）
   useEffect(() => {
-    if (!open && defaultSymbol) setSym(defaultSymbol)
+    if (!open) setSym(defaultSymbol)
   }, [defaultSymbol, open])
 
-  // 打開 / 換幣 → 抓規則引擎快評（毫秒級、免費）
+  // 打開 / 換幣 → 抓開場快評：有幣=該幣規則引擎快評；全市場=恐懼貪婪+新聞情緒
   useEffect(() => {
-    if (!open || !sym) return
+    if (!open) return
     const my = ++seq.current
     setBrief(null)
-    fetchAIAnalysis(sym, { gpt: false })
-      .then(r => { if (seq.current === my) setBrief(r) })
-      .catch(() => {})
+    if (sym) {
+      fetchAIAnalysis(sym, { gpt: false })
+        .then(r => { if (seq.current === my) setBrief(r) })
+        .catch(() => {})
+    } else {
+      Promise.all([fetchFearGreed(1), fetchNewsSentiment('MARKET', 1)])
+        .then(([fg, ns]) => {
+          if (seq.current !== my) return
+          const d = ns?.daily?.length ? ns.daily[ns.daily.length - 1] : null
+          setBrief({ market: { fg: fg?.[0] ?? null, senti: d } })
+        })
+        .catch(() => { if (seq.current === my) setBrief({ market: {} }) })
+    }
   }, [open, sym])
 
   // 新訊息進來時捲到底
@@ -80,7 +94,7 @@ export default function BotWidget({ defaultSymbol = 'BTCUSDT' }) {
     setChat(c => [...c, { q: question, a: null }])
     try {
       const r = await askAI(sym, question, history)
-      // 後端偵測到問題講的是別的幣 → 聊天室跟著切換（黏性）
+      // 後端偵測到問題講的是某顆幣 → 聊天室綁定它；全市場回答（symbol=null）則維持不綁定
       if (r.symbol && r.symbol !== sym) setSym(r.symbol)
       setChat(c => c.map(m => (m.q === question && m.a === null)
         ? { ...m, a: r.answer, source: r.source, coin: r.name_zh } : m))
@@ -92,8 +106,12 @@ export default function BotWidget({ defaultSymbol = 'BTCUSDT' }) {
     }
   }
 
-  // 小Q 的表情：忙碌→思考；有快評→跟著多空變臉；否則待機
-  const mood = busy ? 'thinking' : brief ? stanceToMood(brief.local?.stance) : 'idle'
+  // 小Q 的表情：忙碌→思考；單幣=跟多空變臉；全市場=跟恐懼貪婪變臉
+  const fgVal = brief?.market?.fg ? Number(brief.market.fg.value) : null
+  const mood = busy ? 'thinking'
+    : brief?.local ? stanceToMood(brief.local.stance)
+    : fgVal != null ? (fgVal <= 25 ? 'bear' : fgVal >= 75 ? 'bull' : 'neutral')
+    : 'idle'
   const stance = brief?.local?.stance
 
   return (
@@ -108,16 +126,29 @@ export default function BotWidget({ defaultSymbol = 'BTCUSDT' }) {
               <span>量化小幫手</span>
             </div>
             <span className="bot-coin-badge"
-                  title="免選幣：提到幣名就自動切換（例：問「以太幣如何？」）">
-              💬 {coinZh(sym)} {coinTicker(sym)}
+                  title={sym ? '免選幣：提到別的幣名就自動切換（例：問「以太幣如何？」）'
+                             : '全站小幫手：提到幣名會自動鎖定該幣'}>
+              {sym ? `💬 ${coinZh(sym)} ${coinTicker(sym)}` : '🌐 全市場'}
             </span>
             <button className="bot-close" onClick={toggle} aria-label="關閉">✕</button>
           </div>
 
           <div className="bot-card-body" ref={bodyRef}>
-            {/* 開場快評 */}
+            {/* 開場快評（單幣＝規則引擎；全市場＝大盤溫度） */}
             <div className="bot-bubble bot-bubble-bot">
-              {brief ? (
+              {brief?.market ? (
+                <>
+                  <div className="bot-brief-line"><b>📊 全市場現況</b></div>
+                  <div className="bot-brief-sub">
+                    {brief.market.fg ? `恐懼貪婪指數 ${brief.market.fg.value}（${
+                      {'Extreme Fear':'極度恐慌','Fear':'恐慌','Neutral':'中性','Greed':'貪婪','Extreme Greed':'極度貪婪'}[brief.market.fg.value_classification] ?? brief.market.fg.value_classification ?? ''}）` : ''}
+                    {brief.market.senti ? `｜今日新聞情緒 ${brief.market.senti.score > 0 ? '+' : ''}${brief.market.senti.score}` : ''}
+                  </div>
+                  <div className="bot-brief-hint">
+                    我是全站小幫手，想看哪顆幣直接講名字（例：「比特幣現在如何？」），教學問題也可以問我～
+                  </div>
+                </>
+              ) : brief ? (
                 <>
                   <div className="bot-brief-line">
                     {stance && <span className={`bot-stance s-${stanceToMood(stance)}`}>{stance}</span>}
@@ -158,14 +189,16 @@ export default function BotWidget({ defaultSymbol = 'BTCUSDT' }) {
           </div>
 
           <div className="bot-quick">
-            {QUICK.map(t => (
+            {(sym ? QUICK_COIN : QUICK_MARKET).map(t => (
               <button key={t} className="ai-chip" disabled={busy} onClick={() => send(t)}>{t}</button>
             ))}
           </div>
           <div className="bot-input-row">
             <input
               className="ai-input"
-              placeholder="問我任何幣：比特幣可以進場嗎？以太幣風險？"
+              placeholder={sym
+                ? `問${coinZh(sym)}，或講其他幣名自動切換…`
+                : '問我任何幣或大盤：比特幣如何？市場情緒？'}
               value={q} maxLength={500}
               onChange={e => setQ(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') send() }}
