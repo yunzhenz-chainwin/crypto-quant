@@ -83,6 +83,15 @@ def intervals_available() -> dict:
     return {iv: available_symbols(iv) for iv in VALID_INTERVALS}
 
 
+def data_range(symbol: str, interval: str = INTERVAL) -> tuple:
+    """某幣的可查資料範圍 (最早日, 最晚日)；無資料回 (None, None)。歷史查詢的邊界提示用。"""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT substr(MIN(ts),1,10), substr(MAX(ts),1,10) FROM prices "
+            "WHERE symbol=? AND interval=?", (symbol, interval)).fetchone()
+    return (row[0], row[1]) if row and row[0] else (None, None)
+
+
 def data_versions() -> dict:
     """各週期最新一根 K 棒的時間戳（前端輪詢比對「資料有沒有變」用，很便宜）。"""
     with _connect() as conn:

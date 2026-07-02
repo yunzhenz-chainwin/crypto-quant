@@ -531,14 +531,41 @@ def _history_answer(symbol: str, question: str) -> dict | None:
     def fp(v):  # 價位自適應
         return "—" if v is None else (f"{v:,.4f}" if v < 1 else f"{v:,.2f}")
 
+    def _out_of_range_reply(asked_txt: str, anchor_iso: str) -> dict:
+        """範圍外三層回覆：可查區間 → 最接近的可查快照 → GPT 公開常識補充（標註非本站數據）。
+        anchor_iso：請求時間點的 ISO 日期（判斷該取「最早」還是「最新」的鄰近快照）。"""
+        from backend.services.reader import data_range
+        dmin, dmax = data_range(symbol)
+        range_txt = f"{dmin} ～ {dmax}" if dmin else "（此幣尚無資料）"
+        near_txt = ""
+        if dmin:
+            near_d = dmin if anchor_iso < dmin else dmax   # 早於範圍→最早日；晚於/未來→最新日
+            nr = load_indicators(symbol, start=near_d, end=near_d)
+            if nr:
+                n = nr[-1]
+                nrsi = n.get("RSI")
+                near_txt = (f"\n・最接近的可查日 **{near_d}**：收盤 ${fp(n['close'])}、"
+                            f"RSI {f'{nrsi:.1f}' if nrsi is not None else '—'}{_rsi_zone(nrsi)}")
+        gpt_txt = ""
+        try:
+            from backend.services.ai_analyst import gpt_history_fallback
+            extra = gpt_history_fallback(question, name, range_txt)
+            if extra:
+                gpt_txt = f"\n\n{extra}"
+        except Exception:
+            pass
+        tail = ("" if gpt_txt else
+                "\n・（設定 GPT 金鑰後，範圍外的年代我還能依公開歷史常識做約略補充，並會明確標註非本站數據）")
+        ans = (f"你問的 **{asked_txt}** 超出我能「驗證」的範圍 🙇\n"
+               f"・{name} {tk} 可查區間：**{range_txt}**（日線，UTC）{near_txt}{tail}{gpt_txt}\n\n"
+               f"想擴充更早的歷史（Binance 最早約 2017 年起）可請管理者調整回補年數。")
+        return {"answer": ans, "intent": "history:out_of_range", "ctx": None, "coin_specific": True}
+
     if hq["type"] == "day":
         d = hq["date"].isoformat()
         rows = load_indicators(symbol, start=d, end=d)
         if not rows:
-            ans = (f"查不到 {name} {tk} 在 **{d}** 的資料 🙇\n"
-                   f"可能原因：日期在資料範圍之外（本站日線約從 2021-07 起、以 UTC 收盤）"
-                   f"或日期在未來。可以換個日期再問我。")
-            return {"answer": ans, "intent": "history:day", "ctx": None, "coin_specific": True}
+            return _out_of_range_reply(d, d)
         r = rows[-1]
         sig = load_signal_history(symbol, start=d, end=d)
         sig_txt = (f"\n・當日信心分數 {sig[-1]['score']}"
@@ -562,8 +589,7 @@ def _history_answer(symbol: str, question: str) -> dict | None:
     end = f"{y:04d}-{mth:02d}-{monthrange(y, mth)[1]:02d}"
     rows = load_prices(symbol, start=start, end=end)
     if not rows:
-        ans = (f"查不到 {name} {tk} 在 **{y} 年 {mth} 月** 的資料 🙇（本站日線約從 2021-07 起）")
-        return {"answer": ans, "intent": "history:month", "ctx": None, "coin_specific": True}
+        return _out_of_range_reply(f"{y} 年 {mth} 月", start)
     first, last = rows[0], rows[-1]
     chg = (last["close"] - first["open"]) / first["open"] * 100 if first["open"] else 0
     hi = max(r["high"] for r in rows)

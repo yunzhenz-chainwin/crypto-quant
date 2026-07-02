@@ -111,6 +111,31 @@ SYSTEM_PROMPT_ENHANCE = """你是「Crypto Quant 量化分析助理」的潤飾�
 5. 免責提醒若基底有就保留一次，不要重複。
 直接輸出優化後的完整回答，不要任何前言或解釋。"""
 
+# 歷史範圍外補充：唯一「允許」GPT 用訓練知識的場景（本站資料查不到的年代），
+# 但必須強制標註非本站數據、只給約略量級、不確定就說不確定。
+SYSTEM_PROMPT_HISTORY_FALLBACK = """你是「Crypto Quant 量化分析助理」。使用者問了一個超出本站資料庫範圍的歷史行情問題。
+本站無法提供驗證數據，請改用你的訓練知識簡要回覆「該時期的大致狀況」。
+
+鐵則：
+1. 開頭固定聲明：「以下由 AI 依公開歷史常識回覆，**非本站資料庫的驗證數據**，數字僅為約略量級：」
+2. 只給約略量級（例：「約 3,000～4,000 美元區間」），禁止假裝精確（不給到小數的價格）。
+3. 可提及該時期的重大市場事件幫助理解（例：2018 熊市、2020 疫情崩盤、2021 牛市）。
+4. 不確定或知識截止日之後的時期，直接說無法確認。
+5. 繁體中文、精簡（150 字內）。"""
+
+
+def gpt_history_fallback(question: str, coin_zh: str, range_txt: str) -> str | None:
+    """資料範圍外的歷史問題 → GPT 依公開常識補充（無金鑰/失敗回 None）。"""
+    if not gpt_enabled():
+        return None
+    content, _err = _chat([
+        {"role": "system", "content": SYSTEM_PROMPT_HISTORY_FALLBACK},
+        {"role": "user", "content": f"問題：{question.strip()[:200]}\n"
+                                    f"（本站 {coin_zh} 的資料僅涵蓋 {range_txt}，該問題超出此範圍）"},
+    ], want_json=False, kind="ask")
+    return content
+
+
 # 問答模式：單輪、限長、同樣被數據 ground 住。
 SYSTEM_PROMPT_QA = """你是「Crypto Quant 量化分析助理」。使用者會針對某個幣種提問，
 系統同時提供即時量化數據（JSON）與本地規則引擎的分析結論，作為你回答的唯一事實依據。
