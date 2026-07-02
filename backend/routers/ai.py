@@ -77,6 +77,12 @@ def post_ask(body: AskReq):
             log_ai_chat("MARKET", q, answer, "canned")
             return {**base, "answer": answer, "source": "canned", "intent": "閒聊:全站打招呼"}
 
+        # 歷史查詢沒講幣 → 反問哪顆幣（歷史數據一定是幣種專屬）
+        if canned_qa.has_history_query(q):
+            answer = canned_qa.ask_which_coin(q)
+            log_ai_chat("MARKET", q, answer, "canned")
+            return {**base, "answer": answer, "source": "canned", "intent": "全站:反問幣種"}
+
         # 行情建議 / 幣種知識類但沒講幣 → 反問哪顆幣，絕不擅自替使用者選
         if info and info["coin_specific"] and (info["kind"] == "knowledge"
                                                or info["category"] == "行情"):

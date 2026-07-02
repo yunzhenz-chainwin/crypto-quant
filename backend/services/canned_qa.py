@@ -210,6 +210,9 @@ QA_TEMPLATES = [
     ("平台", "新聞是從哪裡來的？是真的嗎？",
      "新聞來源｜新聞哪來｜新聞是真的嗎",
      "全部來自真實媒體的官方 RSS：CoinTelegraph、CoinDesk、Decrypt、The Block、CryptoSlate、Blockworks、Bitcoin Magazine、動區、鏈新聞＋Google News 中文聚合。\n\n系統**只搬運、不改寫、不創作**，每則都保留原始網址，點開即可對質原文；情緒標籤（看多/看空）是我們用審核過的詞庫做的自動判讀，屬於分析、不是新聞內容。"),
+    ("平台", "可以查以前（歷史）的數據嗎？",
+     "歷史數據｜查以前｜過去的數據｜歷史查詢｜以前的指標｜之前的價格｜歷史價格",
+     "可以！直接把「日期＋想看的東西」講給我聽就行：\n・**單日快照**：「{幣名} 6月15日的 RSI」「2026-06-01 收盤多少」「昨天的價格」「三天前的數據」\n・**月度回顧**：「{幣名} 上個月漲多少」「6 月表現如何」\n\n我會直接查資料庫的真實歷史（日線約從 2021 年 7 月起），回覆當日開高低收、RSI/MACD、均線與信心分數。\n\n也可以在蠟燭圖用「📅 自訂」選日期區間自己看圖。"),
     ("平台", "資料多久更新一次？",
      "多久更新｜資料更新頻率｜即時嗎",
      "・日線 K 棒：每天 09:00（台北時間）\n・時線（{時線清單}）：每小時第 6 分鐘\n・新聞與情緒：每 30 分鐘\n・恐懼貪婪指數：每天\n\n頁面每分鐘自動檢查新資料、有變化才更新畫面——**不用手動重整**。"),
@@ -437,6 +440,140 @@ def _knowledge_answer(symbol: str, intent: str) -> str | None:
             f"・近期熱度可看「市場情緒／新聞」面板的該幣新聞量" + tail)
 
 
+# ── 歷史數據查詢（「6月15日比特幣RSI多少」「上個月漲多少」直接查 DB 回答）──────
+_ZH_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7,
+           "八": 8, "九": 9, "十": 10}
+
+
+def _parse_history_query(question: str):
+    """
+    從問題解析歷史時間點/區間。回傳：
+      {"type": "day",   "date": date}                      單日快照
+      {"type": "month", "y": int, "m": int}                月度回顧
+      None                                                  沒有歷史語意
+    支援：YYYY-MM-DD、YYYY年M月D日、M月D日、昨天/前天/大前天、N天前、
+          上週（=7天前）、上個月、這個月、X月（今年，未到則視為去年）
+    """
+    import re as _re
+    from datetime import datetime, timezone, timedelta, date
+    q = question.replace(" ", "")
+    today = datetime.now(timezone.utc).date()
+
+    m = _re.search(r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})[日號]?", q)
+    if m:
+        try:
+            return {"type": "day", "date": date(int(m.group(1)), int(m.group(2)), int(m.group(3)))}
+        except ValueError:
+            return None
+    m = _re.search(r"(?<![\d.])(\d{1,2})月(\d{1,2})[日號]", q)
+    if m:
+        try:
+            d = date(today.year, int(m.group(1)), int(m.group(2)))
+            if d > today:
+                d = d.replace(year=today.year - 1)
+            return {"type": "day", "date": d}
+        except ValueError:
+            return None
+    if "大前天" in q:
+        return {"type": "day", "date": today - timedelta(days=3)}
+    if "前天" in q:
+        return {"type": "day", "date": today - timedelta(days=2)}
+    if "昨天" in q or "昨日" in q:
+        return {"type": "day", "date": today - timedelta(days=1)}
+    m = _re.search(r"([一二三四五六七八九十]|\d+)天前", q)
+    if m:
+        n = _ZH_NUM.get(m.group(1)) or int(m.group(1))
+        return {"type": "day", "date": today - timedelta(days=n)}
+    if "上週" in q or "上周" in q or "上禮拜" in q:
+        return {"type": "day", "date": today - timedelta(days=7), "approx": "上週約此時（7 天前）"}
+    if "上個月" in q or "上月" in q:
+        y, mth = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+        return {"type": "month", "y": y, "m": mth}
+    if "這個月" in q or "本月" in q:
+        return {"type": "month", "y": today.year, "m": today.month}
+    m = _re.search(r"(?<![\d.月])(\d{1,2})月(?![\d日號])", q)
+    if m and ("漲" in q or "跌" in q or "表現" in q or "回顧" in q or "行情" in q
+              or "怎麼樣" in q or "怎樣" in q or "如何" in q or "rsi" in q.lower()
+              or "價" in q or "數據" in q or "指標" in q):
+        mth = int(m.group(1))
+        if 1 <= mth <= 12:
+            y = today.year if mth <= today.month else today.year - 1
+            return {"type": "month", "y": y, "m": mth}
+    return None
+
+
+def has_history_query(question: str) -> bool:
+    """問題是否含歷史時間語意（全站模式下需先反問幣種）。"""
+    return _parse_history_query(question) is not None
+
+
+def _rsi_zone(v):
+    if v is None:
+        return ""
+    return ("（跌深超賣）" if v < 30 else "（偏弱）" if v < 45 else "（中性）" if v <= 55
+            else "（偏強）" if v <= 70 else "（漲多超買）")
+
+
+def _history_answer(symbol: str, question: str) -> dict | None:
+    """歷史查詢：直接查資料庫的真實數據組答案（零幻覺）。查無資料時誠實說。"""
+    hq = _parse_history_query(question)
+    if not hq:
+        return None
+    from backend.services.reader import load_indicators, load_prices, load_signal_history
+    from backend.services.app_db import get_coins
+    name = next((c.get("zh") or symbol for c in get_coins() if c["symbol"] == symbol), symbol)
+    tk = symbol.replace("USDT", "")
+
+    def fp(v):  # 價位自適應
+        return "—" if v is None else (f"{v:,.4f}" if v < 1 else f"{v:,.2f}")
+
+    if hq["type"] == "day":
+        d = hq["date"].isoformat()
+        rows = load_indicators(symbol, start=d, end=d)
+        if not rows:
+            ans = (f"查不到 {name} {tk} 在 **{d}** 的資料 🙇\n"
+                   f"可能原因：日期在資料範圍之外（本站日線約從 2021-07 起、以 UTC 收盤）"
+                   f"或日期在未來。可以換個日期再問我。")
+            return {"answer": ans, "intent": "history:day", "ctx": None, "coin_specific": True}
+        r = rows[-1]
+        sig = load_signal_history(symbol, start=d, end=d)
+        sig_txt = (f"\n・當日信心分數 {sig[-1]['score']}"
+                   f"（{ {'BULL':'偏多','BEAR':'偏空','NEUTRAL':'中立'}.get(sig[-1]['signal'], '—') }）"
+                   if sig else "")
+        approx = f"（{hq['approx']}）" if hq.get("approx") else ""
+        rsi = r.get("RSI")
+        hist = r.get("HIST")
+        ans = (f"📅 **{d} {name} {tk}**（日線收盤，UTC）{approx}\n"
+               f"・收盤 ${fp(r['close'])}（開 ${fp(r['open'])}／高 ${fp(r['high'])}／低 ${fp(r['low'])}）\n"
+               f"・RSI {f'{rsi:.1f}' if rsi is not None else '—'}{_rsi_zone(rsi)}"
+               f"｜MACD 柱 {f'{hist:+.4f}' if hist is not None else '—'}\n"
+               f"・MA20 ${fp(r.get('MA20'))}／MA60 ${fp(r.get('MA60'))}／MA200 ${fp(r.get('MA200'))}"
+               f"{sig_txt}\n\n想對照現在 → 問「{name}現在如何？」")
+        return {"answer": ans, "intent": "history:day", "ctx": None, "coin_specific": True}
+
+    # month：月度回顧
+    y, mth = hq["y"], hq["m"]
+    from calendar import monthrange
+    start = f"{y:04d}-{mth:02d}-01"
+    end = f"{y:04d}-{mth:02d}-{monthrange(y, mth)[1]:02d}"
+    rows = load_prices(symbol, start=start, end=end)
+    if not rows:
+        ans = (f"查不到 {name} {tk} 在 **{y} 年 {mth} 月** 的資料 🙇（本站日線約從 2021-07 起）")
+        return {"answer": ans, "intent": "history:month", "ctx": None, "coin_specific": True}
+    first, last = rows[0], rows[-1]
+    chg = (last["close"] - first["open"]) / first["open"] * 100 if first["open"] else 0
+    hi = max(r["high"] for r in rows)
+    lo = min(r["low"] for r in rows)
+    ind = load_indicators(symbol, start=end, end=end) or load_indicators(symbol, start=last["date"], end=last["date"])
+    rsi = ind[-1].get("RSI") if ind else None
+    ans = (f"📅 **{y} 年 {mth} 月 {name} {tk} 月度回顧**（日線，UTC）\n"
+           f"・月初開盤 ${fp(first['open'])} → 月末收盤 ${fp(last['close'])}（**{chg:+.1f}%**）\n"
+           f"・當月最高 ${fp(hi)}／最低 ${fp(lo)}（振幅 {((hi - lo) / lo * 100) if lo else 0:.1f}%）\n"
+           f"・月末 RSI {f'{rsi:.1f}' if rsi is not None else '—'}{_rsi_zone(rsi)}\n"
+           f"・資料涵蓋 {len(rows)} 個交易日（{first['date']} ~ {last['date']}）")
+    return {"answer": ans, "intent": "history:month", "ctx": None, "coin_specific": True}
+
+
 # ── 對外入口 ─────────────────────────────────────────────────────────────────
 # 模板中「幣種專屬」的變數：全市場模式下若答案用到這些，要註明「以比特幣為例」
 _COIN_VARS = ("{幣名}", "{代號}", "{價格}", "{立場}", "{分數}", "{RSI}", "{MA20}",
@@ -494,6 +631,12 @@ def try_answer(symbol: str, question: str) -> dict | None:
     固定問答入口。命中 → {answer(豐富固定答案), intent, ctx, coin_specific}；
     沒命中 → None。ctx 供 GPT 優化層引用（佐證數據），不外洩給前端。
     """
+    # 歷史查詢優先：「6月15日RSI多少」「上個月漲多少」→ 直接查 DB 的真實歷史數據
+    # （必須先於一般比對：這類問題常含「漲多少」等關鍵詞，會被「近期表現」搶走）
+    hist = _history_answer(symbol, question)
+    if hist:
+        return hist
+
     hit = _match(question)
     if not hit:
         return None
