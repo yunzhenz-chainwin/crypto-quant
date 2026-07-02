@@ -381,11 +381,8 @@ export default function App() {
         </div>
       )}
 
-      {/* ── 全站漂浮 AI 小幫手「小Q」（右下角，兩個模式都在）──────────── */}
-      <BotWidget
-        symbols={symbols}
-        defaultSymbol={view === 'detail' ? active : 'BTCUSDT'}
-      />
+      {/* ── 全站漂浮 AI 小幫手「小Q」（右下角，兩個模式都在；免選幣）──── */}
+      <BotWidget defaultSymbol={view === 'detail' ? active : 'BTCUSDT'} />
 
     </div>
   )

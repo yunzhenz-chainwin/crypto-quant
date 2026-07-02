@@ -99,6 +99,18 @@ SYSTEM_PROMPT_ANALYSIS = """你是「Crypto Quant 量化分析助理」，一位
   "disagree_reason": "若與規則引擎立場不同才填原因，否則空字串"
 }"""
 
+# 優化模式：固定答案為底稿，GPT 只做潤飾與補充（不得推翻）。
+SYSTEM_PROMPT_ENHANCE = """你是「Crypto Quant 量化分析助理」的潤飾引擎。
+系統已依審核過的模板產出一份「基底答案」（含即時數據），你的任務是把它變得更好讀、更貼合使用者的問法。
+
+## 鐵則（違反任何一條即為失敗）
+1. 基底答案中的所有數字、價位、立場結論**必須原封保留**，不得修改、刪除或反轉。
+2. 不得新增基底答案與數據中沒有的數字或事實；可以補充「怎麼理解、怎麼運用」的白話說明。
+3. 針對使用者的實際問法調整開頭與語氣（他問得口語，你就答得口語），去掉與問題無關的段落。
+4. 保持繁體中文、markdown 格式，長度與基底相近或更精簡（不要灌水）。
+5. 免責提醒若基底有就保留一次，不要重複。
+直接輸出優化後的完整回答，不要任何前言或解釋。"""
+
 # 問答模式：單輪、限長、同樣被數據 ground 住。
 SYSTEM_PROMPT_QA = """你是「Crypto Quant 量化分析助理」。使用者會針對某個幣種提問，
 系統同時提供即時量化數據（JSON）與本地規則引擎的分析結論，作為你回答的唯一事實依據。
@@ -127,6 +139,161 @@ def _coin_zh(symbol: str) -> str:
         if c["symbol"] == symbol:
             return c.get("zh") or symbol
     return symbol
+
+
+# 常見中文別名（設定檔 zh 之外的口語說法＋常見錯字；偵測用）
+_ZH_ALIASES = {
+    "BTC": ["比特币", "比特", "大餅"], "ETH": ["以太幣", "以太", "乙太", "已太", "依太"],
+    "SOL": ["索拉纳"], "DOGE": ["狗狗"], "ADA": ["艾達"], "XRP": ["瑞波"],
+    "LTC": ["萊特"], "DOT": ["波卡"], "AVAX": ["雪崩"], "ATOM": ["宇宙幣"],
+}
+
+# 這些 ticker 同時是常見英文單字（near/link/dot/atom/uni/pol），
+# 必須「大寫出現」或用全名（chainlink、polkadot…）才算數，避免把
+# 「is it near the bottom?」誤判成 NEAR 幣。
+_AMBIGUOUS_TICKERS = {"NEAR", "LINK", "DOT", "ATOM", "UNI", "POL"}
+
+
+def _coin_names_for_fuzzy() -> list[tuple[str, str]]:
+    """[(3 字以上的中文名, symbol)]，給錯字容忍比對用。"""
+    out = []
+    for c in get_coins():
+        if not c.get("enabled", True):
+            continue
+        tk = (c.get("ticker") or c["symbol"].replace("USDT", "")).upper()
+        names = ([c["zh"]] if c.get("zh") and not str(c["zh"]).isascii() else [])
+        names += [a for a in _ZH_ALIASES.get(tk, []) if not a.isascii()]
+        for n in names:
+            if len(n) >= 3:
+                out.append((n, c["symbol"]))
+    return out
+
+
+def detect_symbol(question: str) -> tuple[str | None, bool]:
+    """
+    從問題文字偵測講的是哪顆幣，回傳 (symbol, 是否為錯字猜測)。
+    聊天室「免選幣」的核心：提到「以太幣」「BTC」「solana」就自動切換。
+
+    三段式：
+      1. 精確比對：中文名/別名/ticker/英文名（取最早出現者）
+      2. 錯字容忍：與已知中文名（≥3 字）同長度、恰好差 1 個字 → 視為猜測
+         （例：「已太幣」→ 以太幣；guessed=True，回答時要明講「你說的應該是…」）
+      3. 都沒有 → (None, False)，呼叫端沿用聊天室目前的幣
+    """
+    q = question or ""
+    ql = q.lower()
+    best = None                                # (出現位置, symbol)
+    from backend.routers.sentiment import COIN_EN_NAMES
+    for c in get_coins():
+        if not c.get("enabled", True):
+            continue
+        sym = c["symbol"]
+        tk = (c.get("ticker") or sym.replace("USDT", "")).upper()
+        positions = []
+        # 中文名 + 別名：子字串
+        zh_names = ([c["zh"]] if c.get("zh") and not str(c["zh"]).isascii() else [])
+        for name in zh_names + [a for a in _ZH_ALIASES.get(tk, []) if not a.isascii()]:
+            i = q.find(name)
+            if i >= 0:
+                positions.append(i)
+        # ticker：歧義字（near/link…）要求原文大寫；其餘小寫也可。前後不得為英數。
+        if tk in _AMBIGUOUS_TICKERS:
+            m = re.search(rf"(?<![A-Za-z0-9]){tk}(?![A-Za-z0-9])", q)
+        else:
+            m = re.search(rf"(?<![a-z0-9]){tk.lower()}(?![a-z0-9])", ql)
+        if m:
+            positions.append(m.start())
+        # 英文全名（bitcoin、chainlink…）
+        for name in COIN_EN_NAMES.get(tk, []):
+            m = re.search(rf"(?<![a-z0-9]){re.escape(name)}(?![a-z0-9])", ql)
+            if m:
+                positions.append(m.start())
+        if positions:
+            pos = min(positions)
+            if best is None or pos < best[0]:
+                best = (pos, sym)
+    if best:
+        return best[1], False
+
+    # 錯字容忍：滑動視窗逐一比對已知中文名（同長、差 1 字）
+    for name, sym in _coin_names_for_fuzzy():
+        L = len(name)
+        for i in range(len(q) - L + 1):
+            win = q[i:i + L]
+            if sum(1 for a, b in zip(win, name) if a != b) == 1:
+                return sym, True
+    return None, False
+
+
+# 「X幣」的泛稱與法幣（不是在講特定加密幣種），不觸發「不支援」回覆
+_GENERIC_BI = ["貨幣", "穩定幣", "加密幣", "山寨幣", "迷因幣", "主流幣", "台幣",
+               "代幣", "平台幣", "數位幣", "買幣", "賣幣", "換幣", "什麼幣",
+               "哪些幣", "些幣", "的幣", "個幣", "顆幣", "隻幣", "支幣", "檔幣",
+               "這幣", "那幣", "此幣", "日幣", "韓幣", "港幣", "外幣", "法幣",
+               "紙幣", "硬幣", "金幣", "銀幣", "美幣"]
+# 問題中常見、不是幣種代號的大寫縮寫
+_KNOWN_UPPER = {"RSI", "MACD", "KDJ", "DMI", "ADX", "BIAS", "MA", "EMA", "SMA",
+                "BB", "ETF", "AI", "GPT", "API", "USD", "USDT", "TWD", "OK",
+                "ATH", "MDD", "DCA", "FOMO", "APP", "ID", "URL", "QA", "PK",
+                "NFT", "DEFI", "DAO", "SEC", "FED", "CPI", "FOMC", "CEO", "CTO",
+                "TVL", "APY", "APR", "KOL", "GM", "PC", "TV",
+                "ATR", "OBV", "VWAP", "MVRV", "OI", "CCI", "SAR"}
+
+_qa_upper_cache: set | None = None
+
+
+def _qa_upper_whitelist() -> set:
+    """從固定問答庫的觸發關鍵詞自動蒐集大寫縮寫（ATR、OBV…），
+    之後在問答庫新增含縮寫的條目時，這裡自動放行、不會被誤判成「不支援的幣」。"""
+    global _qa_upper_cache
+    if _qa_upper_cache is None:
+        toks = set()
+        try:
+            from backend.services.canned_qa import QA_TEMPLATES, KNOWLEDGE_INTENTS
+            for _, _, kws, _ in QA_TEMPLATES:
+                for m in re.finditer(r"[A-Za-z]{2,6}", kws):
+                    toks.add(m.group(0).upper())
+            for _, kws in KNOWLEDGE_INTENTS:
+                for k in kws:
+                    for m in re.finditer(r"[A-Za-z]{2,6}", k):
+                        toks.add(m.group(0).upper())
+        except Exception:
+            pass
+        _qa_upper_cache = toks
+    return _qa_upper_cache
+
+
+def find_unknown_coin(question: str) -> str | None:
+    """
+    偵測「看起來在問某顆幣、但我們沒追蹤」的詞（例：PEPE、殼殼幣）。
+    有找到就回傳該詞，呼叫端應誠實回覆「沒有這顆幣的資料」，
+    而不是默默用別的幣回答（答非所問比不回答更糟）。
+    """
+    q = question or ""
+    tickers = {(c.get("ticker") or c["symbol"].replace("USDT", "")).upper()
+               for c in get_coins()}
+    # 「X幣」樣式（中文）；幣後面接圈/價/市/種/安…是「幣圈、幣價、幣安」這類詞，不算
+    for m in re.finditer(r"([一-鿿A-Za-z0-9]{1,4}幣)(?![圈價值市种種安別商])", q):
+        word = m.group(1)
+        if any(g in word for g in _GENERIC_BI):
+            continue
+        return word
+    # 大寫 ticker 樣式（英文）；問答庫關鍵詞裡出現過的縮寫（ATR/OBV…）自動放行
+    for m in re.finditer(r"(?<![A-Za-z])([A-Z]{2,6})(?![A-Za-z])", q):
+        t = m.group(1)
+        if t not in tickers and t not in _KNOWN_UPPER and t not in _qa_upper_whitelist():
+            return t
+    return None
+
+
+def unsupported_coin_reply(word: str) -> str:
+    """不支援幣種的誠實回覆（附目前支援清單）。"""
+    coins = [c for c in get_coins() if c.get("enabled", True)]
+    lst = "、".join(f'{c.get("zh", "")} {(c.get("ticker") or c["symbol"].replace("USDT", ""))}'
+                    for c in coins)
+    return (f"抱歉，我目前**沒有追蹤「{word}」**的資料，不能亂給你分析 🙇\n\n"
+            f"我支援的 {len(coins)} 檔：{lst}。\n"
+            f"直接講幣名就能切換（例：「以太幣現在如何？」）；想追蹤新幣可請管理者到後台新增。")
 
 
 def build_context(symbol: str) -> dict:
@@ -180,6 +347,16 @@ def build_context(symbol: str) -> dict:
                 "above_ma20": (hl.get("close") or 0) > (hl.get("MA20") or float("inf")),
                 "ma20": hl.get("MA20"), "ma60": hl.get("MA60"),
             }
+
+    # 幣種知識檔案（給 GPT 的背景知識：這顆幣是什麼、供應機制、風險），
+    # 讓 GPT 回答自由問題時有正確的既定事實可引用，減少幻覺。
+    try:
+        from backend.services.coin_facts import get_facts
+        facts = get_facts(symbol)
+        if facts:
+            ctx["coin_facts"] = facts
+    except Exception:
+        pass
 
     # 恐懼貪婪指數（全市場情緒）；label 轉中文
     _FG_ZH = {"Extreme Fear": "極度恐慌", "Fear": "恐慌", "Neutral": "中性",
@@ -416,6 +593,37 @@ def gpt_analysis(ctx: dict, local: dict) -> tuple[dict | None, str | None]:
     return data, None
 
 
+_enhance_cache: dict = {}      # {(intent, symbol, data_version, model): {"ts":…, "answer":…}}
+
+
+def enhance_answer(question: str, base_answer: str, intent: str, symbol: str,
+                   ctx: dict | None = None) -> str | None:
+    """
+    GPT 優化固定答案（豐富固定答案是骨幹，GPT 只做潤飾補充）。
+    成功回優化版文字；GPT 不可用/失敗/超限回 None（呼叫端直接用固定答案，永不失敗）。
+    同一（意圖×幣×資料版本）快取 15 分鐘控成本。
+    """
+    if not gpt_enabled():
+        return None
+    ver = data_versions()
+    key = (intent, symbol, ver.get("1d"), ver.get("1h"), gpt_config()["model"])
+    hit = _enhance_cache.get(key)
+    if hit and time.time() - hit["ts"] < CACHE_TTL:
+        return hit["answer"]
+
+    payload = {"使用者問題": question.strip()[:300], "基底答案": base_answer}
+    if ctx:
+        payload["佐證數據"] = ctx
+    content, err = _chat([
+        {"role": "system", "content": SYSTEM_PROMPT_ENHANCE},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)},
+    ], want_json=False, kind="enhance")
+    if not content:
+        return None
+    _enhance_cache[key] = {"ts": time.time(), "answer": content}
+    return content
+
+
 def ask(symbol: str, question: str, history: list | None = None) -> dict:
     """
     問答模式：使用者針對幣種提問。GPT 可用時由 GPT 回答（以數據 + 本地分析 ground），
@@ -451,7 +659,7 @@ def ask(symbol: str, question: str, history: list | None = None) -> dict:
                     "stance": local["stance"]}
         fallback_note = f"（GPT 暫時無法使用：{err}，以下為規則引擎摘要）\n\n"
     else:
-        fallback_note = "（尚未設定 GPT API 金鑰，以下為規則引擎摘要；到後台「AI 設定」補上金鑰即可啟用智慧問答）\n\n"
+        fallback_note = "（規則引擎回答；設定 GPT 金鑰後會更聰明）\n\n"
 
     # 降級：用本地分析組一段回答
     lines = [fallback_note + f"**{local['headline']}**", ""]

@@ -104,12 +104,14 @@ export const fetchAIAnalysis = (symbol, { gpt = true, force = false } = {}) =>
   get(`/ai/analysis/${symbol}?gpt=${gpt ? 1 : 0}${force ? '&force=1' : ''}`)
 
 // 針對幣種提問（GPT 沒設定金鑰時後端會降級為規則引擎摘要）
+// 免選幣：後端會從問題文字自動偵測幣種（「以太幣如何？」→ ETH）；
+// contextSymbol = 聊天室目前的幣（問題沒提到幣時沿用）。回應含實際回答的 symbol。
 // history：最近幾輪對話 [{q, a}]，讓 GPT 能接住「那如果跌破呢？」這類追問
-export const askAI = (symbol, question, history = []) =>
+export const askAI = (contextSymbol, question, history = []) =>
   fetch('/api/ai/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ symbol, question, history: history.slice(-3) }),
+    body: JSON.stringify({ context_symbol: contextSymbol, question, history: history.slice(-3) }),
   }).then(async r => {
     if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.detail || `API 回應 ${r.status}`)
     return r.json()

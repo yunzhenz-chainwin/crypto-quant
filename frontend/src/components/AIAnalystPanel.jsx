@@ -94,7 +94,8 @@ export default function AIAnalystPanel({ symbol, refreshKey }) {
     setChat(c => [...c, { q: text, a: null }])
     try {
       const r = await askAI(symbol, text, history)
-      setChat(c => c.map(m => (m.q === text && m.a === null) ? { ...m, a: r.answer, source: r.source } : m))
+      setChat(c => c.map(m => (m.q === text && m.a === null)
+        ? { ...m, a: r.answer, source: r.source, coin: r.name_zh } : m))
     } catch (e) {
       setChat(c => c.map(m => (m.q === text && m.a === null) ? { ...m, a: '回答失敗：' + e.message, source: 'error' } : m))
     } finally {
@@ -115,7 +116,7 @@ export default function AIAnalystPanel({ symbol, refreshKey }) {
     <div className="ai-panel">
       {/* 標題列：小Q + 立場 + 一致性 + 重新分析 */}
       <div className="ai-head">
-        <BotMascot mood={mascotMood} size={56} className="ai-mascot" />
+        <BotMascot mood={mascotMood} size={72} className="ai-mascot" />
         <span className="ai-title">AI 智能分析</span>
         {local && <StanceChip stance={local.stance} label="規則引擎" />}
         {gpt && <StanceChip stance={gpt.stance} label={`GPT`} />}
@@ -214,8 +215,10 @@ export default function AIAnalystPanel({ symbol, refreshKey }) {
                 <div className="ai-chat-q">🙋 {m.q}</div>
                 <div className="ai-chat-a">
                   {m.a === null ? <span className="ai-loading">思考中…</span> : <Md text={m.a} />}
-                  {m.source === 'gpt' && <span className="ai-chat-src">by GPT</span>}
-                  {m.source === 'local' && <span className="ai-chat-src">by 規則引擎</span>}
+                  {m.source === 'gpt' && <span className="ai-chat-src">{m.coin ? `${m.coin} · ` : ''}by GPT</span>}
+                  {m.source === 'canned+gpt' && <span className="ai-chat-src">{m.coin ? `${m.coin} · ` : ''}by 小Q 固定答案 × GPT 優化</span>}
+                  {(m.source === 'canned' || m.source === 'knowledge') && <span className="ai-chat-src">{m.coin ? `${m.coin} · ` : ''}by 小Q 固定答案</span>}
+                  {m.source === 'local' && <span className="ai-chat-src">{m.coin ? `${m.coin} · ` : ''}by 規則引擎</span>}
                 </div>
               </div>
             ))}
