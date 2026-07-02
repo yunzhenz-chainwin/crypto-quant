@@ -25,6 +25,7 @@ import MarketOverview   from './components/MarketOverview'
 import MarketSummary    from './components/MarketSummary'
 import AIAnalystPanel   from './components/AIAnalystPanel'
 import BotWidget        from './components/BotWidget'
+import OnboardingTour   from './components/OnboardingTour'
 import { coinName }     from './constants/coins'
 
 // 日線的區間預設（單位：天）
@@ -79,6 +80,9 @@ export default function App() {
   const [showSentiment,   setShowSentiment]   = useState(false)
   const [showBacktest,    setShowBacktest]    = useState(false)
   const [showAI,          setShowAI]          = useState(true)
+  // 首次造訪自動開新手導覽；Header「❓ 導覽」可重看
+  const [showTour, setShowTour] = useState(() => !localStorage.getItem('cq_tour_done'))
+  const [apiError, setApiError] = useState(false)   // API 失敗橫幅（輕量版 #22）
   const versionRef = useRef('')
 
   // 這顆幣有沒有時線資料（目前只開 BTC/ETH）
@@ -95,7 +99,10 @@ export default function App() {
       setSignals(sigs)
       setFearGreed(fg?.[0] ?? null)
       setLastUpdated(Date.now())
-    } catch (_) {}
+      setApiError(false)
+    } catch (_) {
+      setApiError(true)      // 顯示錯誤橫幅（取代永遠的「載入中…」）
+    }
     if (showSpinner) setRefreshing(false)
   }, [])
 
@@ -113,7 +120,10 @@ export default function App() {
         fetchIndicators(active, opts),
       ])
       setOhlc(p); setIndicators(ind)
-    } catch (_) {}
+      setApiError(false)
+    } catch (_) {
+      setApiError(true)
+    }
   }, [active, interval, days, hourDays, startDate, endDate, dateMode])
 
   // 頁面載入：初始化所有資料
@@ -204,9 +214,25 @@ export default function App() {
           >
             市場總覽
           </button>
+          <button className="nav-btn" onClick={() => setShowTour(true)} title="重看新手導覽">
+            ❓ 導覽
+          </button>
         </nav>
         <StatusBar />
       </header>
+
+      {/* ── 新手導覽（首次造訪自動開啟）─────────────────────────────────── */}
+      {showTour && <OnboardingTour onClose={() => setShowTour(false)} />}
+
+      {/* ── API 失敗橫幅（取代永遠的「載入中…」）───────────────────────── */}
+      {apiError && (
+        <div className="api-error-banner">
+          ⚠️ 資料載入失敗（網路或伺服器暫時無回應）
+          <button onClick={() => { refreshMarket(true); if (view === 'detail') loadDetail(true) }}>
+            重試
+          </button>
+        </div>
+      )}
 
       {/* ── 市場摘要列（兩個模式都顯示）────────────────────────────────── */}
       <MarketSummary

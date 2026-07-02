@@ -457,9 +457,11 @@ def ai_usage_stats(_: str = Depends(require_admin)):
 
 # ── 指標交叉驗證(用獨立演算法逐點比對,確認指標計算正確)─────────────────────
 @router.get("/admin/verify/indicators")
-def verify_indicators(_: str = Depends(require_admin)):
+def verify_indicators(interval: str = "1d", _: str = Depends(require_admin)):
     from src.verify_indicators import cached_result
-    return cached_result()              # 與前台 /status 共用同一份快取
+    if interval not in ("1d", "1h"):
+        raise HTTPException(status_code=400, detail="interval 僅支援 1d/1h")
+    return cached_result(interval)      # 1d 與前台 /status 共用同一份快取
 
 
 # ── 訊號預測力(成績單,即時看現行訊號有沒有 forward edge)──────────────────────

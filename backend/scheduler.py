@@ -10,7 +10,7 @@ scheduler.py — 背景排程任務
 """
 import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.routers.sentiment import _fetch_and_save
@@ -87,13 +87,14 @@ def run_pipeline():
                   [PYTHON, str(ROOT / "src" / "fetch_binance.py"), *symbols], env)
 
         # 2) indicators.py 需要幣種代號作為參數，每個幣種各跑一次
+        #    --no-plot：PNG 圖沒有任何消費者（前端自繪圖表），只出 CSV 供入庫
         for sym in symbols:
             _run_step(f"indicators[{sym}]",
-                      [PYTHON, str(ROOT / "src" / "indicators.py"), sym], env)
+                      [PYTHON, str(ROOT / "src" / "indicators.py"), sym, "--no-plot"], env)
 
-        # 3) 重算相關性矩陣（同樣傳入幣種清單）
-        _run_step("correlation",
-                  [PYTHON, str(ROOT / "src" / "correlation.py"), *symbols], env)
+        # （原步驟 3「correlation.py 重算相關性」已移除：它只產出 PNG 熱圖，
+        #   而前台 /api/correlation 是由 reader.load_correlation() 直接讀 DB 計算，
+        #   PNG 無人使用。腳本保留於 src/ 供手動分析。）
 
         # 4) 同步進資料庫：K線/指標 + 重算每日訊號歷史
         ing = ingest_market_data()
@@ -126,6 +127,21 @@ def run_pipeline():
             cleanup_ai()
         except Exception as e:
             print(f"[scheduler] ai cleanup skip: {e}")
+
+        # 9) data/raw 原始 JSON 保留 7 天（時線每小時抓取會持續累積，非關鍵）
+        try:
+            import re as _re
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y%m%d")
+            removed = 0
+            for f in (ROOT / "data" / "raw").glob("*.json"):
+                m = _re.search(r"_(\d{8})\.json$", f.name)
+                if m and m.group(1) < cutoff:
+                    f.unlink()
+                    removed += 1
+            if removed:
+                print(f"[scheduler] raw cleanup: {removed} files removed")
+        except Exception as e:
+            print(f"[scheduler] raw cleanup skip: {e}")
 
         finish_job(job_id, "success",
                    f"{len(symbols)} 幣種 · 入庫 {ing['prices']} 筆 · 訊號 {sig} 筆 · 最新 {date_max}")

@@ -474,7 +474,7 @@ def fetch_and_ingest_symbol(symbol: str) -> dict:
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     for name, args in (
         ("fetch_binance", [_PYTHON, str(_ROOT_DIR / "src" / "fetch_binance.py"), symbol]),
-        ("indicators",    [_PYTHON, str(_ROOT_DIR / "src" / "indicators.py"), symbol]),
+        ("indicators",    [_PYTHON, str(_ROOT_DIR / "src" / "indicators.py"), symbol, "--no-plot"]),
     ):
         proc = subprocess.run(args, env=env, capture_output=True,
                               text=True, encoding="utf-8", errors="replace")

@@ -18,7 +18,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 CLEAN = ROOT / "data" / "clean"
 REP = ROOT / "reports"
-INTERVAL = "1d"
+INTERVAL = "1d"          # 預設週期(前台徽章用);函式皆可傳 interval 驗證 1h
 SKIP = 250
 
 
@@ -78,22 +78,22 @@ def _cmp(ours, indep, absol=None, rel=1e-3):
     return md <= rel * scale, md
 
 
-def _symbols():
-    return sorted(p.stem.replace(f"_{INTERVAL}", "") for p in CLEAN.glob(f"*_{INTERVAL}.csv"))
+def _symbols(interval=INTERVAL):
+    return sorted(p.stem.replace(f"_{interval}", "") for p in CLEAN.glob(f"*_{interval}.csv"))
 
 
-def indicators_version() -> float:
+def indicators_version(interval=INTERVAL) -> float:
     """所有指標檔的最新 mtime,給後台做快取鍵用(資料更新後驗證會重跑)。"""
-    return max((p.stat().st_mtime for p in REP.glob(f"indicators_*_{INTERVAL}.csv")),
+    return max((p.stat().st_mtime for p in REP.glob(f"indicators_*_{interval}.csv")),
                default=0.0)
 
 
-def cross_check_indicators(symbols=None) -> dict:
-    symbols = symbols or _symbols()
+def cross_check_indicators(symbols=None, interval=INTERVAL) -> dict:
+    symbols = symbols or _symbols(interval)
     coins = []
     for sym in symbols:
-        clean_p = CLEAN / f"{sym}_{INTERVAL}.csv"
-        rep_p = REP / f"indicators_{sym}_{INTERVAL}.csv"
+        clean_p = CLEAN / f"{sym}_{interval}.csv"
+        rep_p = REP / f"indicators_{sym}_{interval}.csv"
         if not (clean_p.exists() and rep_p.exists()):
             coins.append({"symbol": sym, "ok": False, "error": "缺少資料檔"})
             continue
@@ -128,24 +128,27 @@ def cross_check_indicators(symbols=None) -> dict:
 
     passed = sum(1 for c in coins if c.get("ok"))
     return {"ok": passed == len(coins), "total": len(coins),
-            "passed": passed, "coins": coins}
+            "passed": passed, "coins": coins, "interval": interval}
 
 
 _RESULT_CACHE: dict = {}
 
 
-def cached_result() -> dict:
+def cached_result(interval: str = INTERVAL) -> dict:
     """有快取的交叉驗證結果(快取鍵=指標檔版本,資料更新後自動重算)。
-    供後台 API 與前台公開摘要共用,避免每次請求都重算。"""
-    v = indicators_version()
-    if _RESULT_CACHE.get("ver") != v:
-        _RESULT_CACHE["ver"] = v
-        _RESULT_CACHE["data"] = cross_check_indicators()
-    return _RESULT_CACHE["data"]
+    供後台 API 與前台公開摘要共用,避免每次請求都重算。interval 可傳 "1h"。"""
+    v = indicators_version(interval)
+    slot = _RESULT_CACHE.setdefault(interval, {})
+    if slot.get("ver") != v:
+        slot["ver"] = v
+        slot["data"] = cross_check_indicators(interval=interval)
+    return slot["data"]
 
 
 def main():
-    r = cross_check_indicators()
+    import sys
+    interval = sys.argv[1] if len(sys.argv) > 1 else INTERVAL
+    r = cross_check_indicators(interval=interval)
     print(f"\n指標交叉驗證(用獨立演算法逐點比對)")
     print(f"{'幣種':<9} 結果   最大誤差 RSI / MACD / MA200 / BB")
     for c in r["coins"]:
