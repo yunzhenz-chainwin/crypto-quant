@@ -13,7 +13,6 @@ import {
   fetchTasks, createTask, updateTask, deleteTask, ingestMarket,
   fetchDbTables, fetchDbTable, fetchVerifyIndicators, fetchSignalScorecard, fetchStrategy,
   fetchCoins, addCoin, updateCoin, deleteCoin,
-  fetchAIConfig, saveAIConfig, testAIConfig, fetchAIStats,
 } from '../api/admin'
 import {
   ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, ReferenceLine, Tooltip, LabelList,
@@ -114,8 +113,6 @@ function AdminHeader({ tab, setTab, onLogout }) {
                 onClick={() => setTab('db')}>資料庫</button>
         <button className={`admin-tab ${tab === 'status' ? 'active' : ''}`}
                 onClick={() => setTab('status')}>現況</button>
-        <button className={`admin-tab ${tab === 'ai' ? 'active' : ''}`}
-                onClick={() => setTab('ai')}>AI 設定</button>
         <button className="admin-tab" disabled title="P3">分析（即將推出）</button>
       </div>
       <div className="admin-header-right">
@@ -329,8 +326,8 @@ function Dashboard({ onLogout }) {
             ].map(([name, how, what], i) => (
               <tr key={i}>
                 <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{name}</td>
-                <td style={{ color: '#cbd5e1' }}>{how}</td>
-                <td style={{ color: '#94a3b8' }}>{what}</td>
+                <td className="wrap" style={{ color: '#cbd5e1' }}>{how}</td>
+                <td className="wrap" style={{ color: '#94a3b8' }}>{what}</td>
               </tr>
             ))}
           </tbody>
@@ -359,7 +356,7 @@ function Dashboard({ onLogout }) {
                 <td><JobBadge status={j.status} /></td>
                 <td>{j.started_at}</td>
                 <td>{j.finished_at ?? '—'}</td>
-                <td style={{ color: '#94a3b8' }}>{j.message ?? ''}</td>
+                <td className="wrap" style={{ color: '#94a3b8', minWidth: 160 }}>{j.message ?? ''}</td>
               </tr>
             ))}
           </tbody>
@@ -680,7 +677,7 @@ function TasksPage({ onLogout }) {
                     </select>
                   </td>
                   <td>{t.phase || '—'}</td>
-                  <td>
+                  <td className="task-item-cell">
                     <button className="task-title-link" onClick={() => setEditing(t)}
                             title="點擊查看 / 編輯備註">
                       {t.title}{t.notes ? ' 📝' : ''}
@@ -840,8 +837,8 @@ function DbViewer({ onLogout }) {
           {data && <span className="db-desc">{TABLE_ICONS[active]} {TABLE_DESC[active] ?? ''}</span>}
           {data?.has_symbol && (
             <label className="task-filter-label">幣種
-              <input className="admin-input" style={{ width: 150 }}
-                     placeholder="如 BTCUSDT(留空全部)"
+              <input className="admin-input" style={{ width: 200 }}
+                     placeholder="如 BTCUSDT（可留空）"
                      value={symbol} onChange={e => { setSymbol(e.target.value); setOffset(0) }} />
             </label>
           )}
@@ -1019,7 +1016,7 @@ function StatusPage({ onLogout }) {
   const gradeColor = grade === 'A' ? '#22c55e' : grade === 'B' ? '#84cc16'
     : grade === 'C' ? '#f59e0b' : grade === 'D' ? '#ef4444' : '#94a3b8'
   const G = score?.gap || {}
-  const col2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18, marginBottom: 22 }
+  const col2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))', gap: 18, marginBottom: 22 }
 
   return (
     <div className="admin-body">
@@ -1161,7 +1158,7 @@ function StatusPage({ onLogout }) {
                 <ResponsiveContainer width="100%" height={Math.max(190, score.factors.length * 36)}>
                   <BarChart layout="vertical" data={score.factors} margin={{ top: 6, right: 64, bottom: 6, left: 16 }}>
                     <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 11 }} unit="pp" />
-                    <YAxis type="category" dataKey="label" width={108} tick={{ fill: '#cbd5e1', fontSize: 12 }} />
+                    <YAxis type="category" dataKey="label" width={132} tick={{ fill: '#cbd5e1', fontSize: 11 }} />
                     <ReferenceLine x={0} stroke="#64748b" />
                     <Tooltip cursor={{ fill: '#1e293b55' }}
                              contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
@@ -1363,122 +1360,6 @@ function CoinsPage({ onLogout }) {
   )
 }
 
-// ── AI 設定頁：GPT API 金鑰 / 模型（給前台 AI 分析機器人用）─────────────────
-function AIConfigPage({ onLogout }) {
-  const [cfg, setCfg]         = useState(null)
-  const [key, setKey]         = useState('')
-  const [model, setModel]     = useState('')
-  const [baseUrl, setBaseUrl] = useState('')
-  const [msg, setMsg]         = useState(null)   // {tone:'ok'|'err', text}
-  const [busy, setBusy]       = useState(false)
-  const [stats, setStats]     = useState(null)   // GPT 用量統計
-
-  const load = useCallback(async () => {
-    try {
-      const c = await fetchAIConfig()
-      setCfg(c); setModel(c.model || ''); setBaseUrl(c.base_url || '')
-      fetchAIStats().then(setStats).catch(() => {})
-    } catch (e) { if (e.message === 'UNAUTH') onLogout() }
-  }, [onLogout])
-
-  useEffect(() => { load() }, [load])
-
-  const save = async () => {
-    setBusy(true); setMsg(null)
-    try {
-      const fields = { model, base_url: baseUrl }
-      if (key.trim() || key === '') {
-        // 有輸入才更新金鑰；輸入框留白不動舊金鑰（要清除請輸入一個空白再刪掉? 用按鈕清除）
-        if (key.trim()) fields.api_key = key.trim()
-      }
-      await saveAIConfig(fields)
-      setKey('')
-      await load()
-      setMsg({ tone: 'ok', text: '已儲存 ✓' })
-    } catch (e) {
-      if (e.message === 'UNAUTH') { onLogout(); return }
-      setMsg({ tone: 'err', text: '儲存失敗：' + e.message })
-    } finally { setBusy(false) }
-  }
-
-  const clearKey = async () => {
-    if (!window.confirm('確定清除已儲存的 API 金鑰？前台 AI 將降級為只用規則引擎。')) return
-    setBusy(true); setMsg(null)
-    try { await saveAIConfig({ api_key: '' }); await load(); setMsg({ tone: 'ok', text: '金鑰已清除' }) }
-    catch (e) { if (e.message === 'UNAUTH') { onLogout(); return } setMsg({ tone: 'err', text: e.message }) }
-    finally { setBusy(false) }
-  }
-
-  const test = async () => {
-    setBusy(true); setMsg(null)
-    try {
-      const r = await testAIConfig()
-      setMsg(r.ok
-        ? { tone: 'ok', text: `連線成功 ✓ 模型 ${r.model} 回覆：「${r.reply}」` }
-        : { tone: 'err', text: '測試失敗：' + r.error })
-    } catch (e) {
-      if (e.message === 'UNAUTH') { onLogout(); return }
-      setMsg({ tone: 'err', text: '測試失敗：' + e.message })
-    } finally { setBusy(false) }
-  }
-
-  return (
-    <div className="admin-body">
-      <h2 className="admin-section-title">🤖 AI 分析機器人（GPT API）</h2>
-      <div className="admin-grid">
-        <StatCard label="GPT 狀態"
-          value={cfg ? (cfg.has_key ? '已啟用' : '未設定') : '—'}
-          sub={cfg?.has_key
-            ? `金鑰 ${cfg.key_masked}${cfg.env_locked ? '（來自環境變數，此頁改不動金鑰）' : ''}`
-            : '未設定時前台仍可用「規則引擎分析」，只是沒有 GPT 深度解讀與問答'}
-          tone={cfg?.has_key ? 'good' : 'warn'} />
-        <StatCard label="使用模型" value={cfg?.model ?? '—'}
-          sub="建議 gpt-4o-mini（便宜快速）；需要更強可改 gpt-4o" />
-        <StatCard label="今日 GPT 呼叫"
-          value={stats ? `${stats.today.calls} 次` : '—'}
-          sub={stats ? `token ${(stats.today.prompt_tokens + stats.today.completion_tokens).toLocaleString()}${stats.today.fails ? ` · 失敗 ${stats.today.fails}` : ''}` : '成功與失敗都會記錄'}
-          tone={stats?.today?.fails ? 'warn' : undefined} />
-        <StatCard label="近 7 日用量"
-          value={stats ? `${stats.week.calls} 次` : '—'}
-          sub={stats ? `token ${(stats.week.prompt_tokens + stats.week.completion_tokens).toLocaleString()} · 對話 ${stats.chat_rows} 則 · 快取 ${stats.analysis_cached} 筆` : '對話紀錄保留 90 天'} />
-      </div>
-
-      <div className="admin-panel" style={{ maxWidth: 640 }}>
-        <div className="task-form-row">
-          <label className="dr-label" style={{ minWidth: 84 }}>API 金鑰</label>
-          <input className="admin-input" style={{ flex: 1 }} type="password"
-                 placeholder={cfg?.has_key ? `已設定（${cfg.key_masked}），輸入新值可覆蓋` : 'sk-…'}
-                 value={key} onChange={e => setKey(e.target.value)}
-                 disabled={cfg?.env_locked} />
-        </div>
-        <div className="task-form-row">
-          <label className="dr-label" style={{ minWidth: 84 }}>模型</label>
-          <input className="admin-input" style={{ width: 220 }} placeholder="gpt-4o-mini"
-                 value={model} onChange={e => setModel(e.target.value)} />
-          <label className="dr-label">API 位址</label>
-          <input className="admin-input" style={{ flex: 1 }} placeholder="https://api.openai.com/v1"
-                 value={baseUrl} onChange={e => setBaseUrl(e.target.value)} />
-        </div>
-        <div className="task-form-row">
-          <button className="admin-btn" onClick={save} disabled={busy}>儲存</button>
-          <button className="admin-link" onClick={test} disabled={busy || !(cfg?.has_key || key.trim())}>
-            ⚡ 測試連線
-          </button>
-          {cfg?.has_key && !cfg?.env_locked && (
-            <button className="admin-link danger" onClick={clearKey} disabled={busy}>清除金鑰</button>
-          )}
-          {msg && <span style={{ color: msg.tone === 'ok' ? '#22c55e' : '#ef4444' }}>{msg.text}</span>}
-        </div>
-        <div className="task-form-hint">
-          🔒 金鑰只保存在後端、僅用於伺服器呼叫 GPT，<b>不會傳到前端、頁面也只顯示遮罩</b>。<br />
-          前台「AI 分析」為<b>雙引擎</b>：本地規則引擎（免費、即時）＋ GPT 深度解讀（需金鑰），
-          兩者立場不一致時會特別標示、互相檢核；GPT 呼叫有每小時上限與 15 分鐘快取控制成本。
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── 入口 ────────────────────────────────────────────────────────────────────
 export default function AdminApp() {
   const [authed, setAuthed] = useState(!!getToken())
@@ -1495,7 +1376,6 @@ export default function AdminApp() {
         : tab === 'coins' ? <CoinsPage onLogout={logout} />
         : tab === 'tasks' ? <TasksPage onLogout={logout} />
         : tab === 'status' ? <StatusPage onLogout={logout} />
-        : tab === 'ai' ? <AIConfigPage onLogout={logout} />
         : <DbViewer onLogout={logout} />}
     </div>
   )

@@ -603,13 +603,14 @@ body { background: var(--bg); }
   transition: background 0.12s;
 }
 .news-item:hover { background: rgba(255,255,255,0.04); border-color: var(--border); }
-.news-item-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* 新版：情緒標籤與標題同一行（標籤在前、標題緊接），來源日期小字在下 */
+.news-row { display: flex; align-items: flex-start; gap: 8px; }
 .news-sentiment-badge {
-  font-size: 10px; font-weight: 700;
+  font-size: 10px; font-weight: 700; flex: none; margin-top: 1px;
   padding: 2px 8px; border-radius: 20px; white-space: nowrap;
 }
-.news-title { font-size: 12px; line-height: 1.5; color: var(--text); }
-.news-meta  { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.news-title { font-size: 13px; line-height: 1.5; color: var(--text); flex: 1; min-width: 0; }
+.news-meta  { font-size: 11px; color: var(--muted); margin-left: 46px; }
 
 /* ── 相關性熱力圖 ────────────────────────────────────── */
 .heatmap-grid { display: grid; gap: 3px; margin-top: 12px; }
@@ -1641,3 +1642,60 @@ body { background: var(--bg); }
   .tdr-inner { width: 58px; height: 58px; }
   .tdr-num { font-size: 18px; }
 }
+
+/* ══ 文字截斷/溢出修正（全站盤點 2026-07-02）══════════════════════ */
+/* 1) 長字詞（網址、長英文、長代號）換行保護：GPT 回答/新聞/白話文字容器 */
+.bot-bubble, .ai-md p, .ai-md li, .ai-chat-a, .ai-headline, .ai-points li,
+.ai-suggestion, .ai-risks, .ai-watch, .ai-disagree,
+.news-title, .hero-desc, .admin-card-value, .admin-card-sub,
+.gloss-brief, .gloss-detail, .task-detail, .bot-brief-sub, .bot-brief-line,
+.card-name, .card-reason-tag, .verdict-text, .ind-card-note {
+  overflow-wrap: anywhere; word-break: break-word;
+}
+
+/* 2) 工作項目「項目」欄：長標題改為換行，不再撐寬整張表格逼出橫向捲動 */
+.task-item-cell {
+  white-space: normal; min-width: 200px; max-width: 460px;
+}
+.task-item-cell .task-title-link { white-space: normal; }
+
+/* 3) 幣種側邊欄：長中文名不擠壓價格（min-width:0 讓 flex 子項可縮） */
+.sidebar-names { min-width: 0; }
+.sidebar-zh { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 4) AI 面板標題列在窄寬度可換行，立場標籤不被擠掉 */
+.ai-head { flex-wrap: wrap; }
+.ai-title { min-width: 0; }
+
+/* 5) 後台 StatCard 數值/說明可完整換行（伺服器時間、訊息等長字串） */
+.admin-card { min-width: 0; overflow: hidden; }
+
+/* ══ 文字截斷修正 第二批（子代理稽核）══════════════════════════════ */
+/* 後台表格：說明類長句欄位改換行（td.wrap），短欄仍維持既有 nowrap 對齊 */
+.admin-table td.wrap { white-space: normal; word-break: break-word; }
+
+/* 後台分頁列：手機上可自行橫向捲動，不再把右側分頁推出畫面 */
+.admin-tabs { flex-wrap: wrap; }
+@media (max-width: 768px) {
+  .admin-tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .admin-tab { flex: 0 0 auto; }
+  .admin-app { overflow-x: hidden; }
+}
+
+/* 新手導覽 / 交叉驗證彈窗：矮螢幕可捲動，內容與按鈕不再被裁掉 */
+.tour-backdrop { overflow-y: auto; }
+.tour-card { max-height: 92vh; overflow-y: auto; }
+.vm { max-height: 92vh; overflow-y: auto; }
+
+/* 相關性熱圖：格子給最小寬、外層可橫向捲動，避免數字互相重疊 */
+.correlation-body { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.heatmap-grid { min-width: 520px; }
+.heatmap-cell { overflow: hidden; }
+
+/* K 線擺盪指標分頁：每顆按鈕不內部斷行，改由工具列整體換行 */
+.osc-tab { white-space: nowrap; }
+
+/* ══ 表格欄位對齊：改自適應寬，欄位靠左緊貼、不再被 100% 撐開留大空隙 ══ */
+.admin-table { width: auto; max-width: 100%; }
+/* DbViewer 多欄表維持滿版（欄多、外層可橫向捲），其餘內容表自適應 */
+.admin-table.db-table { width: 100%; }

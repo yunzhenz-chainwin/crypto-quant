@@ -171,13 +171,13 @@ function NewsArticles({ items }) {
         const s = SENTIMENT_STYLE[item.sentiment] ?? SENTIMENT_STYLE.neutral
         return (
           <a key={i} href={item.url} target="_blank" rel="noreferrer" className="news-item">
-            <div className="news-item-top">
+            <div className="news-row">
               <span className="news-sentiment-badge" style={{ color: s.color, background: s.bg }}>
                 {s.label}
               </span>
-              <span className="news-meta">{item.domain} · {item.published_at || item.fetched_at?.slice(0,10)}</span>
+              <span className="news-title">{item.title}</span>
             </div>
-            <span className="news-title">{item.title}</span>
+            <span className="news-meta">{item.domain} · {item.published_at || item.fetched_at?.slice(0, 10)}</span>
           </a>
         )
       })}
