@@ -16,9 +16,10 @@ news_store.py — 新聞歷史紀錄資料庫
   idx_fetched  : 依 fetched_at 加速歷史查詢（依日期過濾時用到）
   idx_category : 依 category 加速分類過濾
 """
+import json
 import sqlite3
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # 資料庫路徑：從本檔往上兩層到專案根目錄，再進 data/
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "news.db"
@@ -29,6 +30,13 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _ensure_column(conn, table: str, column: str, decl: str):
+    """若資料表缺少某欄位就補上（既有資料庫的安全遷移，可重複執行）。"""
+    cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 def init_db():
@@ -52,35 +60,68 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_category ON news(category)")
         # 歷史查詢以「發布日期」為準，故也對 published_at 建索引
         conn.execute("CREATE INDEX IF NOT EXISTS idx_published ON news(published_at)")
+        # 欄位遷移：coins = 標題比對到的相關幣種（逗號分隔 ticker，如 "BTC,ETH"）
+        _ensure_column(conn, "news", "coins", "TEXT")
+        # 每日新聞情緒彙總（symbol='MARKET' 為全市場；分數 -100（極空）~ +100（極多））
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS news_sentiment_daily (
+                date       TEXT NOT NULL,
+                symbol     TEXT NOT NULL,          -- 'MARKET' 或幣種 ticker（BTC、ETH…）
+                score      INTEGER,                -- 加權情緒分數 -100 ~ +100
+                n_total    INTEGER,
+                n_bull     INTEGER,
+                n_bear     INTEGER,
+                top_json   TEXT,                   -- 當日代表性標題（JSON 陣列）
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (date, symbol)
+            )
+        """)
         conn.commit()
+
+
+def _norm_title(title: str) -> str:
+    """標題正規化（去重比對用）：小寫、去空白與標點、去 Google News 的「 - 來源」尾巴。"""
+    t = (title or "").rsplit(" - ", 1)[0].lower()
+    return "".join(ch for ch in t if ch.isalnum())
 
 
 def save_articles(articles: list[dict]) -> int:
     """
-    批次存入文章，已存在的 URL 自動略過（INSERT OR IGNORE）
+    批次存入文章，已存在的 URL 自動略過（INSERT OR IGNORE）。
+    另做「標題去重」：同一則新聞常被多個來源轉載（尤其 Google News 聚合 vs 原站 RSS），
+    URL 不同但標題相同 → 以正規化標題比對最近 7 天既有資料，重複就跳過。
     回傳：這次實際新增的筆數
     """
     if not articles:
         return 0
     # 用 UTC 時間記錄「何時存入系統」，與文章發布時間分開
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
     saved = 0
     with _connect() as conn:
+        recent_titles = {
+            _norm_title(r[0]) for r in conn.execute(
+                "SELECT title FROM news WHERE fetched_at >= ?", (week_ago,)).fetchall()
+        }
         for a in articles:
             try:
+                key = _norm_title(a["title"])
+                if key and key in recent_titles:
+                    continue                     # 轉載重複，跳過
                 conn.execute(
                     """INSERT OR IGNORE INTO news
-                       (url, title, domain, category, sentiment, published_at, fetched_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                       (url, title, domain, category, sentiment, published_at, fetched_at, coins)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         a["url"], a["title"], a.get("domain", ""),
                         a.get("category", ""), a.get("sentiment", "neutral"),
-                        a.get("published_at", ""), now,
+                        a.get("published_at", ""), now, a.get("coins", ""),
                     ),
                 )
                 # changes() 回傳 1 = 真正新增；0 = 被 IGNORE（重複）
                 if conn.execute("SELECT changes()").fetchone()[0]:
                     saved += 1
+                    recent_titles.add(key)
             except Exception:
                 continue  # 單筆失敗不影響其他筆
         conn.commit()
@@ -149,6 +190,72 @@ def total_count() -> int:
     """回傳資料庫所有新聞總筆數，顯示在前端底部統計區"""
     with _connect() as conn:
         return conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
+
+
+# ── 每日新聞情緒彙總 ─────────────────────────────────────────────────────────
+# 情緒 → 權重（分數 = (多-空)/總數 × 100，四捨五入，夾在 -100~100）
+def aggregate_daily(dates: list[str] = None) -> int:
+    """
+    把 news 表彙總成「每日 × 幣種」情緒分數，寫入 news_sentiment_daily。
+    - symbol='MARKET'：當日全部新聞
+    - symbol=ticker（BTC…）：coins 欄含該幣的新聞
+    dates 不給就只算「今天 + 昨天」（排程滾動更新用）；給日期清單則重算那些天（回補用）。
+    回傳寫入的列數。
+    """
+    if not dates:
+        today = datetime.now(timezone.utc).date()
+        dates = [str(today - timedelta(days=1)), str(today)]
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    written = 0
+    with _connect() as conn:
+        for d in dates:
+            rows = conn.execute(
+                "SELECT title, sentiment, coins, category FROM news "
+                "WHERE substr(published_at,1,10) = ?", (d,)).fetchall()
+            if not rows:
+                continue
+            # 分組：MARKET + 各幣
+            groups: dict[str, list] = {"MARKET": list(rows)}
+            for r in rows:
+                for tk in (r["coins"] or "").split(","):
+                    tk = tk.strip()
+                    if tk:
+                        groups.setdefault(tk, []).append(r)
+            for sym, items in groups.items():
+                n_bull = sum(1 for i in items if i["sentiment"] == "bullish")
+                n_bear = sum(1 for i in items if i["sentiment"] == "bearish")
+                n = len(items)
+                score = round((n_bull - n_bear) / n * 100) if n else 0
+                # 代表性標題：非中立優先，最多 3 則
+                tops = [i["title"] for i in items if i["sentiment"] != "neutral"][:3] \
+                       or [i["title"] for i in items[:2]]
+                conn.execute(
+                    "INSERT OR REPLACE INTO news_sentiment_daily "
+                    "(date, symbol, score, n_total, n_bull, n_bear, top_json, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (d, sym, score, n, n_bull, n_bear,
+                     json.dumps(tops, ensure_ascii=False), now))
+                written += 1
+        conn.commit()
+    return written
+
+
+def load_sentiment_daily(symbol: str = "MARKET", days: int = 30) -> list[dict]:
+    """讀某幣（或全市場）最近 N 天的每日情緒分數，升冪回傳。"""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT date, score, n_total, n_bull, n_bear, top_json "
+            "FROM news_sentiment_daily WHERE symbol=? "
+            "ORDER BY date DESC LIMIT ?", (symbol.upper(), days)).fetchall()
+    out = []
+    for r in rows[::-1]:
+        d = dict(r)
+        try:
+            d["top"] = json.loads(d.pop("top_json") or "[]")
+        except Exception:
+            d["top"] = []
+        out.append(d)
+    return out
 
 
 # 模組載入時自動建表，確保任何環境下資料庫都已準備好

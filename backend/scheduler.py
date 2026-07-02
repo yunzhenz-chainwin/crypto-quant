@@ -2,8 +2,9 @@
 scheduler.py — 背景排程任務
 
 排程說明：
-  每日 01:00  run_pipeline()    從 Binance 抓取最新 K 線 → 計算技術指標 → 更新相關性矩陣
-  每 30 分鐘  fetch_news_job()  從 RSS 抓取最新新聞並存入資料庫
+  每日 01:00  run_pipeline()        從 Binance 抓取最新 K 線 → 計算技術指標 → 更新相關性矩陣
+  每小時 :06  run_hourly_pipeline() 抓 BTC/ETH 等主流幣 1h K 線（增量）→ 算指標 → 入庫
+  每 30 分鐘  fetch_news_job()      從 RSS 抓取最新新聞並存入資料庫
 
 使用 APScheduler 的 BackgroundScheduler，在 FastAPI 啟動時一起跑（非阻塞）
 """
@@ -14,7 +15,7 @@ from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.routers.sentiment import _fetch_and_save
 from backend.services.app_db import (
-    get_enabled_symbols, start_job, finish_job,
+    get_enabled_symbols, get_hourly_symbols, start_job, finish_job,
     ingest_market_data, backfill_daily_signals, fetch_fear_greed_history,
     market_stats,
 )
@@ -107,12 +108,68 @@ def run_pipeline():
         except Exception as e:
             print(f"[scheduler] fear_greed history skip: {e}")
 
+        # 7) 幣種級新聞（Google News 逐幣查詢）+ 重算近 3 天每日情緒彙總（非關鍵）
+        try:
+            from backend.routers.sentiment import fetch_coin_news_google
+            from backend.services.news_store import aggregate_daily
+            n_news = fetch_coin_news_google(symbols)
+            from datetime import timedelta as _td
+            days3 = [str((datetime.now(timezone.utc) - _td(days=i)).date()) for i in range(3)]
+            aggregate_daily(days3)
+            print(f"[scheduler] coin news +{n_news}")
+        except Exception as e:
+            print(f"[scheduler] coin news skip: {e}")
+
+        # 8) AI 紀錄保留政策：清掉過期的分析快取與 90 天前的對話/用量紀錄（非關鍵）
+        try:
+            from backend.services.app_db import cleanup_ai
+            cleanup_ai()
+        except Exception as e:
+            print(f"[scheduler] ai cleanup skip: {e}")
+
         finish_job(job_id, "success",
                    f"{len(symbols)} 幣種 · 入庫 {ing['prices']} 筆 · 訊號 {sig} 筆 · 最新 {date_max}")
         print(f"[scheduler] daily pipeline done (prices {ing['prices']}, signals {sig}, latest {date_max})")
     except Exception as e:
         finish_job(job_id, "failed", str(e))
         print(f"[scheduler] daily pipeline failed: {e}")
+
+
+def run_hourly_pipeline():
+    """
+    小時線資料更新（每小時 :06 執行，等 Binance 收完整點 K 棒）
+
+    只追蹤主流幣（app_config 的 hourly_symbols，預設 BTC/ETH）：
+    1. fetch_binance --interval 1h  增量抓（讀既有 CSV 最後一根續抓，通常 1 次請求）
+    2. indicators --interval 1h --no-plot  重算該幣小時線指標
+    3. ingest_market_data("1h")  入庫（INSERT OR REPLACE，可重複執行）
+
+    首次執行或停機多日也不用特別處理：增量抓會自動從缺口處補齊。
+    """
+    job_id = start_job("hourly_pipeline")
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    try:
+        symbols = get_hourly_symbols()
+        if not symbols:
+            finish_job(job_id, "success", "無啟用的小時線幣種，略過")
+            return
+
+        _run_step("fetch_binance_1h",
+                  [PYTHON, str(ROOT / "src" / "fetch_binance.py"),
+                   "--interval", "1h", *symbols], env)
+        for sym in symbols:
+            _run_step(f"indicators_1h[{sym}]",
+                      [PYTHON, str(ROOT / "src" / "indicators.py"),
+                       sym, "--interval", "1h", "--no-plot"], env)
+        ing = ingest_market_data("1h")
+
+        latest = (market_stats().get("by_interval") or {}).get("1h", 0)
+        finish_job(job_id, "success",
+                   f"{len(symbols)} 幣種 · 入庫 {ing['prices']} 筆 1h（累計 {latest}）")
+        print(f"[scheduler] hourly pipeline done ({ing['prices']} rows)")
+    except Exception as e:
+        finish_job(job_id, "failed", str(e))
+        print(f"[scheduler] hourly pipeline failed: {e}")
 
 
 def fetch_news_job():
@@ -141,6 +198,9 @@ def start_scheduler():
     scheduler.add_job(run_pipeline, "cron", hour=1, minute=0,
                       id="daily_pipeline", replace_existing=True,
                       max_instances=1, coalesce=True)              # 每日 01:00
+    scheduler.add_job(run_hourly_pipeline, "cron", minute=6,
+                      id="hourly_pipeline", replace_existing=True,
+                      max_instances=1, coalesce=True)              # 每小時 :06（1h K 棒收盤後）
     scheduler.add_job(fetch_news_job, "interval", minutes=30,
                       id="news_fetch", replace_existing=True,
                       max_instances=1, coalesce=True)              # 每 30 分鐘

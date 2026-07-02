@@ -3,3 +3,6 @@
 # 前端指標正確性驗證 scripts/verify_frontend_indicators.py 需要獨立第三方庫
 # 當作參考,與 frontend/src/lib/indicators.js 的計算逐點比對:
 pandas_ta
+
+# 產生 Word 文件(計畫書/詞庫範本 → docs/*.docx)
+python-docx

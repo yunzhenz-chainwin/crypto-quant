@@ -27,6 +27,15 @@ import pandas as pd
 ROOT    = Path(__file__).resolve().parent.parent.parent
 DB_PATH = ROOT / "data" / "app.db"
 INTERVAL = "1d"
+VALID_INTERVALS = ("1d", "1h")
+
+# 每個週期一天有幾根 K 棒：API 的 days 參數語意固定是「天」，
+# 小時線取最近 N 天時 LIMIT 要乘上 24（見 _bars_per_day 用法）。
+_BARS_PER_DAY = {"1d": 1, "1h": 24}
+
+# ts 欄輸出格式：日線沿用舊的 YYYY-MM-DD（前端相容）；小時線帶完整時間。
+def _date_expr(interval: str, tscol: str = "ts") -> str:
+    return f"substr({tscol},1,10)" if interval == "1d" else f"substr({tscol},1,19)"
 
 
 def _connect() -> sqlite3.Connection:
@@ -36,12 +45,13 @@ def _connect() -> sqlite3.Connection:
 
 
 def _range_clause(days: int | None, start: str | None, end: str | None,
-                  tscol: str = "ts") -> tuple[str, list, bool]:
+                  tscol: str = "ts", interval: str = "1d") -> tuple[str, list, bool]:
     """
     依 days / start / end 產生時間篩選 SQL 片段。
     回傳 (sql_tail, params, reverse)：
       - start/end：範圍過濾，升冪；end 用 date(?, '+1 day') 沿用舊版含界行為。
-      - days     ：取最近 N 筆 → DESC LIMIT，呼叫端需再反轉回升冪（reverse=True）。
+      - days     ：取最近 N 天 → DESC LIMIT（小時線一天 24 根，LIMIT 乘 24），
+                   呼叫端需再反轉回升冪（reverse=True）。
       - 皆無     ：全部，升冪。
     tscol 讓 load_indicators 能指定用 i.ts（JOIN 後需限定表別名）。
     """
@@ -53,41 +63,58 @@ def _range_clause(days: int | None, start: str | None, end: str | None,
             tail += f" AND date({tscol}) <= date(?, '+1 day')"; params.append(end)
         return tail + f" ORDER BY {tscol}", params, False
     if days:
-        return f" ORDER BY {tscol} DESC LIMIT ?", [days], True
+        bars = days * _BARS_PER_DAY.get(interval, 1)
+        return f" ORDER BY {tscol} DESC LIMIT ?", [bars], True
     return f" ORDER BY {tscol}", [], False
 
 
-def available_symbols() -> list[str]:
+def available_symbols(interval: str = INTERVAL) -> list[str]:
     # 只回傳「設定啟用 + DB 有資料」的幣種:啟用清單(app_config 的 coins)為單一來源,
     # 已停用的幣即使 DB 仍有歷史也不顯示(例如已停止交易、換代號的 MATIC)。
     from backend.services.app_db import get_enabled_symbols
     with _connect() as conn:
         have = {r["symbol"] for r in conn.execute(
-            "SELECT DISTINCT symbol FROM prices WHERE interval=?", (INTERVAL,)).fetchall()}
+            "SELECT DISTINCT symbol FROM prices WHERE interval=?", (interval,)).fetchall()}
     return sorted(s for s in get_enabled_symbols() if s in have)
 
 
+def intervals_available() -> dict:
+    """各週期有資料的幣種清單，例如 {"1d": [...15 幣...], "1h": ["BTCUSDT","ETHUSDT"]}。"""
+    return {iv: available_symbols(iv) for iv in VALID_INTERVALS}
+
+
+def data_versions() -> dict:
+    """各週期最新一根 K 棒的時間戳（前端輪詢比對「資料有沒有變」用，很便宜）。"""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT interval, MAX(ts) AS m, COUNT(*) AS n FROM prices GROUP BY interval"
+        ).fetchall()
+    return {r["interval"]: f'{r["m"]}#{r["n"]}' for r in rows}
+
+
 def load_prices(symbol: str, days: int = None,
-                start: str = None, end: str = None) -> list[dict]:
-    tail, rparams, reverse = _range_clause(days, start, end, tscol="ts")
+                start: str = None, end: str = None,
+                interval: str = INTERVAL) -> list[dict]:
+    tail, rparams, reverse = _range_clause(days, start, end, tscol="ts", interval=interval)
     sql = (
-        "SELECT substr(ts,1,10) AS date, open, high, low, close, volume "
+        f"SELECT {_date_expr(interval)} AS date, open, high, low, close, volume "
         "FROM prices WHERE symbol=? AND interval=?" + tail
     )
     with _connect() as conn:
-        rows = conn.execute(sql, [symbol, INTERVAL, *rparams]).fetchall()
+        rows = conn.execute(sql, [symbol, interval, *rparams]).fetchall()
     if reverse:
         rows = rows[::-1]           # DESC LIMIT 取最近 N 筆後，反轉回升冪
     return [dict(r) for r in rows]
 
 
 def load_indicators(symbol: str, days: int = None,
-                    start: str = None, end: str = None) -> list[dict]:
-    tail, rparams, reverse = _range_clause(days, start, end, tscol="i.ts")
+                    start: str = None, end: str = None,
+                    interval: str = INTERVAL) -> list[dict]:
+    tail, rparams, reverse = _range_clause(days, start, end, tscol="i.ts", interval=interval)
     # indicators 只有指標欄 → JOIN prices 補 open/high/low/volume；
     # 欄名一律 alias 回舊 CSV 的大寫，close 取自 prices（與 indicators 同一根 K 棒，值相同）。
     sql = (
-        "SELECT substr(i.ts,1,10) AS date, p.open, p.high, p.low, p.close, p.volume, "
+        f"SELECT {_date_expr(interval, 'i.ts')} AS date, p.open, p.high, p.low, p.close, p.volume, "
         "i.ma20 AS MA20, i.ma60 AS MA60, i.ma200 AS MA200, i.rsi AS RSI, "
         "i.macd AS MACD, i.signal AS SIGNAL, i.hist AS HIST, "
         "i.bb_upper AS BB_UPPER, i.bb_lower AS BB_LOWER, i.vol_ma20 AS VOL_MA20 "
@@ -96,7 +123,7 @@ def load_indicators(symbol: str, days: int = None,
         "WHERE i.symbol=? AND i.interval=?" + tail
     )
     with _connect() as conn:
-        rows = conn.execute(sql, [symbol, INTERVAL, *rparams]).fetchall()
+        rows = conn.execute(sql, [symbol, interval, *rparams]).fetchall()
     if reverse:
         rows = rows[::-1]
     # DB 的 NULL → Python None（缺值如暖身期 MA200），與舊版 NaN→None 語意一致

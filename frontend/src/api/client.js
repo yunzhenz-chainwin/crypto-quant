@@ -19,21 +19,26 @@ export const fetchVerify = () => get('/verify')
 export const fetchPrices = (symbol, days = 180) =>
   get(`/prices/${symbol}?days=${days}`)
 
-// 取得原始 OHLCV 資料，供蠟燭圖使用（支援 days 或 start/end 日期）
-export const fetchOHLC = (symbol, { days = 365, start = null, end = null } = {}) => {
+// 取得原始 OHLCV 資料，供蠟燭圖使用（支援 days 或 start/end 日期；interval 1d/1h）
+export const fetchOHLC = (symbol, { days = 365, start = null, end = null, interval = '1d' } = {}) => {
   const p = new URLSearchParams()
   if (start && end) { p.set('start', start); p.set('end', end) }
   else               { p.set('days', days) }
+  if (interval !== '1d') p.set('interval', interval)
   return get(`/prices/${symbol}?${p}`)
 }
 
-// 取得指定幣種的技術指標（支援 days 或 start/end 日期）
-export const fetchIndicators = (symbol, { days = 180, start = null, end = null } = {}) => {
+// 取得指定幣種的技術指標（支援 days 或 start/end 日期；interval 1d/1h）
+export const fetchIndicators = (symbol, { days = 180, start = null, end = null, interval = '1d' } = {}) => {
   const p = new URLSearchParams()
   if (start && end) { p.set('start', start); p.set('end', end) }
   else               { p.set('days', days) }
+  if (interval !== '1d') p.set('interval', interval)
   return get(`/indicators/${symbol}?${p}`)
 }
+
+// 各週期有資料的幣種清單，例如 { "1d": [...], "1h": ["BTCUSDT","ETHUSDT"] }
+export const fetchIntervals = () => get('/intervals')
 
 // 取得所有幣種的相關性矩陣與年化波動度
 export const fetchCorrelation = () => get('/correlation')
@@ -84,7 +89,31 @@ export const fetchNewsHistory = (date, category = null) => {
 // 取得有新聞紀錄的日期清單
 export const fetchNewsDates = () => get('/sentiment/news/dates')
 
+// 每日新聞情緒分數（-100 極空 ~ +100 極多）；symbol 給幣種看單幣，不給看全市場
+export const fetchNewsSentiment = (symbol = 'MARKET', days = 14) =>
+  get(`/sentiment/summary?symbol=${symbol}&days=${days}`)
+
 // 回補歷史新聞（從 HackerNews 撈舊資料存入資料庫）
 export const backfillNews = (fromDate, toDate) =>
   fetch(`/api/sentiment/news/backfill?from_date=${fromDate}&to_date=${toDate}`, { method: 'POST' })
     .then(r => r.json())
+
+// ── AI 分析機器人 ───────────────────────────────────────────────────────────
+// 完整分析：gpt=false 只跑本地規則引擎（即時）；gpt=true 加上 GPT 深度解讀
+export const fetchAIAnalysis = (symbol, { gpt = true, force = false } = {}) =>
+  get(`/ai/analysis/${symbol}?gpt=${gpt ? 1 : 0}${force ? '&force=1' : ''}`)
+
+// 針對幣種提問（GPT 沒設定金鑰時後端會降級為規則引擎摘要）
+// history：最近幾輪對話 [{q, a}]，讓 GPT 能接住「那如果跌破呢？」這類追問
+export const askAI = (symbol, question, history = []) =>
+  fetch('/api/ai/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol, question, history: history.slice(-3) }),
+  }).then(async r => {
+    if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.detail || `API 回應 ${r.status}`)
+    return r.json()
+  })
+
+// AI 功能狀態（GPT 是否已設定金鑰）
+export const fetchAIConfig = () => get('/ai/config')

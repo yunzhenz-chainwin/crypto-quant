@@ -7,27 +7,29 @@ indicators.py
   - MACD        ：MACD 線、訊號線、柱狀圖（轉折）
 
 用法：
-  python indicators.py                # 預設 BTCUSDT
-  python indicators.py ETHUSDT        # 指定幣別
+  python indicators.py                        # 預設 BTCUSDT 日線
+  python indicators.py ETHUSDT                # 指定幣別
+  python indicators.py BTCUSDT --interval 1h  # 小時線（指標期數同樣以「根」計）
+  python indicators.py BTCUSDT --interval 1h --no-plot   # 排程用：只出 CSV 不畫圖
 
 需先安裝繪圖套件：
   python -m pip install matplotlib
 """
 
+import argparse
 import sys
 from pathlib import Path
 
 import pandas as pd
 import matplotlib.pyplot as plt
 
-INTERVAL = "1d"
 ROOT = Path(__file__).resolve().parent.parent
 CLEAN_DIR = ROOT / "data" / "clean"
 REPORT_DIR = ROOT / "reports"
 
 
-def load(symbol: str) -> pd.DataFrame:
-    path = CLEAN_DIR / f"{symbol}_{INTERVAL}.csv"
+def load(symbol: str, interval: str) -> pd.DataFrame:
+    path = CLEAN_DIR / f"{symbol}_{interval}.csv"
     if not path.exists():
         sys.exit(f"找不到檔案：{path}（請先用 fetch_binance.py 抓資料）")
     df = pd.read_csv(path, parse_dates=["date"])
@@ -71,12 +73,12 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def plot(df: pd.DataFrame, symbol: str) -> Path:
+def plot(df: pd.DataFrame, symbol: str, interval: str) -> Path:
     fig, (ax1, ax2, ax3) = plt.subplots(
         3, 1, figsize=(13, 9), sharex=True,
         gridspec_kw={"height_ratios": [3, 1.2, 1.4]},
     )
-    fig.suptitle(f"{symbol} {INTERVAL} — Technical Indicators", fontsize=14)
+    fig.suptitle(f"{symbol} {interval} — Technical Indicators", fontsize=14)
 
     # 上層：價格 + 兩條均線
     ax1.plot(df["date"], df["close"], color="#3a3a3a", lw=1, label="Price")
@@ -107,29 +109,36 @@ def plot(df: pd.DataFrame, symbol: str) -> Path:
     ax3.grid(alpha=0.2)
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    out = REPORT_DIR / f"indicators_{symbol}_{INTERVAL}.png"
+    out = REPORT_DIR / f"indicators_{symbol}_{interval}.png"
     fig.savefig(out, dpi=120, bbox_inches="tight")
     plt.close(fig)
     return out
 
 
 def main():
-    symbol = sys.argv[1].upper() if len(sys.argv) > 1 else "BTCUSDT"
-    df = load(symbol)
+    ap = argparse.ArgumentParser(description="Compute technical indicators")
+    ap.add_argument("symbol", nargs="?", default="BTCUSDT")
+    ap.add_argument("--interval", default="1d", choices=["1d", "1h"])
+    ap.add_argument("--no-plot", action="store_true", help="只出 CSV，不畫 PNG（小時線排程用）")
+    args = ap.parse_args()
+
+    symbol, interval = args.symbol.upper(), args.interval
+    df = load(symbol, interval)
     df = add_indicators(df)
 
     # 存一份含指標的 CSV，方便後續使用
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    csv_out = REPORT_DIR / f"indicators_{symbol}_{INTERVAL}.csv"
+    csv_out = REPORT_DIR / f"indicators_{symbol}_{interval}.csv"
     df.to_csv(csv_out, index=False)
 
-    png_out = plot(df, symbol)
+    png_out = None if args.no_plot else plot(df, symbol, interval)
 
-    # 印出最近幾天的指標數值
+    # 印出最近幾根的指標數值
     cols = ["date", "close", "MA20", "MA60", "RSI", "MACD", "SIGNAL"]
-    print(f"\n{symbol} 最近 5 天指標：")
+    print(f"\n{symbol} [{interval}] 最近 5 根指標：")
     print(df[cols].tail().to_string(index=False))
-    print(f"\n圖表已存到：{png_out}")
+    if png_out:
+        print(f"\n圖表已存到：{png_out}")
     print(f"指標數值已存到：{csv_out}")
 
 

@@ -403,6 +403,58 @@ def db_table_rows(
     }
 
 
+# ── AI 分析機器人設定（GPT API 金鑰 / 模型；金鑰只回遮罩，不外洩）────────────
+class AIConfigReq(BaseModel):
+    api_key: Optional[str] = None    # 給空字串 = 清除金鑰
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+
+
+def _mask_key(key: str) -> str:
+    if not key:
+        return ""
+    return key[:6] + "…" + key[-4:] if len(key) > 12 else "已設定"
+
+
+@router.get("/admin/ai/config")
+def ai_config_get(_: str = Depends(require_admin)):
+    from backend.services import ai_analyst
+    cfg = ai_analyst.gpt_config()
+    return {
+        "has_key": bool(cfg["api_key"]),
+        "key_masked": _mask_key(cfg["api_key"]),
+        "model": cfg["model"],
+        "base_url": cfg["base_url"],
+        "source": cfg["source"],     # env = 環境變數（後台改不動）；db = 後台設定
+        "env_locked": cfg["source"] == "env",
+    }
+
+
+@router.put("/admin/ai/config")
+def ai_config_put(body: AIConfigReq, _: str = Depends(require_admin)):
+    cur = app_db.get_config("ai", {}) or {}
+    if body.api_key is not None:
+        cur["api_key"] = body.api_key.strip()
+    if body.model is not None:
+        cur["model"] = body.model.strip()
+    if body.base_url is not None:
+        cur["base_url"] = body.base_url.strip()
+    app_db.set_config("ai", cur)
+    return {"ok": True}
+
+
+@router.post("/admin/ai/test")
+def ai_config_test(_: str = Depends(require_admin)):
+    from backend.services import ai_analyst
+    return ai_analyst.test_gpt()
+
+
+@router.get("/admin/ai/stats")
+def ai_usage_stats(_: str = Depends(require_admin)):
+    """GPT 用量統計（今日/近7日呼叫數、token 數）＋ 對話/快取筆數。"""
+    return app_db.ai_stats()
+
+
 # ── 指標交叉驗證(用獨立演算法逐點比對,確認指標計算正確)─────────────────────
 @router.get("/admin/verify/indicators")
 def verify_indicators(_: str = Depends(require_admin)):

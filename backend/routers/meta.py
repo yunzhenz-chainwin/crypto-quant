@@ -1,5 +1,7 @@
 from fastapi import APIRouter
-from backend.services.reader import available_symbols, last_updated
+from backend.services.reader import (
+    available_symbols, last_updated, intervals_available, data_versions,
+)
 
 router = APIRouter()
 
@@ -7,6 +9,12 @@ router = APIRouter()
 @router.get("/symbols")
 def get_symbols():
     return available_symbols()
+
+
+@router.get("/intervals")
+def get_intervals():
+    """各週期有資料的幣種，例如 {"1d": [...], "1h": ["BTCUSDT","ETHUSDT"]}。"""
+    return intervals_available()
 
 
 @router.get("/status")
@@ -18,7 +26,13 @@ def get_status():
         verification = {"ok": v["ok"], "passed": v["passed"], "total": v["total"]}
     except Exception:
         verification = None
-    return {"last_updated": last_updated(), "verification": verification}
+    # data_version：各週期最新 K 棒時間戳＋筆數。前端每分鐘輪詢比對，
+    # 有變化才重拉重資料（K 線/指標/訊號），做到「不用重整、資料自動更新」。
+    return {
+        "last_updated": last_updated(),
+        "verification": verification,
+        "data_version": data_versions(),
+    }
 
 
 @router.get("/verify")

@@ -76,6 +76,12 @@ export const addCoin    = (coin)           => adminSend('/coins', 'POST', coin)
 export const updateCoin = (symbol, fields) => adminSend(`/coins/${symbol}`, 'PUT', fields)
 export const deleteCoin = (symbol)         => adminSend(`/coins/${symbol}`, 'DELETE')
 
+// AI 分析機器人設定(GPT API 金鑰 / 模型;金鑰只回遮罩)
+export const fetchAIConfig  = () => adminGet('/ai/config')
+export const saveAIConfig   = (fields) => adminSend('/ai/config', 'PUT', fields)
+export const testAIConfig   = () => adminSend('/ai/test', 'POST')
+export const fetchAIStats   = () => adminGet('/ai/stats')   // GPT 用量統計
+
 // 資料庫檢視:列出資料表 / 讀某表的資料列
 export const fetchDbTables = () => adminGet('/db/tables')
 export const fetchDbTable = (name, { symbol = null, interval = null, limit = 50, offset = 0 } = {}) => {

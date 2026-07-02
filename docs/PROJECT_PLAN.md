@@ -27,7 +27,9 @@
   - ✅ 加密數值入庫:`prices` / `indicators` 改為**多週期 schema**(`interval` + `ts`,1d/1h 可並存),1d 各 26,730 筆。
   - ✅ 每日訊號歷史 `daily_signal` 26,730 筆、恐懼貪婪歷史 `fear_greed` 3,067 筆(2018 至今),排程自動維護。
   - ✅ 兩個 DB 開啟 **WAL**(耐當機、讀寫不互鎖);加密數值可由 CSV 重建,不怕遺失。
-  - ⬜ 加入 **1h 資料**(schema 已就緒,待抓取);⬜（選用）前台改讀 DB / 畫歷史走勢。
+  - ✅ 加入 **1h 資料**(BTC/ETH 各 17,520 根、每小時 :06 排程增量更新;API/前端 `interval=1h`);⬜（選用）前台改讀 DB / 畫歷史走勢。
+- **🤖 AI 分析機器人(2026-07-02 完成)**:`backend/services/ai_analyst.py` 雙引擎(本地 6 因子規則引擎 + GPT API 深度解讀,固定提示詞、立場交叉檢核);前台詳細頁 AI 面板 + 提問框;後台「AI 設定」頁管理金鑰。
+- **🔄 前台自動更新(2026-07-02 完成)**:`/api/status` 提供 `data_version`,前端每 60 秒輪詢、有新資料才重拉,不用手動重整。
 - ⬜ P1 前台人性化 ⬜ P4 打磨
 
 > 存取:跑起來後開 `/admin`(帳號 `admin`;密碼於 `backend/routers/admin.py` 或環境變數 `ADMIN_PASS` 設定,`ADMIN_SECRET` 建議對外時一併覆蓋)。

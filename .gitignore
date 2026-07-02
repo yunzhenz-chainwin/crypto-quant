@@ -27,3 +27,6 @@ data/*.db-shm
 
 # 報告圖片（二進位檔，不追蹤）
 reports/*.png
+
+# Claude 工作階段記憶(非專案程式)
+memory/

@@ -19,7 +19,7 @@ import os
 import sqlite3
 import subprocess
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "app.db"
 
@@ -155,11 +155,47 @@ def init_db():
                 PRIMARY KEY (symbol, interval, ts)
             )
         """)
+        # AI 分析快取（持久化：重啟後仍在；cache_key 內含資料版本，資料更新自動失效）
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ai_analysis (
+                cache_key    TEXT PRIMARY KEY,
+                symbol       TEXT NOT NULL,
+                generated_at TEXT NOT NULL,
+                json         TEXT NOT NULL
+            )
+        """)
+        # AI 對話紀錄（問答歷史；保留 90 天，見 cleanup_ai）
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ai_chat (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts       TEXT NOT NULL,
+                symbol   TEXT,
+                question TEXT,
+                answer   TEXT,
+                source   TEXT,      -- gpt / local / error
+                model    TEXT
+            )
+        """)
+        # GPT 用量（成本監控：每次呼叫的 token 數；分析/問答/測試都記）
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ai_usage (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts                TEXT NOT NULL,
+                kind              TEXT,     -- analysis / ask / test
+                model             TEXT,
+                prompt_tokens     INTEGER,
+                completion_tokens INTEGER,
+                ok                INTEGER,  -- 1 成功 / 0 失敗
+                error             TEXT
+            )
+        """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_job_started ON job_runs(started_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_access_ts   ON access_log(ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_prices_sym  ON prices(symbol, interval, ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ind_sym     ON indicators(symbol, interval, ts)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_chat_ts  ON ai_chat(ts)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_usage_ts ON ai_usage(ts)")
         # 既有資料庫的欄位遷移：補上 tasks.notes（備註 / 交接說明）
         _ensure_column(conn, "tasks", "notes", "TEXT")
         conn.commit()
@@ -190,6 +226,16 @@ def get_coins() -> list[dict]:
 def get_enabled_symbols() -> list[str]:
     """目前啟用要追蹤的幣種代號清單，給排程 / 抓取流程用。"""
     return [c["symbol"] for c in get_coins() if c.get("enabled", True)]
+
+
+# 小時線只追蹤主流幣（資料量大，先開 BTC/ETH；後台可改 app_config 的 hourly_symbols）
+DEFAULT_HOURLY_SYMBOLS = ["BTCUSDT", "ETHUSDT"]
+
+
+def get_hourly_symbols() -> list[str]:
+    """要抓 1h 小時線的幣種清單（同時要求該幣目前為啟用狀態）。"""
+    enabled = set(get_enabled_symbols())
+    return [s for s in get_config("hourly_symbols", DEFAULT_HOURLY_SYMBOLS) if s in enabled]
 
 
 def coin_data_status(interval: str = "1d") -> dict:
@@ -509,6 +555,86 @@ def fetch_fear_greed_history(limit: int = 0) -> int:
             "INSERT OR REPLACE INTO fear_greed (date, value, label) VALUES (?,?,?)", rows)
         conn.commit()
     return len(rows)
+
+
+# ── AI 分析快取 / 對話紀錄 / 用量（ai_analyst.py 用）─────────────────────────
+def save_ai_analysis(cache_key: str, symbol: str, data: dict):
+    with _connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO ai_analysis (cache_key, symbol, generated_at, json) "
+            "VALUES (?,?,?,?)",
+            (cache_key, symbol, _now(), json.dumps(data, ensure_ascii=False)))
+        conn.commit()
+
+
+def load_ai_analysis(cache_key: str, max_age_sec: int) -> dict | None:
+    """讀持久化的分析快取；超過 max_age_sec 視為過期回 None。"""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT generated_at, json FROM ai_analysis WHERE cache_key=?",
+            (cache_key,)).fetchone()
+    if not row:
+        return None
+    try:
+        age = (datetime.now(timezone.utc)
+               - datetime.strptime(row["generated_at"], "%Y-%m-%d %H:%M:%S")
+                 .replace(tzinfo=timezone.utc)).total_seconds()
+        if age > max_age_sec:
+            return None
+        return json.loads(row["json"])
+    except Exception:
+        return None
+
+
+def log_ai_chat(symbol: str, question: str, answer: str, source: str, model: str = ""):
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO ai_chat (ts, symbol, question, answer, source, model) "
+            "VALUES (?,?,?,?,?,?)",
+            (_now(), symbol, question[:500], answer[:4000], source, model))
+        conn.commit()
+
+
+def log_ai_usage(kind: str, model: str, prompt_tokens: int = 0,
+                 completion_tokens: int = 0, ok: bool = True, error: str = ""):
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO ai_usage (ts, kind, model, prompt_tokens, completion_tokens, ok, error) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (_now(), kind, model, prompt_tokens, completion_tokens,
+             1 if ok else 0, error[:300]))
+        conn.commit()
+
+
+def ai_stats() -> dict:
+    """GPT 用量統計（後台 AI 設定頁顯示）：今日 / 近 7 日呼叫數與 token。"""
+    today = _now()[:10]
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+    with _connect() as conn:
+        def _row(since):
+            r = conn.execute(
+                "SELECT COUNT(*) n, SUM(ok=0) fails, "
+                "COALESCE(SUM(prompt_tokens),0) pt, COALESCE(SUM(completion_tokens),0) ct "
+                "FROM ai_usage WHERE ts >= ?", (since,)).fetchone()
+            return {"calls": r["n"], "fails": r["fails"] or 0,
+                    "prompt_tokens": r["pt"], "completion_tokens": r["ct"]}
+        chats = conn.execute("SELECT COUNT(*) FROM ai_chat").fetchone()[0]
+        cached = conn.execute("SELECT COUNT(*) FROM ai_analysis").fetchone()[0]
+    return {"today": _row(today), "week": _row(week_ago),
+            "chat_rows": chats, "analysis_cached": cached}
+
+
+def cleanup_ai(chat_keep_days: int = 90, analysis_keep_days: int = 7) -> dict:
+    """保留政策：分析快取留 7 天（資料版本一變就沒用）、對話/用量留 90 天。"""
+    now = datetime.now(timezone.utc)
+    cut_chat = (now - timedelta(days=chat_keep_days)).strftime("%Y-%m-%d %H:%M:%S")
+    cut_ana  = (now - timedelta(days=analysis_keep_days)).strftime("%Y-%m-%d %H:%M:%S")
+    with _connect() as conn:
+        a = conn.execute("DELETE FROM ai_analysis WHERE generated_at < ?", (cut_ana,)).rowcount
+        c = conn.execute("DELETE FROM ai_chat  WHERE ts < ?", (cut_chat,)).rowcount
+        u = conn.execute("DELETE FROM ai_usage WHERE ts < ?", (cut_chat,)).rowcount
+        conn.commit()
+    return {"analysis": a, "chat": c, "usage": u}
 
 
 # ── 預設資料 ─────────────────────────────────────────────────────────────────

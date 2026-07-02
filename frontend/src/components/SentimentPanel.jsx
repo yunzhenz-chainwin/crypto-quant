@@ -17,8 +17,8 @@ import {
   ResponsiveContainer, AreaChart, Area,
   XAxis, YAxis, Tooltip, ReferenceLine,
 } from 'recharts'
-import { fetchFearGreed, fetchNews, fetchNewsHistory, fetchNewsDates, backfillNews } from '../api/client'
-import { coinZh } from '../constants/coins'
+import { fetchFearGreed, fetchNews, fetchNewsHistory, fetchNewsDates, backfillNews, fetchNewsSentiment } from '../api/client'
+import { coinZh, coinTicker } from '../constants/coins'
 
 // 依指數值（0~100）回傳對應的顏色、標籤和解說文字
 function fgConfig(value) {
@@ -91,6 +91,58 @@ function FearGreedChart({ history }) {
         <Area dataKey="value" stroke="#f59e0b" fill="url(#fgArea)" strokeWidth={1.5} dot={false} />
       </AreaChart>
     </ResponsiveContainer>
+  )
+}
+
+// 新聞情緒溫度：近 N 天每日分數（-100 極空 ~ +100 極多）長條 + 今日統計
+// 資料來源 /api/sentiment/summary（news_sentiment_daily 彙總表，30 分鐘滾動更新）
+function NewsSentimentStrip({ symbol }) {
+  const [market, setMarket] = useState(null)   // 全市場
+  const [coin,   setCoin]   = useState(null)   // 這顆幣
+
+  useEffect(() => {
+    let alive = true
+    fetchNewsSentiment('MARKET', 14).then(r => { if (alive) setMarket(r.daily) }).catch(() => {})
+    fetchNewsSentiment(coinTicker(symbol), 14).then(r => { if (alive) setCoin(r.daily) }).catch(() => {})
+    return () => { alive = false }
+  }, [symbol])
+
+  const scoreColor = (s) => (s > 15 ? '#22c55e' : s < -15 ? '#ef4444' : '#f59e0b')
+
+  const Bars = ({ daily, label }) => {
+    if (!daily?.length) return null
+    const last = daily[daily.length - 1]
+    return (
+      <div className="ns-row">
+        <div className="ns-row-head">
+          <span className="ns-label">{label}</span>
+          <span className="ns-today" style={{ color: scoreColor(last.score) }}>
+            今日 {last.score > 0 ? '+' : ''}{last.score}
+            <span className="ns-counts">（{last.n_total} 則：多 {last.n_bull} / 空 {last.n_bear}）</span>
+          </span>
+        </div>
+        <div className="ns-bars" title="近 14 天每日新聞情緒（綠=偏多、紅=偏空、黃=中性）">
+          {daily.map(d => (
+            <div key={d.date} className="ns-bar-slot"
+                 title={`${d.date}：${d.score > 0 ? '+' : ''}${d.score}（${d.n_total} 則）`}>
+              <div className="ns-bar" style={{
+                background: scoreColor(d.score),
+                height: `${Math.max(8, Math.abs(d.score) * 0.9)}%`,
+              }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (!market?.length && !coin?.length) return null
+  return (
+    <div className="news-senti-strip">
+      <div className="fg-panel-title">新聞情緒溫度 <span className="ns-scale">-100 空 ~ +100 多</span></div>
+      <Bars daily={market} label="全市場" />
+      <Bars daily={coin}   label={coinZh(symbol)} />
+    </div>
   )
 }
 
@@ -339,6 +391,9 @@ export default function SentimentPanel({ symbol }) {
           }
           <div className="fg-chart-label">近 30 天趨勢</div>
           <FearGreedChart history={fgData} />
+
+          {/* 新聞情緒溫度（全市場 + 這顆幣，來自每日彙總表） */}
+          <NewsSentimentStrip symbol={symbol} />
 
           {/* 資料庫統計 + 回補按鈕 */}
           <div className="db-stat">
