@@ -1470,10 +1470,9 @@ function AIConfigPage({ onLogout }) {
           {msg && <span style={{ color: msg.tone === 'ok' ? '#22c55e' : '#ef4444' }}>{msg.text}</span>}
         </div>
         <div className="task-form-hint">
-          💡 金鑰存在本機資料庫（app_config），只用於伺服器端呼叫 GPT，不會傳到前端。<br />
-          也可用環境變數 <code>OPENAI_API_KEY</code> / <code>OPENAI_MODEL</code> 設定（優先於此頁）。<br />
-          前台「AI 分析」設計為<b>雙引擎</b>：本地規則引擎（免費、即時）＋ GPT 深度解讀（需金鑰），
-          兩者立場不一致時會特別標示，互相檢核。GPT 呼叫有每小時上限與 15 分鐘快取控制成本。
+          🔒 金鑰只保存在後端、僅用於伺服器呼叫 GPT，<b>不會傳到前端、頁面也只顯示遮罩</b>。<br />
+          前台「AI 分析」為<b>雙引擎</b>：本地規則引擎（免費、即時）＋ GPT 深度解讀（需金鑰），
+          兩者立場不一致時會特別標示、互相檢核；GPT 呼叫有每小時上限與 15 分鐘快取控制成本。
         </div>
       </div>
     </div>
