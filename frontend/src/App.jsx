@@ -26,6 +26,7 @@ import MarketSummary    from './components/MarketSummary'
 import AIAnalystPanel   from './components/AIAnalystPanel'
 import BotWidget        from './components/BotWidget'
 import OnboardingTour   from './components/OnboardingTour'
+import GlossaryModal    from './components/GlossaryModal'
 import { coinName }     from './constants/coins'
 
 // 日線的區間預設（單位：天）
@@ -82,8 +83,20 @@ export default function App() {
   const [showAI,          setShowAI]          = useState(true)
   // 首次造訪自動開新手導覽；Header「❓ 導覽」可重看
   const [showTour, setShowTour] = useState(() => !localStorage.getItem('cq_tour_done'))
+  const [showGlossary, setShowGlossary] = useState(false)
+  // 🌱簡易 / 📊專業 模式：簡易＝圖表固定常用圖層、回測只留白話與 preset。
+  // 首次造訪預設簡易（對新手直覺），選擇記在 localStorage。
+  const [simpleMode, setSimpleMode] = useState(
+    () => (localStorage.getItem('cq_view_mode') ?? 'simple') === 'simple')
   const [apiError, setApiError] = useState(false)   // API 失敗橫幅（輕量版 #22）
   const versionRef = useRef('')
+
+  const toggleMode = () => {
+    setSimpleMode(v => {
+      localStorage.setItem('cq_view_mode', v ? 'pro' : 'simple')
+      return !v
+    })
+  }
 
   // 這顆幣有沒有時線資料（目前只開 BTC/ETH）
   const hasHourly = (intervals['1h'] ?? []).includes(active)
@@ -214,15 +227,23 @@ export default function App() {
           >
             市場總覽
           </button>
+          <button className="nav-btn" onClick={() => setShowGlossary(true)} title="名詞小辭典">
+            📖 辭典
+          </button>
           <button className="nav-btn" onClick={() => setShowTour(true)} title="重看新手導覽">
             ❓ 導覽
+          </button>
+          <button className="nav-btn mode-btn" onClick={toggleMode}
+                  title={simpleMode ? '目前為簡易模式：圖表固定常用圖層、回測只留重點。點擊切換到完整專業介面' : '目前為專業模式：完整指標與參數。點擊切換到精簡直覺介面'}>
+            {simpleMode ? '🌱 簡易' : '📊 專業'}
           </button>
         </nav>
         <StatusBar />
       </header>
 
-      {/* ── 新手導覽（首次造訪自動開啟）─────────────────────────────────── */}
+      {/* ── 新手導覽（首次造訪自動開啟）／名詞辭典 ─────────────────────── */}
       {showTour && <OnboardingTour onClose={() => setShowTour(false)} />}
+      {showGlossary && <GlossaryModal onClose={() => setShowGlossary(false)} />}
 
       {/* ── API 失敗橫幅（取代永遠的「載入中…」）───────────────────────── */}
       {apiError && (
@@ -357,6 +378,7 @@ export default function App() {
                 indicators={indicators}
                 trades={interval === '1d' ? (backtest?.recent_trades ?? []) : []}
                 interval={interval}
+                simple={simpleMode}
               />
             </section>
 
@@ -388,6 +410,7 @@ export default function App() {
                   loading={btLoading}
                   params={btParams}
                   onParamsChange={patch => setBtParams(p => ({ ...p, ...patch }))}
+                  simple={simpleMode}
                 />
               )}
             </section>

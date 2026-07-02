@@ -128,7 +128,18 @@ export default function AIAnalystPanel({ symbol, refreshKey }) {
       </div>
 
       {err && <div className="ai-error">{err}</div>}
-      {!data && !err && <div className="ai-loading">量化數據整理中…</div>}
+      {!data && !err && (
+        <div className="ai-cols">
+          {[0, 1].map(i => (
+            <div key={i} className="ai-col">
+              <div className="skeleton sk-line" style={{ width: '45%' }} />
+              <div className="skeleton sk-line" style={{ width: '90%' }} />
+              <div className="skeleton sk-line" style={{ width: '82%' }} />
+              <div className="skeleton sk-line" style={{ width: '86%' }} />
+            </div>
+          ))}
+        </div>
+      )}
 
       {local && (
         <div className="ai-cols">

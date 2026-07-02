@@ -99,11 +99,20 @@ export default function MarketOverview({ signals, onSelect }) {
   const sorted = [...(signals ?? [])].sort((a, b) => (b.score ?? 50) - (a.score ?? 50))
 
   if (sorted.length === 0) {
+    // 載入骨架：先給版面形狀，不要整片空白
     return (
-      <div className="overview-empty">
-        <span className="overview-empty-icon">📡</span>
-        <p>資料載入中，請稍候…</p>
-      </div>
+      <section className="overview-section">
+        <div className="overview-grid">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div key={i} className="coin-card skeleton-card">
+              <div className="skeleton sk-line" style={{ width: '55%' }} />
+              <div className="skeleton sk-line lg" style={{ width: '70%' }} />
+              <div className="skeleton sk-bar" />
+              <div className="skeleton sk-bar" />
+            </div>
+          ))}
+        </div>
+      </section>
     )
   }
 

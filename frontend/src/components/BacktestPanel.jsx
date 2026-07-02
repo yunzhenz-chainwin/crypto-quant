@@ -192,8 +192,18 @@ function VerdictBanner({ data }) {
 // 回測資料與參數由父層(App)集中管理,面板為受控元件:
 //   - 與 K 線買賣標記共用同一份回測(不再各抓一次)
 //   - 調整停損/停利時,K 線上的箭頭會跟著一起變
-export default function BacktestPanel({ signal, data, loading, params, onParamsChange }) {
+// 一鍵參數組合：新手不用懂四個 %，選風格就好（專業模式仍可微調下拉）
+const PRESETS = [
+  { key: '保守', hint: '小賠就跑、小賺就收',   p: { stopLoss: -0.05, takeProfit: 0.10, feeRate: 0.001, slippage: 0.001 } },
+  { key: '平衡', hint: '預設參數',             p: { stopLoss: -0.06, takeProfit: 0.20, feeRate: 0.001, slippage: 0.0005 } },
+  { key: '積極', hint: '拉大停損停利抱久一點', p: { stopLoss: -0.10, takeProfit: 0.30, feeRate: 0.001, slippage: 0.0005 } },
+]
+
+export default function BacktestPanel({ signal, data, loading, params, onParamsChange, simple = false }) {
   const [showDetail, setShowDetail] = useState(false)   // 交易明細預設收起
+  const activePreset = PRESETS.find(pr =>
+    pr.p.stopLoss === params.stopLoss && pr.p.takeProfit === params.takeProfit &&
+    pr.p.feeRate === params.feeRate && pr.p.slippage === params.slippage)?.key
 
   const m = data?.metrics
   // beatsHold=true 表示策略報酬 > 單純買入持有，用來決定顯示綠色還是警告色
@@ -209,6 +219,19 @@ export default function BacktestPanel({ signal, data, loading, params, onParamsC
           <h2 className="section-title">策略回測</h2>
           <p className="section-subtitle">模擬過去 5 年依訊號買賣的假設績效</p>
         </div>
+        <div className="param-col">
+        <div className="preset-row">
+          <span className="preset-lbl">參數風格：</span>
+          {PRESETS.map(pr => (
+            <button key={pr.key} title={pr.hint}
+              className={`preset-btn ${activePreset === pr.key ? 'active' : ''}`}
+              onClick={() => onParamsChange(pr.p)}>
+              {pr.key}
+            </button>
+          ))}
+          {!activePreset && <span className="preset-custom">自訂中</span>}
+        </div>
+        {!simple && (
         <div className="param-row">
           <label>停損<Info text="跌幅達多少就認賠出場，保護本金。例如 -6% = 買進後跌 6% 就賣。" />
             <select value={params.stopLoss} onChange={e => onParamsChange({ stopLoss: +e.target.value })}>
@@ -238,6 +261,8 @@ export default function BacktestPanel({ signal, data, loading, params, onParamsC
               ))}
             </select>
           </label>
+        </div>
+        )}
         </div>
       </div>
 
@@ -311,18 +336,27 @@ export default function BacktestPanel({ signal, data, loading, params, onParamsC
             </div>
           </div>
 
-          <div className="backtest-grid">
-            <ValidationTable validation={data.validation} />
-            <SweepTable rows={data.parameter_sweep} />
-          </div>
-
-          {/* 資產曲線 */}
-          <div style={{ marginTop: 16 }}>
-            <div className="key-chart-title">
-              資產變化曲線:策略 vs 買入持有(每筆交易後的倍數,1.0 = 本金)
+          {!simple && (
+            <div className="backtest-grid">
+              <ValidationTable validation={data.validation} />
+              <SweepTable rows={data.parameter_sweep} />
             </div>
-            <EquityCurve data={data.equity_curve} />
-          </div>
+          )}
+
+          {/* 資產曲線（簡易模式收起，切專業看完整） */}
+          {!simple && (
+            <div style={{ marginTop: 16 }}>
+              <div className="key-chart-title">
+                資產變化曲線:策略 vs 買入持有(每筆交易後的倍數,1.0 = 本金)
+              </div>
+              <EquityCurve data={data.equity_curve} />
+            </div>
+          )}
+          {simple && (
+            <div className="task-form-hint" style={{ marginTop: 10 }}>
+              🌱 簡易模式只顯示重點結論；想看樣本切分驗證、參數掃描與資產曲線，請切換右上角「📊 專業」。
+            </div>
+          )}
 
           {/* 展開更多 */}
           <button className="detail-toggle" onClick={() => setShowDetail(v => !v)}>
