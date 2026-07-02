@@ -14,6 +14,17 @@ scoring.py — 共用的訊號計分核心（前端建議與回測共用同一�
 """
 
 
+def _fmt_price(v):
+    """價位自適應小數位：低價幣（DOGE $0.07）不能被 ,.0f 捨成 0。"""
+    if v is None:
+        return "—"
+    if v < 1:
+        return f"{v:,.4f}"
+    if v < 100:
+        return f"{v:,.2f}"
+    return f"{v:,.0f}"
+
+
 def score_row(rsi, hist, prev_hist, close, ma20, ma60, ma200,
               volume, vol_ma20, bb_upper, bb_lower):
     """
@@ -33,9 +44,16 @@ def score_row(rsi, hist, prev_hist, close, ma20, ma60, ma200,
         elif rsi > 70: rsi_score = -20
         elif rsi > 65: rsi_score = -12
         elif rsi > 55: rsi_score = -5
+    # note 帶區間白話（新手看得懂 26 是「跌深超賣」而不只是個數字）
+    if rsi is None:
+        rsi_note = "無資料"
+    else:
+        zone = ("跌深超賣" if rsi < 30 else "偏弱" if rsi < 45 else
+                "中性" if rsi <= 55 else "偏強" if rsi <= 70 else "漲多超買")
+        rsi_note = f"RSI {rsi:.1f}（{zone}）"
     factors["RSI"] = {"score": rsi_score,
                       "value": round(rsi, 1) if rsi is not None else None,
-                      "note":  f"RSI {rsi:.1f}" if rsi is not None else "無資料",
+                      "note":  rsi_note,
                       "label": "RSI 動量"}
     score += rsi_score
 
@@ -66,8 +84,8 @@ def score_row(rsi, hist, prev_hist, close, ma20, ma60, ma200,
     ma200_score = 0
     ma200_note  = "無資料"
     if ma200 and close:
-        if   close > ma200: ma200_score, ma200_note = +10, f"站上 MA200 ({ma200:,.0f})"
-        else:               ma200_score, ma200_note = -10, f"跌破 MA200 ({ma200:,.0f})"
+        if   close > ma200: ma200_score, ma200_note = +10, f"站上 MA200 (${_fmt_price(ma200)})"
+        else:               ma200_score, ma200_note = -10, f"跌破 MA200 (${_fmt_price(ma200)})"
     factors["MA200"] = {"score": ma200_score, "note": ma200_note, "label": "長期趨勢 MA200"}
     score += ma200_score
 
