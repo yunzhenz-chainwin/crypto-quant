@@ -465,6 +465,10 @@ def _parse_history_query(question: str):
             return {"type": "day", "date": date(int(m.group(1)), int(m.group(2)), int(m.group(3)))}
         except ValueError:
             return None
+    # 帶年份的月份（2024年11月 / 2024-11）→ 該年該月的月度回顧
+    m = _re.search(r"(20\d{2})[-/年](\d{1,2})月?(?![\d日號])", q)
+    if m and 1 <= int(m.group(2)) <= 12:
+        return {"type": "month", "y": int(m.group(1)), "m": int(m.group(2))}
     m = _re.search(r"(?<![\d.])(\d{1,2})月(\d{1,2})[日號]", q)
     if m:
         try:
