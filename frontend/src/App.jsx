@@ -240,10 +240,13 @@ export default function App() {
           <button className="nav-btn" onClick={() => setShowTour(true)} title="重看新手導覽">
             ❓ 導覽
           </button>
-          <button className="nav-btn mode-btn" onClick={toggleMode}
-                  title={simpleMode ? '目前為簡易模式：圖表固定常用圖層、回測只留重點。點擊切換到完整專業介面' : '目前為專業模式：完整指標與參數。點擊切換到精簡直覺介面'}>
-            {simpleMode ? '🌱 簡易' : '📊 專業'}
-          </button>
+          {/* 兩段式切換：亮著的是目前模式，點另一邊切換（單顆按鈕會讓人誤會） */}
+          <div className="mode-seg" title="簡易＝白話重點；專業＝完整指標與參數">
+            <button className={`mode-seg-btn ${simpleMode ? 'active' : ''}`}
+                    onClick={() => !simpleMode && toggleMode()}>🌱 簡易</button>
+            <button className={`mode-seg-btn ${!simpleMode ? 'active' : ''}`}
+                    onClick={() => simpleMode && toggleMode()}>📊 專業</button>
+          </div>
         </nav>
         <StatusBar />
       </header>
@@ -292,7 +295,7 @@ export default function App() {
           />
 
           <main className="main-content">
-            <HeroSignal signal={activeSignal} symbol={active} />
+            <HeroSignal signal={activeSignal} symbol={active} simple={simpleMode} />
 
             <section className="chart-section">
               <div className="chart-section-header">
@@ -425,17 +428,20 @@ export default function App() {
               )}
             </section>
 
-            <section className="collapsible-section">
-              <button className="collapse-toggle" onClick={() => setShowCorrelation(v => !v)}>
-                <span>幣種相關性分析</span>
-                <span className="collapse-arrow">{showCorrelation ? '▲' : '▼'}</span>
-              </button>
-              {showCorrelation && (
-                <div className="correlation-body">
-                  <CorrelationHeatmap data={correlation} />
-                </div>
-              )}
-            </section>
+            {/* 相關性矩陣屬進階內容：簡易模式整段隱藏，切專業才出現 */}
+            {!simpleMode && (
+              <section className="collapsible-section">
+                <button className="collapse-toggle" onClick={() => setShowCorrelation(v => !v)}>
+                  <span>幣種相關性分析</span>
+                  <span className="collapse-arrow">{showCorrelation ? '▲' : '▼'}</span>
+                </button>
+                {showCorrelation && (
+                  <div className="correlation-body">
+                    <CorrelationHeatmap data={correlation} />
+                  </div>
+                )}
+              </section>
+            )}
           </main>
         </div>
       )}

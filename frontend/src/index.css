@@ -1587,3 +1587,25 @@ body { background: var(--bg); }
   box-shadow: 0 10px 30px rgba(0,0,0,.5); animation: bot-pop .25s ease;
   white-space: nowrap; max-width: calc(100vw - 24px); overflow: hidden; text-overflow: ellipsis;
 }
+
+/* 兩段式 簡易/專業 切換器（亮著=目前模式） */
+.mode-seg {
+  display: inline-flex; border: 1px solid var(--border); border-radius: 999px;
+  overflow: hidden; background: rgba(15,23,42,.5);
+}
+.mode-seg-btn {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 12.5px; font-weight: 700; padding: 6px 14px; transition: all .15s;
+}
+.mode-seg-btn.active { background: var(--accent); color: #fff; }
+.mode-seg-btn:not(.active):hover { color: var(--text); }
+
+/* 簡易模式的大訊號卡：白話因子清單 */
+.hero-plain { min-width: 300px; max-width: 380px; }
+.hero-plain-title { font-size: 12px; font-weight: 800; color: var(--muted); margin-bottom: 8px; letter-spacing: 1px; }
+.hero-plain-item {
+  display: flex; gap: 8px; align-items: baseline;
+  font-size: 13px; line-height: 1.7; margin-bottom: 4px;
+}
+.hero-plain-hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
+@media (max-width: 768px) { .hero-plain { min-width: 0; max-width: none; width: 100%; } }
