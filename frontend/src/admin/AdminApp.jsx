@@ -514,8 +514,91 @@ function TasksPage({ onLogout }) {
   }
   const shown = tasks.filter(t => filter === 'all' || t.status === filter)
 
+  // ── 視覺化統計 ──────────────────────────────────────────────────────────
+  const total   = tasks.length
+  const donePct = total ? Math.round(counts.done / total * 100) : 0
+  const pct = (k) => total ? counts[k] / total * 100 : 0
+
+  // 依分類彙總完成度（動態取現有分類；未填分類歸「其他」）
+  const catMap = {}
+  tasks.forEach(t => {
+    const c = t.phase || '其他'
+    if (!catMap[c]) catMap[c] = { done: 0, total: 0 }
+    catMap[c].total++
+    if (t.status === 'done') catMap[c].done++
+  })
+  const catList = Object.entries(catMap)
+    .map(([cat, v]) => ({ cat, ...v, pct: v.total ? Math.round(v.done / v.total * 100) : 0 }))
+    .sort((a, b) => b.total - a.total)
+
+  // 每項時程狀態（相對今天）：完成 / 逾期 N 天 / 今天 / 還有 N 天 / 未排期
+  const timeInfo = (t) => {
+    if (t.status === 'done')
+      return { text: t.done_date ? `完成 ${t.done_date.slice(5)}` : '完成', cls: 'done' }
+    if (!t.planned_date) return { text: '未排期', cls: 'none' }
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    const p = new Date(t.planned_date + 'T00:00:00')
+    const days = Math.round((p - today) / 86400000)
+    if (Number.isNaN(days)) return { text: t.planned_date, cls: 'none' }
+    if (days < 0)  return { text: `逾期 ${-days} 天`, cls: 'overdue' }
+    if (days === 0) return { text: '就在今天', cls: 'today' }
+    if (days <= 3)  return { text: `還有 ${days} 天`, cls: 'soon' }
+    return { text: `還有 ${days} 天`, cls: 'later' }
+  }
+
   return (
     <div className="admin-body">
+      {/* ── 視覺化總覽：完成率 + 三色堆疊進度條 + 分類進度 ─────────────── */}
+      <div className="task-dash">
+        <div className="task-dash-top">
+          <div className="task-dash-ring" style={{ '--pct': donePct }}>
+            <div className="tdr-inner">
+              <span className="tdr-num">{donePct}%</span>
+              <span className="tdr-lbl">完成率</span>
+            </div>
+          </div>
+          <div className="task-dash-bars">
+            <div className="task-stack">
+              <div className="ts-seg done" style={{ width: `${pct('done')}%` }}
+                   title={`完成 ${counts.done}`} />
+              <div className="ts-seg prog" style={{ width: `${pct('in_progress')}%` }}
+                   title={`進行中 ${counts.in_progress}`} />
+              <div className="ts-seg plan" style={{ width: `${pct('planned')}%` }}
+                   title={`待辦 ${counts.planned}`} />
+            </div>
+            <div className="task-stack-legend">
+              <button className={`tsl ${filter === 'done' ? 'on' : ''}`} onClick={() => setFilter('done')}>
+                <i className="dot done" />完成 <b>{counts.done}</b>
+              </button>
+              <button className={`tsl ${filter === 'in_progress' ? 'on' : ''}`} onClick={() => setFilter('in_progress')}>
+                <i className="dot prog" />進行中 <b>{counts.in_progress}</b>
+              </button>
+              <button className={`tsl ${filter === 'planned' ? 'on' : ''}`} onClick={() => setFilter('planned')}>
+                <i className="dot plan" />待辦 <b>{counts.planned}</b>
+              </button>
+              <button className={`tsl ${filter === 'all' ? 'on' : ''}`} onClick={() => setFilter('all')}>
+                共 <b>{total}</b> 項
+              </button>
+            </div>
+          </div>
+        </div>
+        {catList.length > 0 && (
+          <div className="task-cat-grid">
+            {catList.map(c => (
+              <div key={c.cat} className="task-cat">
+                <div className="task-cat-head">
+                  <span className="tc-name">{c.cat}</span>
+                  <span className="tc-cnt">{c.done}/{c.total}</span>
+                </div>
+                <div className="task-cat-bar">
+                  <div className="tc-fill" style={{ width: `${c.pct}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="admin-toolbar">
         <div className="task-filter-bar">
           <label className="task-filter-label">篩選狀態
@@ -570,7 +653,7 @@ function TasksPage({ onLogout }) {
           <thead>
             <tr>
               <th>狀態</th><th>分類</th><th>項目</th>
-              <th>預計日</th><th>完成日</th><th>動作</th>
+              <th>時程</th><th>預計日</th><th>動作</th>
             </tr>
           </thead>
           <tbody>
@@ -581,6 +664,7 @@ function TasksPage({ onLogout }) {
             )}
             {shown.map(t => {
               const st = TASK_STATUS[t.status] ?? TASK_STATUS.planned
+              const ti = timeInfo(t)
               return (
                 <tr key={t.id}>
                   <td>
@@ -603,8 +687,8 @@ function TasksPage({ onLogout }) {
                     </button>
                     {t.detail && <div className="task-detail">{t.detail}</div>}
                   </td>
-                  <td>{t.planned_date || '—'}</td>
-                  <td>{t.done_date || '—'}</td>
+                  <td><span className={`time-badge tb-${ti.cls}`}>{ti.text}</span></td>
+                  <td className="task-date-cell">{t.planned_date || '—'}</td>
                   <td>
                     <button className="admin-del-btn"
                             onClick={() => guard(() => deleteTask(t.id))}>刪除</button>
