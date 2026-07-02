@@ -212,7 +212,7 @@ QA_TEMPLATES = [
      "全部來自真實媒體的官方 RSS：CoinTelegraph、CoinDesk、Decrypt、The Block、CryptoSlate、Blockworks、Bitcoin Magazine、動區、鏈新聞＋Google News 中文聚合。\n\n系統**只搬運、不改寫、不創作**，每則都保留原始網址，點開即可對質原文；情緒標籤（看多/看空）是我們用審核過的詞庫做的自動判讀，屬於分析、不是新聞內容。"),
     ("平台", "可以查以前（歷史）的數據嗎？",
      "歷史數據｜查以前｜過去的數據｜歷史查詢｜以前的指標｜之前的價格｜歷史價格",
-     "可以！怎麼問都行，把「時間＋想看的東西」講給我聽：\n・**單日**：「6月15日的RSI」「2024/12/20 狀況」「去年12月20日」「12/25 的價格」「昨天」「兩天前」「三週前」「上個月20號」「半年前」「一年前的今天」\n・**區間回顧**：「上個月漲多少」「去年第四季表現」「今年Q1」「2024年底」「去年表現如何」「今年以來漲多少」\n\n我會直接查資料庫的真實歷史（日線約從 2021 年 7 月起），回覆開高低收、RSI/MACD、均線與信心分數；超出範圍會告訴你可查區間並給最接近的快照。"),
+     "可以！怎麼問都行，把「時間＋想看的東西」講給我聽：\n・**單日**：「6月15日的RSI」「2024/12/20 狀況」「去年12月20日」「12/25 的價格」「昨天」「兩天前」「上個月20號」「一年前的今天」\n・**近期區間**：「這五天狀況」「近7天」「過去三週表現」「最近一個月」「近半年」「過去一年」\n・**特定區間**：「上個月漲多少」「去年第四季表現」「今年Q1」「2024年底」「去年表現如何」「今年以來漲多少」\n\n我會直接查資料庫的真實歷史（日線約從 2021 年 7 月起），回覆開高低收、RSI/MACD、均線與信心分數；超出範圍會告訴你可查區間並給最接近的快照。"),
     ("平台", "資料多久更新一次？",
      "多久更新｜資料更新頻率｜即時嗎",
      "・日線 K 棒：每天 09:00（台北時間）\n・時線（{時線清單}）：每小時第 6 分鐘\n・新聞與情緒：每 30 分鐘\n・恐懼貪婪指數：每天\n\n頁面每分鐘自動檢查新資料、有變化才更新畫面——**不用手動重整**。"),
@@ -528,6 +528,36 @@ def _parse_history_query(question: str):
             d0 = mk_day(y, mth, int(m[1]))
         if d0:
             return d0
+    # 5.5) 最近 N 天/週/月 區間：近/過去/最近/這/前 + N + 天|週|個月（前綴，不與後綴「前」衝突）
+    #      例：這五天、近7天、過去三週、最近一個月、近半年、過去一年
+    _RNG = r"(?:近|過去|最近|這|前)"
+    m = _re.search(_RNG + r"([一兩二三四五六七八九十]+|\d+)天(?:內|來)?", q)
+    if m and num(m[1]):
+        n = num(m[1])
+        return {"type": "range", "start": today - timedelta(days=n - 1),
+                "end": today, "label": f"近 {n} 天"}
+    if "這週" in q or "本週" in q or "這周" in q or "這禮拜" in q or "本周" in q:
+        return {"type": "range", "start": today - timedelta(days=6),
+                "end": today, "label": "近一週"}
+    m = _re.search(_RNG + r"([一兩二三四五六七八九十]+|\d+)個?(?:週|周|禮拜|星期)", q)
+    if m and num(m[1]):
+        n = num(m[1])
+        return {"type": "range", "start": today - timedelta(days=7 * n - 1),
+                "end": today, "label": f"近 {n} 週"}
+    m = _re.search(_RNG + r"([一兩二三四五六七八九十]+|\d+)個月", q)
+    if m and num(m[1]):
+        n = num(m[1])
+        y, mth = shift_month(n)
+        dd = min(today.day, monthrange(y, mth)[1])
+        return {"type": "range", "start": date(y, mth, dd), "end": today,
+                "label": f"近 {n} 個月"}
+    if _re.search(r"(?:近|過去|最近)半年", q):
+        return {"type": "range", "start": today - timedelta(days=182),
+                "end": today, "label": "近半年"}
+    if _re.search(r"(?:近|過去|最近)(?:一|1)年", q):
+        return {"type": "range", "start": today - timedelta(days=365),
+                "end": today, "label": "近一年"}
+
     # 6) 相對日：大前天 / 前天 / 昨天 / N天前（含中文數字、兩）
     if "大前天" in q:
         return mk_day(*(today - timedelta(days=3)).timetuple()[:3])
