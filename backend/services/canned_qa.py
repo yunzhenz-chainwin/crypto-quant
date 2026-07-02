@@ -212,7 +212,7 @@ QA_TEMPLATES = [
      "全部來自真實媒體的官方 RSS：CoinTelegraph、CoinDesk、Decrypt、The Block、CryptoSlate、Blockworks、Bitcoin Magazine、動區、鏈新聞＋Google News 中文聚合。\n\n系統**只搬運、不改寫、不創作**，每則都保留原始網址，點開即可對質原文；情緒標籤（看多/看空）是我們用審核過的詞庫做的自動判讀，屬於分析、不是新聞內容。"),
     ("平台", "可以查以前（歷史）的數據嗎？",
      "歷史數據｜查以前｜過去的數據｜歷史查詢｜以前的指標｜之前的價格｜歷史價格",
-     "可以！直接把「日期＋想看的東西」講給我聽就行：\n・**單日快照**：「{幣名} 6月15日的 RSI」「2026-06-01 收盤多少」「昨天的價格」「三天前的數據」\n・**月度回顧**：「{幣名} 上個月漲多少」「6 月表現如何」\n\n我會直接查資料庫的真實歷史（日線約從 2021 年 7 月起），回覆當日開高低收、RSI/MACD、均線與信心分數。\n\n也可以在蠟燭圖用「📅 自訂」選日期區間自己看圖。"),
+     "可以！怎麼問都行，把「時間＋想看的東西」講給我聽：\n・**單日**：「6月15日的RSI」「2024/12/20 狀況」「去年12月20日」「12/25 的價格」「昨天」「兩天前」「三週前」「上個月20號」「半年前」「一年前的今天」\n・**區間回顧**：「上個月漲多少」「去年第四季表現」「今年Q1」「2024年底」「去年表現如何」「今年以來漲多少」\n\n我會直接查資料庫的真實歷史（日線約從 2021 年 7 月起），回覆開高低收、RSI/MACD、均線與信心分數；超出範圍會告訴你可查區間並給最接近的快照。"),
     ("平台", "資料多久更新一次？",
      "多久更新｜資料更新頻率｜即時嗎",
      "・日線 K 棒：每天 09:00（台北時間）\n・時線（{時線清單}）：每小時第 6 分鐘\n・新聞與情緒：每 30 分鐘\n・恐懼貪婪指數：每天\n\n頁面每分鐘自動檢查新資料、有變化才更新畫面——**不用手動重整**。"),
@@ -440,69 +440,177 @@ def _knowledge_answer(symbol: str, intent: str) -> str | None:
             f"・近期熱度可看「市場情緒／新聞」面板的該幣新聞量" + tail)
 
 
-# ── 歷史數據查詢（「6月15日比特幣RSI多少」「上個月漲多少」直接查 DB 回答）──────
-_ZH_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7,
-           "八": 8, "九": 9, "十": 10}
+# ── 歷史數據查詢（口語化解析：多種問法都通，直接查 DB 回答）───────────────────
+_ZH_NUM = {"一": 1, "兩": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
+           "七": 7, "八": 8, "九": 9, "十": 10}
+
+# 判斷「講到年/月但沒講日」時，是否真的在問行情（避免「12月」出現在無關句子誤觸）
+_CTX_WORDS = ("漲", "跌", "表現", "回顧", "行情", "如何", "怎樣", "怎麼樣", "狀況",
+              "數據", "指標", "價", "走勢", "rsi", "macd", "成交量", "分數", "多少")
 
 
 def _parse_history_query(question: str):
     """
-    從問題解析歷史時間點/區間。回傳：
-      {"type": "day",   "date": date}                      單日快照
-      {"type": "month", "y": int, "m": int}                月度回顧
-      None                                                  沒有歷史語意
-    支援：YYYY-MM-DD、YYYY年M月D日、M月D日、昨天/前天/大前天、N天前、
-          上週（=7天前）、上個月、這個月、X月（今年，未到則視為去年）
+    口語化歷史時間解析。回傳三種形態之一：
+      {"type": "day",   "date": date, ["approx": 說明]}         單日快照
+      {"type": "range", "start": date, "end": date, "label": str}  區間回顧（月/季/年）
+      None                                                       沒有歷史語意
+    支援（舉例）：
+      2024-12-20 / 2024/12/20 / 2024.12.20 / 2024年12月20日 / 去年12月20日
+      12月20日 / 12/20 / 上個月20號 / 20號
+      昨天 / 前天 / 大前天 / 兩天前 / 十天前
+      上週 / 上上週 / 三週前 / 兩個月前 / 半年前 / 一年前 / 去年這時候
+      上個月 / 這個月 / 2024年11月 / 去年11月 / 6月 / 2024年底 / 去年年初
+      去年第四季 / 今年Q1 / 2025年第2季 / 去年表現 / 2024年漲多少 / 今年以來
     """
     import re as _re
     from datetime import datetime, timezone, timedelta, date
-    q = question.replace(" ", "")
+    from calendar import monthrange
+    q = question.replace(" ", "").replace("／", "/").replace("．", ".")
+    ql = q.lower()
     today = datetime.now(timezone.utc).date()
+    REL_YEAR = {"今年": today.year, "去年": today.year - 1, "前年": today.year - 2}
 
-    m = _re.search(r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})[日號]?", q)
-    if m:
+    def num(s):
+        return _ZH_NUM.get(s) or (int(s) if s and s.isdigit() else None)
+
+    def mk_day(y, m, d, approx=None):
         try:
-            return {"type": "day", "date": date(int(m.group(1)), int(m.group(2)), int(m.group(3)))}
+            out = {"type": "day", "date": date(y, m, d)}
+            if approx:
+                out["approx"] = approx
+            return out
         except ValueError:
             return None
-    # 帶年份的月份（2024年11月 / 2024-11）→ 該年該月的月度回顧
-    m = _re.search(r"(20\d{2})[-/年](\d{1,2})月?(?![\d日號])", q)
-    if m and 1 <= int(m.group(2)) <= 12:
-        return {"type": "month", "y": int(m.group(1)), "m": int(m.group(2))}
-    m = _re.search(r"(?<![\d.])(\d{1,2})月(\d{1,2})[日號]", q)
-    if m:
-        try:
-            d = date(today.year, int(m.group(1)), int(m.group(2)))
-            if d > today:
-                d = d.replace(year=today.year - 1)
-            return {"type": "day", "date": d}
-        except ValueError:
+
+    def month_range(y, m, label=None):
+        if not (1 <= m <= 12):
             return None
+        return {"type": "range", "start": date(y, m, 1),
+                "end": date(y, m, monthrange(y, m)[1]),
+                "label": label or f"{y} 年 {m} 月"}
+
+    def shift_month(back):
+        y, m = today.year, today.month - back
+        while m <= 0:
+            y, m = y - 1, m + 12
+        return y, m
+
+    # 1) 完整日期：2024-12-20 / 2024/12/20 / 2024.12.20 / 2024年12月20日|號
+    m = _re.search(r"(20\d{2})[年\-/.](\d{1,2})[月\-/.](\d{1,2})[日號]?", q)
+    if m:
+        return mk_day(int(m[1]), int(m[2]), int(m[3]))
+    # 2) 相對年＋月日：去年12月20日 / 前年6月1號
+    m = _re.search(r"(去年|今年|前年)(\d{1,2})月(\d{1,2})[日號]?", q)
+    if m:
+        return mk_day(REL_YEAR[m[1]], int(m[2]), int(m[3]))
+    # 3) 月日（無年）：12月20日|號 / 12月20（後不接數字）/ 12/20 / 12-20 → 今年，未到則去年
+    m = (_re.search(r"(?<![\d.])(\d{1,2})月(\d{1,2})(?:[日號]|(?![\d%]))", q)
+         or _re.search(r"(?<![\d./-])(\d{1,2})[/-](\d{1,2})(?![\d/%-])", q))
+    if m and 1 <= int(m[1]) <= 12 and 1 <= int(m[2]) <= 31:
+        d0 = mk_day(today.year, int(m[1]), int(m[2]))
+        if d0 and d0["date"] > today:
+            d0 = mk_day(today.year - 1, int(m[1]), int(m[2]))
+        if d0:
+            return d0
+    # 4) 相對月＋日：上個月20號 / 這個月3日 / 上上個月15號
+    m = _re.search(r"(上上個月|上個月|上月|這個月|本月)(\d{1,2})[日號]", q)
+    if m:
+        back = {"上上個月": 2, "上個月": 1, "上月": 1, "這個月": 0, "本月": 0}[m[1]]
+        y, mth = shift_month(back)
+        return mk_day(y, mth, int(m[2]))
+    # 5) 單獨「N號」→ 本月該日（未到則上個月）
+    m = _re.search(r"(?<![\d月])(\d{1,2})號", q)
+    if m and 1 <= int(m[1]) <= 31:
+        d0 = mk_day(today.year, today.month, int(m[1]))
+        if d0 and d0["date"] > today:
+            y, mth = shift_month(1)
+            d0 = mk_day(y, mth, int(m[1]))
+        if d0:
+            return d0
+    # 6) 相對日：大前天 / 前天 / 昨天 / N天前（含中文數字、兩）
     if "大前天" in q:
-        return {"type": "day", "date": today - timedelta(days=3)}
+        return mk_day(*(today - timedelta(days=3)).timetuple()[:3])
     if "前天" in q:
-        return {"type": "day", "date": today - timedelta(days=2)}
+        return mk_day(*(today - timedelta(days=2)).timetuple()[:3])
     if "昨天" in q or "昨日" in q:
-        return {"type": "day", "date": today - timedelta(days=1)}
-    m = _re.search(r"([一二三四五六七八九十]|\d+)天前", q)
-    if m:
-        n = _ZH_NUM.get(m.group(1)) or int(m.group(1))
-        return {"type": "day", "date": today - timedelta(days=n)}
+        return mk_day(*(today - timedelta(days=1)).timetuple()[:3])
+    m = _re.search(r"([一兩二三四五六七八九十]+|\d+)天前", q)
+    if m and num(m[1]):
+        return mk_day(*(today - timedelta(days=num(m[1]))).timetuple()[:3])
+    # 7) 週：上上週 / 上週 / N週前 / 兩個禮拜前
+    if "上上週" in q or "上上周" in q or "上上禮拜" in q:
+        d = today - timedelta(days=14)
+        return mk_day(d.year, d.month, d.day, approx="上上週約此時（14 天前）")
     if "上週" in q or "上周" in q or "上禮拜" in q:
-        return {"type": "day", "date": today - timedelta(days=7), "approx": "上週約此時（7 天前）"}
+        d = today - timedelta(days=7)
+        return mk_day(d.year, d.month, d.day, approx="上週約此時（7 天前）")
+    m = _re.search(r"([一兩二三四五六七八九十]+|\d+)個?(?:週|周|禮拜|星期)前", q)
+    if m and num(m[1]):
+        n = num(m[1])
+        d = today - timedelta(days=7 * n)
+        return mk_day(d.year, d.month, d.day, approx=f"{n} 週前約此時")
+    # 8) 半年前 / N個月前 / 一年前 / 去年這時候 → 近似單日
+    if "半年前" in q:
+        d = today - timedelta(days=182)
+        return mk_day(d.year, d.month, d.day, approx="半年前約此時")
+    m = _re.search(r"([一兩二三四五六七八九十]+|\d+)個月前", q)
+    if m and num(m[1]):
+        n = num(m[1])
+        y, mth = shift_month(n)
+        dd = min(today.day, monthrange(y, mth)[1])
+        return mk_day(y, mth, dd, approx=f"{n} 個月前約此時")
+    if "一年前" in q or "去年這時候" in q or "去年的今天" in q or "去年同期" in q:
+        d = today - timedelta(days=365)
+        return mk_day(d.year, d.month, d.day, approx="一年前約此時")
+    # 9) 季：2025年第2季 / 去年第四季 / 今年Q1 / Q3
+    m = _re.search(r"(?:(20\d{2})年?|去年|今年|前年)?第?([一二三四1-4])季(?:度)?", q) \
+        or _re.search(r"(?:(20\d{2})年?|去年|今年|前年)?q([1-4])", ql)
+    if m and ("季" in q or "q" in ql):
+        qn = num(m[2]) if not str(m[2]).isdigit() else int(m[2])
+        yword = _re.search(r"(20\d{2})年|去年|今年|前年", q)
+        if yword:
+            y = int(yword[1]) if yword[1] else REL_YEAR[yword[0]]
+        else:
+            y = today.year if (qn - 1) * 3 + 1 <= today.month else today.year - 1
+        sm = (qn - 1) * 3 + 1
+        return {"type": "range", "start": date(y, sm, 1),
+                "end": date(y, sm + 2, monthrange(y, sm + 2)[1]),
+                "label": f"{y} 年第{'一二三四'[qn-1]}季"}
+    # 10) 年初/年中/年底：2024年底 / 去年年初 / 去年底
+    m = _re.search(r"(20\d{2}|去年|今年|前年)年?(初|中|底)", q)
+    if m:
+        y = int(m[1]) if m[1].isdigit() else REL_YEAR[m[1]]
+        return month_range(y, {"初": 1, "中": 6, "底": 12}[m[2]],
+                           label=f"{y} 年{m[2] == '初' and '年初(1月)' or m[2] == '中' and '年中(6月)' or '年底(12月)'}")
+    # 11) 年＋月：2024年11月 / 2024-11 / 去年11月
+    m = _re.search(r"(20\d{2})[-/年](\d{1,2})月?(?![\d日號])", q)
+    if m and 1 <= int(m[2]) <= 12:
+        return month_range(int(m[1]), int(m[2]))
+    m = _re.search(r"(去年|今年|前年)(\d{1,2})月(?![\d日號])", q)
+    if m and 1 <= int(m[2]) <= 12:
+        return month_range(REL_YEAR[m[1]], int(m[2]))
+    # 12) 相對整月：上上個月 / 上個月 / 這個月
+    if "上上個月" in q:
+        return month_range(*shift_month(2))
     if "上個月" in q or "上月" in q:
-        y, mth = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
-        return {"type": "month", "y": y, "m": mth}
+        return month_range(*shift_month(1))
     if "這個月" in q or "本月" in q:
-        return {"type": "month", "y": today.year, "m": today.month}
+        return month_range(today.year, today.month)
+    # 13) 光桿月份：6月（需行情語境詞，避免誤觸）
     m = _re.search(r"(?<![\d.月])(\d{1,2})月(?![\d日號])", q)
-    if m and ("漲" in q or "跌" in q or "表現" in q or "回顧" in q or "行情" in q
-              or "怎麼樣" in q or "怎樣" in q or "如何" in q or "rsi" in q.lower()
-              or "價" in q or "數據" in q or "指標" in q):
-        mth = int(m.group(1))
+    if m and any(w in ql for w in _CTX_WORDS):
+        mth = int(m[1])
         if 1 <= mth <= 12:
             y = today.year if mth <= today.month else today.year - 1
-            return {"type": "month", "y": y, "m": mth}
+            return month_range(y, mth)
+    # 14) 年度回顧：2024年表現 / 去年漲多少 / 今年以來
+    m = _re.search(r"(20\d{2})年|去年|今年|前年", q)
+    if m and ("今年以來" in q or any(w in ql for w in _CTX_WORDS)):
+        y = int(m[1]) if m[1] else REL_YEAR[m[0]]
+        end = today if y == today.year else date(y, 12, 31)
+        return {"type": "range", "start": date(y, 1, 1), "end": end,
+                "label": f"{y} 年" + ("（至今）" if y == today.year else "全年")}
     return None
 
 
@@ -582,26 +690,28 @@ def _history_answer(symbol: str, question: str) -> dict | None:
                f"{sig_txt}\n\n想對照現在 → 問「{name}現在如何？」")
         return {"answer": ans, "intent": "history:day", "ctx": None, "coin_specific": True}
 
-    # month：月度回顧
-    y, mth = hq["y"], hq["m"]
-    from calendar import monthrange
-    start = f"{y:04d}-{mth:02d}-01"
-    end = f"{y:04d}-{mth:02d}-{monthrange(y, mth)[1]:02d}"
+    # range：區間回顧（月／季／年共用同一套統計）
+    from datetime import datetime as _dt, timezone as _tz
+    today = _dt.now(_tz.utc).date()
+    start_d, end_d, label = hq["start"], hq["end"], hq["label"]
+    if end_d > today:
+        end_d = today                      # 「今年」這類區間夾到今天為止
+    start, end = start_d.isoformat(), end_d.isoformat()
     rows = load_prices(symbol, start=start, end=end)
     if not rows:
-        return _out_of_range_reply(f"{y} 年 {mth} 月", start)
+        return _out_of_range_reply(label, start)
     first, last = rows[0], rows[-1]
     chg = (last["close"] - first["open"]) / first["open"] * 100 if first["open"] else 0
     hi = max(r["high"] for r in rows)
     lo = min(r["low"] for r in rows)
-    ind = load_indicators(symbol, start=end, end=end) or load_indicators(symbol, start=last["date"], end=last["date"])
+    ind = load_indicators(symbol, start=last["date"], end=last["date"])
     rsi = ind[-1].get("RSI") if ind else None
-    ans = (f"📅 **{y} 年 {mth} 月 {name} {tk} 月度回顧**（日線，UTC）\n"
-           f"・月初開盤 ${fp(first['open'])} → 月末收盤 ${fp(last['close'])}（**{chg:+.1f}%**）\n"
-           f"・當月最高 ${fp(hi)}／最低 ${fp(lo)}（振幅 {((hi - lo) / lo * 100) if lo else 0:.1f}%）\n"
-           f"・月末 RSI {f'{rsi:.1f}' if rsi is not None else '—'}{_rsi_zone(rsi)}\n"
+    ans = (f"📅 **{label} {name} {tk} 回顧**（日線，UTC）\n"
+           f"・期初開盤 ${fp(first['open'])} → 期末收盤 ${fp(last['close'])}（**{chg:+.1f}%**）\n"
+           f"・期間最高 ${fp(hi)}／最低 ${fp(lo)}（振幅 {((hi - lo) / lo * 100) if lo else 0:.1f}%）\n"
+           f"・期末 RSI {f'{rsi:.1f}' if rsi is not None else '—'}{_rsi_zone(rsi)}\n"
            f"・資料涵蓋 {len(rows)} 個交易日（{first['date']} ~ {last['date']}）")
-    return {"answer": ans, "intent": "history:month", "ctx": None, "coin_specific": True}
+    return {"answer": ans, "intent": "history:range", "ctx": None, "coin_specific": True}
 
 
 # ── 對外入口 ─────────────────────────────────────────────────────────────────
