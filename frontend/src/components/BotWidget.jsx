@@ -13,7 +13,7 @@
  */
 import { useState, useEffect, useRef } from 'react'
 import { fetchAIAnalysis, askAI, fetchFearGreed, fetchNewsSentiment } from '../api/client'
-import { coinZh, coinTicker } from '../constants/coins'
+import { coinZh } from '../constants/coins'
 import BotMascot, { stanceToMood } from './BotMascot'
 
 // 快速問題：綁定幣時問該幣；全市場模式引導講幣名或問通用問題
@@ -125,11 +125,6 @@ export default function BotWidget({ defaultSymbol = null }) {
               <b>小Q</b>
               <span>量化小幫手</span>
             </div>
-            <span className="bot-coin-badge"
-                  title={sym ? '免選幣：提到別的幣名就自動切換（例：問「以太幣如何？」）'
-                             : '全站小幫手：提到幣名會自動鎖定該幣'}>
-              {sym ? `💬 ${coinZh(sym)} ${coinTicker(sym)}` : '🌐 全市場'}
-            </span>
             <button className="bot-close" onClick={toggle} aria-label="關閉">✕</button>
           </div>
 
