@@ -2,7 +2,8 @@
 scheduler.py — 背景排程任務
 
 排程說明：
-  每日 01:00  run_pipeline()        從 Binance 抓取最新 K 線 → 計算技術指標 → 更新相關性矩陣
+  每日 09:00  run_pipeline()        從 Binance 抓取最新 K 線 → 計算技術指標 → 更新相關性矩陣
+              （台灣 09:00 = UTC 01:00，日棒 UTC 00:00 收盤後才抓；舊版排 01:00 會固定慢一根）
   每小時 :06  run_hourly_pipeline() 抓 BTC/ETH 等主流幣 1h K 線（增量）→ 算指標 → 入庫
   每 30 分鐘  fetch_news_job()      從 RSS 抓取最新新聞並存入資料庫
 
@@ -60,7 +61,7 @@ def _assert_data_fresh():
 
 def run_pipeline():
     """
-    每日資料更新流程（每天 01:00 執行）
+    每日資料更新流程（每天 09:00 執行；日線 K 棒 UTC 00:00＝台灣 08:00 收盤後才抓）
 
     執行順序：
     1. fetch_binance.py  — 從 Binance API 下載最新日線 K 線資料
@@ -211,9 +212,11 @@ def start_scheduler():
     scheduler = BackgroundScheduler()
     # 固定 id + replace_existing：避免同一進程重複註冊，造成同一時刻跑多份（job_runs 出現重複）。
     # max_instances=1 + coalesce：上一輪沒跑完就不疊下一輪（並發打 Binance 容易觸發 429）。
-    scheduler.add_job(run_pipeline, "cron", hour=1, minute=0,
+    # 台灣 09:00 = UTC 01:00：日線 K 棒在 UTC 00:00（台灣 08:00）收盤，排在收盤後 1 小時抓，
+    # 避免像舊版排在台灣 01:00（= UTC 前一天 17:00、當日日棒尚未收盤）而固定慢一根。
+    scheduler.add_job(run_pipeline, "cron", hour=9, minute=0,
                       id="daily_pipeline", replace_existing=True,
-                      max_instances=1, coalesce=True)              # 每日 01:00
+                      max_instances=1, coalesce=True)              # 每日 09:00（台灣）
     scheduler.add_job(run_hourly_pipeline, "cron", minute=6,
                       id="hourly_pipeline", replace_existing=True,
                       max_instances=1, coalesce=True)              # 每小時 :06（1h K 棒收盤後）

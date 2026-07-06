@@ -15,7 +15,7 @@
 | 市場總覽 | 15 幣訊號卡片牆、恐懼貪婪指數、市場摘要列 |
 | 幣種詳細頁 | 蠟燭圖（**日線 / 時線** 切換，MA/布林/成交量/RSI/MACD/KDJ/DMI/BIAS）、回測面板、相關性熱圖 |
 | AI 智能分析 | **雙引擎**：🧮 規則引擎（6 因子白話分析，免費永遠可用）+ 🤖 GPT 深度解讀（需金鑰）；立場不一致會標「觀點分歧」；可提問（多輪對話） |
-| 吉祥物小Q | 全站右下角漂浮小幫手（SVG+CSS 動畫，表情跟多空變臉），點開即聊天 |
+| 吉祥物小Q | 漂浮聊天小幫手（2026-07-06 暫時下架：使用者為主管/老闆；程式保留於 BotWidget.jsx，取消 App.jsx 兩處註解即可恢復） |
 | 市場情緒 | 恐懼貪婪錶盤+歷史、**新聞情緒溫度**（每日 -100~+100，全市場+單幣）、新聞牆（10 個來源、中英文） |
 | 自動更新 | 前端每 60 秒輪詢資料版本，有新資料才重拉 — 不用手動重整 |
 | 管理後台 `/admin` | 監控儀表板、幣種管理、工作項目追蹤、資料庫檢視、訊號成績單、策略現況、AI 設定（金鑰/用量） |
@@ -36,7 +36,7 @@ cd frontend && npm run build
 ```
 
 - 前台：`http://localhost:8000`（或 vite 開發埠 5173）
-- 後台：`/admin`，帳密來自環境變數 `ADMIN_USER` / `ADMIN_PASS`（**預設 admin/admin123，對外務必改掉**，含 `ADMIN_SECRET`）
+- 後台：`/admin`，帳密來自環境變數 `ADMIN_USER` / `ADMIN_PASS`（由 `secrets.local.cmd` 注入強密碼與 `ADMIN_SECRET`，2026-07-06 已改掉預設值；該檔已 gitignore）
 - GPT 金鑰：後台「AI 設定」頁填入，或環境變數 `OPENAI_API_KEY`（優先）；不填則 AI 只用規則引擎
 - 對外公開：Cloudflare Quick Tunnel 指向 8000（每次重啟 tunnel 網址會變；根治方案見待辦 #64）
 
@@ -46,7 +46,7 @@ cd frontend && npm run build
 ## 3. 系統架構與資料流
 
 ```
-Binance API ──每日01:00──▶ src/fetch_binance.py ──▶ data/clean/*_1d.csv ─┐
+Binance API ──每日09:00──▶ src/fetch_binance.py ──▶ data/clean/*_1d.csv ─┐
             ──每小時:06──▶（--interval 1h,增量,只存已收盤K棒）*_1h.csv ─┤
                                                                          ▼
                           src/indicators.py ──▶ reports/indicators_*.csv ─▶ app_db.ingest_market_data()
@@ -68,7 +68,7 @@ alternative.me（恐懼貪婪）──▶ fear_greed 表                        
 ```
 backend/
   main.py                FastAPI 入口（掛路由、服務 frontend/dist）
-  scheduler.py           排程：每日 pipeline(01:00)、每小時 1h 線(:06)、新聞(每30分)
+  scheduler.py           排程：每日 pipeline(09:00，UTC日棒收盤後)、每小時 1h 線(:06)、新聞(每30分)
   routers/
     meta.py              /symbols /intervals /status(data_version=自動更新的心跳)
     prices.py            /prices/{sym}?interval=1d|1h
@@ -102,7 +102,7 @@ frontend/src/
     CandlestickChart.jsx 主圖（lightweight-charts，多週期時間軸）
     AIAnalystPanel.jsx   AI 分析面板（雙引擎+提問）
     BotMascot.jsx        ★小Q吉祥物（SVG 表情狀態機）
-    BotWidget.jsx        全站漂浮聊天小幫手
+    BotWidget.jsx        全站漂浮聊天小幫手（暫時下架，保留可恢復）
     SentimentPanel.jsx   情緒面板（恐懼貪婪+新聞情緒溫度+新聞牆）
     MarketOverview / HeroSignal / BacktestPanel / CorrelationHeatmap ...
   admin/AdminApp.jsx     整個後台（分頁：監控/幣種/工作項目/資料庫/現況/AI 設定）

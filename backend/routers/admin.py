@@ -35,6 +35,14 @@ ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")  # 可用環境變數 ADMIN_PAS
 _SECRET    = os.getenv("ADMIN_SECRET", "dev-secret-change-me").encode()
 TOKEN_TTL  = 8 * 3600  # token 有效 8 小時
 
+# 安全防線（#70 T0）：對外服務絕不能用預設帳密/密鑰——知道預設 SECRET 的人可自簽 token 直接過驗證。
+# 正式啟動請經 start_backend.cmd（會載入 .env.admin.cmd 覆蓋）；這裡偵測到預設值就大聲警告。
+if ADMIN_PASS == "admin123" or _SECRET == b"dev-secret-change-me":
+    print("=" * 70)
+    print("[SECURITY WARNING] 後台帳密/簽章密鑰仍是預設值！對外環境請設定")
+    print("  ADMIN_PASS / ADMIN_SECRET 環境變數（見 .env.admin.cmd）後重啟。")
+    print("=" * 70)
+
 
 # ── token：HMAC 簽章，純標準庫（payload.signature，base64url）──────────────────
 def _make_token(user: str) -> str:
@@ -239,6 +247,43 @@ def ingest(_: str = Depends(require_admin)):
     except Exception as e:
         app_db.finish_job(jid, "failed", str(e))
         return {"ok": False, "error": str(e)}
+
+
+# ── 操作觸發：一鍵執行資料管線（背景執行緒；狀態寫 job_runs 供「工作紀錄」追蹤）──
+# 情境：日線 K 棒 UTC 00:00（台灣 08:00）收盤、排程 09:00 才抓——想「現在就要最新」
+# 就按這裡，不用等排程也不用進伺服器下指令。
+_OPS = {
+    "daily":  "每日資料管線（抓日線 → 算指標 → 入庫 → 回填訊號）",
+    "hourly": "時線管線（1h K 線 → 指標 → 入庫）",
+    "news":   "新聞抓取（RSS + 情緒標註）",
+}
+# 各類任務對應 job_runs 的 job_type（用於防重複執行）
+_OPS_JOB_TYPE = {"daily": "daily_pipeline", "hourly": "hourly_pipeline", "news": "news_fetch"}
+
+
+@router.post("/admin/ops/run/{job}")
+def ops_run(job: str, _: str = Depends(require_admin)):
+    if job not in _OPS:
+        raise HTTPException(status_code=404, detail="unknown job")
+    # 防重複：同型任務還在 running（且 2 小時內開始）就不疊加——並發抓 Binance 易觸發 429
+    last = _last_job(_OPS_JOB_TYPE[job])
+    if last and last.get("status") == "running":
+        try:
+            started = datetime.strptime(last["started_at"], "%Y-%m-%d %H:%M:%S")
+            if datetime.utcnow() - started < timedelta(hours=2):
+                raise HTTPException(status_code=409, detail=f"上一輪還在執行中（{last['started_at']} 開始），請稍候")
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # started_at 解析失敗＝視為殭屍紀錄，放行
+
+    import threading
+    from backend import scheduler as _sched   # 函式內 import，避免啟動期循環相依
+    fn = {"daily": _sched.run_pipeline,
+          "hourly": _sched.run_hourly_pipeline,
+          "news": _sched.fetch_news_job}[job]
+    threading.Thread(target=fn, daemon=True, name=f"ops-{job}").start()
+    return {"ok": True, "message": f"{_OPS[job]}已在背景開始，進度見下方工作紀錄（重新整理更新狀態）"}
 
 
 # ── 幣種管理（新增 / 啟用停用 / 編輯 / 移除；啟用停用即時生效，不需重啟）──────

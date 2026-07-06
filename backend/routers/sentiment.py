@@ -21,7 +21,8 @@ import re
 import time
 import feedparser
 import requests
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from backend.routers.admin import require_admin   # 寫入型端點的登入保護
 from backend.services.news_store import (
     save_articles, query_by_date, available_dates, total_count,
     aggregate_daily, load_sentiment_daily,
@@ -532,9 +533,9 @@ def _hn_fetch_range(from_date: str, to_date: str) -> int:
     return save_articles(all_articles)
 
 
-# ── 歷史回補 API ─────────────────────────────────────────────────────────────
+# ── 歷史回補 API（2026-07-06 安全修補：掛上後台登入保護，不再對外開放寫入）──
 @router.post("/sentiment/news/backfill")
-def backfill_news(from_date: str, to_date: str):
+def backfill_news(from_date: str, to_date: str, _admin: str = Depends(require_admin)):
     """
     回補歷史新聞：從 HackerNews 抓取指定日期範圍的加密幣文章存入資料庫
 
@@ -543,6 +544,7 @@ def backfill_news(from_date: str, to_date: str):
         to_date:   結束日期，格式 YYYY-MM-DD
 
     建議一次不超過 1 個月，太長會耗時較久（每個月約 100~500 篇）
+    需帶後台 token（Authorization: Bearer …）——這是寫入型端點，避免被外部濫用。
     """
     try:
         saved = _hn_fetch_range(from_date, to_date)

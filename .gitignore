@@ -30,3 +30,6 @@ reports/*.png
 
 # Claude 工作階段記憶(非專案程式)
 memory/
+
+# 本機密鑰載入檔（後台帳密，勿提交）
+*.local.cmd
