@@ -262,10 +262,10 @@ function NewsFeed({ symbol, news, historyData, isHistory, availableDates, histor
  * 預設範圍：從今天往前 30 天（一個月）
  */
 function BackfillPanel({ onDone }) {
-  const today    = new Date().toISOString().slice(0, 10)
-  const oneMonth = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+  const today = new Date().toISOString().slice(0, 10)   // 供日期輸入 max=；每次 render 同值
 
-  const [fromDate, setFromDate] = useState(oneMonth)
+  // 預設起訖用 lazy initializer（只在首次 render 算一次），避免在 render 中呼叫 Date.now() 的不純副作用
+  const [fromDate, setFromDate] = useState(() => new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
   const [toDate,   setToDate]   = useState(today)
   const [loading,  setLoading]  = useState(false)
   const [result,   setResult]   = useState(null)

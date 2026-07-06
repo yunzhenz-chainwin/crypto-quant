@@ -28,9 +28,7 @@ function ScoreGauge({ score }) {
   if (score == null) return null
   const r  = 50
   const cx = 70, cy = 70
-  const startAngle = Math.PI          // 左端 = 180°
-  const endAngle   = 0                // 右端 = 0°
-  const angle      = Math.PI - (score / 100) * Math.PI  // 分數對應角度
+  const angle      = Math.PI - (score / 100) * Math.PI  // 分數對應角度（左端 180° → 右端 0°）
 
   const arcPath = (a) => ({
     x: cx + r * Math.cos(a),
@@ -45,9 +43,6 @@ function ScoreGauge({ score }) {
   const fgEnd   = arcPath(angle)
 
   const color   = scoreColor(score)
-
-  // 指針
-  const needle  = arcPath(angle)
 
   return (
     <div className="score-gauge-wrap">

@@ -109,7 +109,7 @@ export default function App() {
       setFearGreed(fg?.[0] ?? null)
       setLastUpdated(Date.now())
       setApiError(false)
-    } catch (_) {
+    } catch {
       setApiError(true)      // 顯示錯誤橫幅（取代永遠的「載入中…」）
     }
     if (showSpinner) setRefreshing(false)
@@ -130,7 +130,7 @@ export default function App() {
       ])
       setOhlc(p); setIndicators(ind)
       setApiError(false)
-    } catch (_) {
+    } catch {
       setApiError(true)
     }
   }, [active, interval, days, hourDays, startDate, endDate, dateMode])
@@ -157,7 +157,7 @@ export default function App() {
           setDataVersion(ver)          // 傳給 AI 面板 & 觸發詳細頁重拉
         }
         if (ver) versionRef.current = ver
-      } catch (_) {}
+      } catch { /* 略過本次輪詢錯誤，下輪再試 */ }
     }
     check()                                              // 啟動先記下目前版本
     const id = setInterval(check, POLL_INTERVAL)
