@@ -15,6 +15,12 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
+# 重算訊號以驗「買賣點無前視」；兩種執行方式都要能 import（同 backtest.py 的寫法）
+try:
+    from backtest import load_indicators, compute_signals
+except ImportError:
+    from src.backtest import load_indicators, compute_signals
+
 ROOT = Path(__file__).resolve().parent.parent
 REPORT_DIR = ROOT / "reports"
 CLEAN_DIR  = ROOT / "data" / "clean"
@@ -189,6 +195,48 @@ def main():
     check(total_check == len(trades),
           "停損 + 停利 + 訊號出場 = 總交易數",
           f"{sl_count} + {tp_count} + {sig_count} = {total_check}（總數 {len(trades)}）")
+
+    # ── 訊號時序：買賣點無前視偏誤（look-ahead bias）─────────────────
+    print("\n[10] 訊號時序（買賣點無前視偏誤）")
+    print("    進場與訊號出場都必須成交在『前一根收盤訊號轉折』的『次根開盤』，")
+    print("    不得用到當根收盤才會知道的訊號（否則等於偷看未來）。")
+    ind = load_indicators(symbol)
+    sigs = compute_signals(ind)
+    ind_dates = [str(d)[:10] for d in ind["date"]]
+    idx_of = {d: k for k, d in enumerate(ind_dates)}
+    ind_open = ind["open"].to_numpy(dtype=float)
+    has_trig = "entry_trigger_price" in trades.columns and "exit_trigger_price" in trades.columns
+
+    def _open_matches(k, trigger):
+        return ind_open[k] > 0 and abs(ind_open[k] - float(trigger)) / ind_open[k] < 1e-4
+
+    entry_ok, exit_ok, px_ok = True, True, True
+    for _, t in trades.iterrows():
+        i = idx_of.get(str(t["entry_date"])[:10])
+        if i is None or i < 2:
+            entry_ok = False
+            continue
+        # 進場：signals[i-1] 首次 BULL（signals[i-2] 非 BULL），成交價 = 當根開盤
+        if not (sigs[i - 1] == "BULL" and sigs[i - 2] != "BULL"):
+            entry_ok = False
+        if has_trig and not _open_matches(i, t["entry_trigger_price"]):
+            px_ok = False
+
+    for _, t in trades[trades["exit_reason"] == "signal_exit"].iterrows():
+        j = idx_of.get(str(t["exit_date"])[:10])
+        if j is None or j < 2:
+            exit_ok = False
+            continue
+        # 訊號出場：signals[j-1] 首次 BEAR（signals[j-2] 非 BEAR），成交價 = 當根開盤
+        if not (sigs[j - 1] == "BEAR" and sigs[j - 2] != "BEAR"):
+            exit_ok = False
+        if has_trig and not _open_matches(j, t["exit_trigger_price"]):
+            px_ok = False
+
+    check(entry_ok, "每筆進場 = 前一根收盤首次轉 BULL 的『次根開盤』（買點無前視）")
+    check(exit_ok,  "每筆訊號出場 = 前一根收盤首次轉 BEAR 的『次根開盤』（賣點無前視）")
+    if has_trig:
+        check(px_ok, "進場/訊號出場成交價 = 當根原始開盤價（誤差 < 0.01%）")
 
     # ── 最終結論 ─────────────────────────────────────────────────────
     print(f"\n{'='*56}")

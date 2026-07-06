@@ -2,12 +2,14 @@
 backtest.py
 把現有的 BULL/BEAR 訊號邏輯跑過歷史資料，計算每筆交易的損益與整體績效。
 
-交易規則：
-  進場：訊號從「非 BULL」→「BULL」的隔天開盤買入
-  出場（三擇一，先觸發先出）：
-    1. 停損：當天最低價 <= 進場價 * (1 + stop_loss)，以停損價出場
-    2. 停利：當天最高價 >= 進場價 * (1 + take_profit)，以停利價出場
-    3. 訊號：訊號轉 BEAR 的隔天開盤賣出
+交易規則（訊號 signals[t] 用到第 t 根收盤，只有收盤後可知 → 依訊號的動作一律
+         延到「下一根開盤」成交，買點與賣點都不偷看未來，無前視偏誤）：
+  進場：訊號從「非 BULL」→「BULL」，於「隔天開盤」買入
+  出場（同一根依時間先後判定）：
+    1. 訊號：訊號從「非 BEAR」→「BEAR」，於「隔天開盤」賣出（與進場對稱）
+    2. 停損：持倉期間（含進場當根）當天最低價 <= 進場價 * (1 + stop_loss)，以停損價出場
+    3. 停利：持倉期間（含進場當根）當天最高價 >= 進場價 * (1 + take_profit)，以停利價出場
+  （同一根：先看開盤的訊號出場；未觸發才看盤中停損→停利，兩者同根皆觸及取保守先停損。）
 
 用法：
   python src/backtest.py                    # 預設 BTCUSDT
@@ -107,6 +109,22 @@ def run_backtest(df: pd.DataFrame,
     回傳交易明細清單，每筆包含：
       entry_date, exit_date, entry_price, exit_price,
       return_pct, hold_days, exit_reason
+
+    ── 時序約定：無前視偏誤（look-ahead bias）────────────────────────────
+    訊號 signals[t] 用到第 t 根的 close[t]/RSI[t]/HIST[t]…，只有「第 t 根收盤後」
+    才可得知。因此所有「依訊號」的動作一律延到「下一根開盤」成交，進出場完全對稱：
+        進場：signals[t] 首次轉 BULL → 第 t+1 根開盤買入
+        出場：signals[t] 首次轉 BEAR → 第 t+1 根開盤賣出
+    迴圈以「當前根 i」為準，看的是「前一根收盤」的訊號轉折（sig_prev / sig_prev2），
+    成交在「第 i 根開盤」opens[i]，故買點與賣點都不會用到當根收盤的未來資訊。
+    （修正前的舊版賣出用 signals[i] 卻成交在 opens[i]，等於拿當根收盤才知道的訊號、
+      回頭用當根開盤價賣出 → 前視偏誤，會高估訊號出場的報酬。）
+
+    停損 / 停利＝預先掛單，於「每一根（含進場當根）」盤中觸價即成交（非依訊號、無前視）。
+
+    同一根的出場優先序（依當根時間先後）：
+      1) 開盤：訊號出場（前一根收盤首次轉 BEAR）→ 以開盤價成交
+      2) 盤中：停損（先）→ 停利（後）＝同根兩者皆觸及時取保守（先算停損）
     """
     signals = signals or compute_signals(df)
     # 一次取出價格欄位為陣列(不逐列 .iloc),日期保留為 Timestamp 清單
@@ -117,72 +135,72 @@ def run_backtest(df: pd.DataFrame,
     trades = []
     position = None  # None = 空倉；dict = 持倉中
 
+    def _record_exit(i: int, raw_exit_price: float, exit_reason: str) -> None:
+        """以 raw 出場價結算目前持倉、寫入 trades、清空 position。"""
+        nonlocal position
+        ep_fill = position["entry_price"]                     # 進場價（已含滑價）
+        fill_exit_price = raw_exit_price * (1 - slippage_rate)
+        gross_ret = (raw_exit_price - position["entry_trigger_price"]) / position["entry_trigger_price"]
+        net_ret = (fill_exit_price * (1 - fee_rate)) / (ep_fill * (1 + fee_rate)) - 1
+        entry_dt = pd.Timestamp(position["entry_date"])
+        exit_dt  = dates[i]
+        # 統一為 tz-naive 才能相減
+        if hasattr(exit_dt, "tz_convert"):
+            exit_dt = exit_dt.tz_convert(None)
+        trades.append({
+            "entry_date":  position["entry_date"],
+            "exit_date":   str(exit_dt.date()),
+            # 價位存 8 位小數：低價幣（DOGE $0.07、SHIB…）4 位會失真、與原始開盤價對不上；
+            # 損益本就用「未捨入」的價格計算，這裡只是讓「記錄的成交價」忠實可稽核。
+            "entry_price": float(round(ep_fill, 8)),
+            "exit_price":  float(round(fill_exit_price, 8)),
+            "entry_trigger_price": float(round(position["entry_trigger_price"], 8)),
+            "exit_trigger_price":  float(round(raw_exit_price, 8)),
+            "gross_return_pct": float(round(gross_ret * 100, 3)),
+            "return_pct":  float(round(net_ret * 100, 3)),
+            "cost_pct":    float(round((gross_ret - net_ret) * 100, 3)),
+            "hold_days":   int((exit_dt - entry_dt).days),
+            "exit_reason": exit_reason,
+            "profit":      bool(net_ret > 0),  # 明確轉成 Python bool
+        })
+        position = None
+
     for i in range(2, len(df)):
-        sig_today = signals[i]
-        sig_prev = signals[i - 1]
+        sig_prev  = signals[i - 1]   # 前一根收盤訊號（第 i 根開盤前即可得知）
         sig_prev2 = signals[i - 2]
+        o  = opens[i]
+        lo = lows[i]
+        hi = highs[i]
+        lo_valid = lo == lo          # 非 NaN（nan==nan 為 False）
+        hi_valid = hi == hi
 
         if position is None:
-            # 進場條件：前一天訊號首次出現 BULL（前兩天不是 BULL）
+            # 進場：前一根收盤首次轉 BULL（前兩根非 BULL）→ 本根開盤買入
             if sig_prev == "BULL" and sig_prev2 != "BULL":
-                ep = opens[i]
-                if ep != ep or ep <= 0:        # NaN(ep!=ep) 或非正值
+                if o != o or o <= 0:              # NaN 或非正值 → 不進場
                     continue
-                fill_price = float(ep) * (1 + slippage_rate)
                 position = {
                     "entry_date":  str(dates[i].date()),
-                    "entry_price": float(fill_price),
-                    "entry_trigger_price": float(ep),
-                    "stop_price":  ep * (1 + stop_loss),
-                    "tp_price":    ep * (1 + take_profit),
+                    "entry_price": float(o) * (1 + slippage_rate),
+                    "entry_trigger_price": float(o),
+                    "stop_price":  o * (1 + stop_loss),
+                    "tp_price":    o * (1 + take_profit),
                 }
+                # 進場當根盤中也可能觸價（買在開盤，之後的盤中高低都算）：先停損後停利＝保守
+                if lo_valid and lo <= position["stop_price"]:
+                    _record_exit(i, position["stop_price"], "stop_loss")
+                elif hi_valid and hi >= position["tp_price"]:
+                    _record_exit(i, position["tp_price"], "take_profit")
         else:
-            ep = position["entry_price"]
-            exit_price = None
-            exit_reason = None
-
-            low  = lows[i]  if lows[i]  == lows[i]  else ep   # nan==nan 為 False
-            high = highs[i] if highs[i] == highs[i] else ep
-
-            # 停損（日內觸及）
-            if low <= position["stop_price"]:
-                exit_price = position["stop_price"]
-                exit_reason = "stop_loss"
-            # 停利（日內觸及）
-            elif high >= position["tp_price"]:
-                exit_price = position["tp_price"]
-                exit_reason = "take_profit"
-            # 訊號出場：訊號首次轉 BEAR
-            elif sig_today == "BEAR" and sig_prev != "BEAR":
-                exit_price = float(opens[i])
-                exit_reason = "signal_exit"
-
-            if exit_price is not None:
-                raw_exit_price = float(exit_price)
-                fill_exit_price = raw_exit_price * (1 - slippage_rate)
-                gross_ret = (raw_exit_price - position["entry_trigger_price"]) / position["entry_trigger_price"]
-                net_ret = (fill_exit_price * (1 - fee_rate)) / (ep * (1 + fee_rate)) - 1
-                entry_dt = pd.Timestamp(position["entry_date"])
-                exit_dt  = dates[i]
-                # 統一為 tz-naive 才能相減
-                if hasattr(exit_dt, "tz_convert"):
-                    exit_dt = exit_dt.tz_convert(None)
-                exit_date_str = str(exit_dt.date())
-                trades.append({
-                    "entry_date":  position["entry_date"],
-                    "exit_date":   exit_date_str,
-                    "entry_price": float(round(ep, 4)),
-                    "exit_price":  float(round(fill_exit_price, 4)),
-                    "entry_trigger_price": float(round(position["entry_trigger_price"], 4)),
-                    "exit_trigger_price":  float(round(raw_exit_price, 4)),
-                    "gross_return_pct": float(round(gross_ret * 100, 3)),
-                    "return_pct":  float(round(net_ret * 100, 3)),
-                    "cost_pct":    float(round((gross_ret - net_ret) * 100, 3)),
-                    "hold_days":   int((exit_dt - entry_dt).days),
-                    "exit_reason": exit_reason,
-                    "profit":      bool(net_ret > 0),  # 明確轉成 Python bool
-                })
-                position = None
+            # 1) 開盤：訊號出場（前一根收盤首次轉 BEAR）— 與進場對稱、無前視
+            if sig_prev == "BEAR" and sig_prev2 != "BEAR":
+                _record_exit(i, float(o), "signal_exit")
+            # 2) 盤中：停損（先）
+            elif lo_valid and lo <= position["stop_price"]:
+                _record_exit(i, position["stop_price"], "stop_loss")
+            # 3) 盤中：停利（後）
+            elif hi_valid and hi >= position["tp_price"]:
+                _record_exit(i, position["tp_price"], "take_profit")
 
     return trades
 
@@ -223,7 +241,8 @@ def compute_metrics(trades: list[dict], df: pd.DataFrame) -> dict:
     # 夏普比率（以每日報酬近似）
     hold_days = [t["hold_days"] for t in trades]
     avg_hold  = float(np.mean(hold_days))
-    if len(rets) > 1 and float(np.std(rets)) > 0:
+    # avg_hold 可能為 0（進場當根即停損/停利出場的極短單）→ 防止 365/avg_hold 除零
+    if len(rets) > 1 and float(np.std(rets)) > 0 and avg_hold > 0:
         sharpe = (float(np.mean(rets)) / float(np.std(rets))) * math.sqrt(
             max(365 / avg_hold, 1))
     else:
@@ -275,6 +294,93 @@ def compute_metrics(trades: list[dict], df: pd.DataFrame) -> dict:
         "take_profit_exits":   int(sum(1 for t in trades if t["exit_reason"] == "take_profit")),
         "signal_exits":        int(sum(1 for t in trades if t["exit_reason"] == "signal_exit")),
         "equity_curve":        equity_curve,
+    }
+
+
+# ── 隨機進場基準（蒙地卡羅）──────────────────────────────────────────
+def random_entry_baseline(df: pd.DataFrame, trades: list[dict],
+                          strategy_return_pct: float,
+                          stop_loss: float = -0.06,
+                          take_profit: float = 0.20,
+                          fee_rate: float = 0.001,
+                          slippage_rate: float = 0.0005,
+                          n_sims: int = 500,
+                          seed: int = 20260706) -> dict | None:
+    """
+    「隨機進場」基準：回答『策略的選時，有沒有贏過亂選日子？』
+
+    設計（對照組只隨機化「進場日」，其餘與策略完全相同）：
+      - 交易筆數 = 實際回測筆數；每筆持有上限 = 該筆實際持有的 K 棒數
+      - 停損 / 停利觸價、手續費、滑價與 run_backtest 同一套數學
+      - 進出場都以開盤價成交（進場含滑價、出場含滑價）
+      - 允許模擬交易期間重疊（每筆獨立抽樣；總報酬為複利乘積，順序不影響）
+      - 固定亂數種子 → 結果可重現（公正性要求：任何人重跑數字相同）
+
+    回傳 strategy_percentile = 策略總報酬在 n_sims 次隨機模擬中的百分位：
+      ~50 代表選時與亂選無異（賺賠主要來自市場本身）；越高代表選時越可能有價值。
+    回傳 None 表示無法計算（無交易或資料不足）。
+    """
+    if not trades or len(df) < 10:
+        return None
+    dates = [str(d.date()) if hasattr(d, "date") else str(d)[:10] for d in df["date"]]
+    idx_of = {d: i for i, d in enumerate(dates)}
+    opens = df["open"].to_numpy(dtype=float)
+    highs = df["high"].to_numpy(dtype=float)
+    lows  = df["low"].to_numpy(dtype=float)
+    n = len(df)
+
+    # 每筆實際持有的 K 棒數（進場列 → 出場列）；對不上日期的交易略過
+    durations = []
+    for t in trades:
+        i = idx_of.get(str(t["entry_date"])[:10])
+        j = idx_of.get(str(t["exit_date"])[:10])
+        if i is not None and j is not None and j > i:
+            durations.append(j - i)
+    if not durations:
+        return None
+
+    rng = np.random.default_rng(seed)
+    totals = np.empty(n_sims)
+    for s in range(n_sims):
+        eq = 1.0
+        for d in durations:
+            hi_idx = n - 1 - d
+            if hi_idx < 1:
+                continue                       # 持有期比整段資料還長，略過
+            i = int(rng.integers(1, hi_idx + 1))
+            ep = opens[i]
+            if not (ep > 0):                   # NaN / 非正值 → 這筆略過
+                continue
+            fill_entry = ep * (1 + slippage_rate)
+            stop_price = ep * (1 + stop_loss)
+            tp_price   = ep * (1 + take_profit)
+            raw_exit = None
+            for k in range(i + 1, i + d + 1):  # 逐日檢查觸價（與 run_backtest 同：先停損後停利）
+                lo = lows[k]  if lows[k]  == lows[k]  else ep
+                hg = highs[k] if highs[k] == highs[k] else ep
+                if lo <= stop_price:
+                    raw_exit = stop_price
+                    break
+                if hg >= tp_price:
+                    raw_exit = tp_price
+                    break
+            if raw_exit is None:               # 未觸價 → 持有期滿以開盤價出場
+                raw_exit = opens[i + d] if opens[i + d] > 0 else ep
+            fill_exit = raw_exit * (1 - slippage_rate)
+            eq *= (fill_exit * (1 - fee_rate)) / (fill_entry * (1 + fee_rate))
+        totals[s] = (eq - 1) * 100
+
+    below = float((totals < strategy_return_pct).sum())
+    equal = float((totals == strategy_return_pct).sum())
+    percentile = (below + 0.5 * equal) / n_sims * 100
+    return {
+        "n_sims":              int(n_sims),
+        "n_trades":            len(durations),
+        "median_return_pct":   float(round(np.median(totals), 2)),
+        "p05_return_pct":      float(round(np.percentile(totals, 5), 2)),
+        "p95_return_pct":      float(round(np.percentile(totals, 95), 2)),
+        "strategy_return_pct": float(round(strategy_return_pct, 2)),
+        "strategy_percentile": float(round(percentile, 1)),
     }
 
 

@@ -110,6 +110,15 @@ def run_pipeline():
         except Exception as e:
             print(f"[scheduler] backtest reports skip: {e}")
 
+        # 4c) 回測結果入庫：逐筆進出場 → backtest_trade、整體績效 → backtest_summary。
+        #     與 get_backtest 同一套計算，前台/後台可直接查 DB。非關鍵，失敗只記錄。
+        try:
+            from backend.services.app_db import backfill_backtests
+            bt = backfill_backtests(symbols)
+            print(f"[scheduler] backtest persisted: {bt['symbols']} syms / {bt['trades']} trades")
+        except Exception as e:
+            print(f"[scheduler] backtest persist skip: {e}")
+
         # 5) 新鮮度防線：資料若沒更新到近期就視為失敗（抓出隱性失敗，避免假性成功）
         date_max, lag = _assert_data_fresh()
 

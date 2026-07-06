@@ -89,10 +89,14 @@ if DIST.exists():
     # /assets/* 直接回傳對應靜態資源（JS / CSS / 圖片）
     app.mount("/assets", StaticFiles(directory=str(DIST / "assets")), name="assets")
 
+    # index.html 一律 no-cache：改版後瀏覽器/通道每次都會重新驗證、拿到最新版
+    # （/assets/* 是雜湊檔名、內容不變，仍可長快取）。修「改了前端卻看到舊畫面」。
+    _INDEX_HEADERS = {"Cache-Control": "no-cache, must-revalidate"}
+
     # 根路徑與所有其他路徑都回傳 index.html，讓 React Router 接管
     @app.get("/")
     def serve_root():
-        return FileResponse(str(DIST / "index.html"))
+        return FileResponse(str(DIST / "index.html"), headers=_INDEX_HEADERS)
 
     @app.get("/{full_path:path}")
     def serve_spa(full_path: str):
@@ -100,4 +104,4 @@ if DIST.exists():
         target = DIST / full_path
         if target.exists() and target.is_file():
             return FileResponse(str(target))
-        return FileResponse(str(DIST / "index.html"))
+        return FileResponse(str(DIST / "index.html"), headers=_INDEX_HEADERS)

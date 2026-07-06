@@ -1,8 +1,25 @@
 from fastapi import APIRouter, HTTPException, Query
 from backend.services.reader import available_symbols
 from backend.services.backtest_engine import get_backtest
+from backend.services.app_db import load_backtest_summary, load_backtest_trades
 
 router = APIRouter()
+
+
+@router.get("/backtest/db/summary")
+def backtest_db_summary():
+    """所有幣種『已入庫』的回測績效摘要（依總報酬排序），供跨幣比較。"""
+    return load_backtest_summary()
+
+
+@router.get("/backtest/db/{symbol}/trades")
+def backtest_db_trades(
+    symbol: str,
+    limit: int = Query(default=0, ge=0, le=2000,
+                       description="只取最近 N 筆；0 = 全部"),
+):
+    """某幣『已入庫』的回測進出場明細（勝率／報酬／持有天數的原始逐筆資料）。"""
+    return load_backtest_trades(symbol.upper(), limit=limit)
 
 
 @router.get("/backtest/{symbol}")

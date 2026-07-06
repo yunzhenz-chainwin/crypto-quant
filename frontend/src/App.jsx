@@ -12,11 +12,10 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import {
   fetchSymbols, fetchAllSignals, fetchOHLC, fetchStatus, fetchIntervals,
-  fetchIndicators, fetchCorrelation, fetchBacktest, fetchFearGreed,
+  fetchIndicators, fetchBacktest, fetchFearGreed,   // fetchCorrelation 暫停（幣種相關性分析）
 } from './api/client'
 import StatusBar        from './components/StatusBar'
 import CandlestickChart from './components/CandlestickChart'
-import CoinSidebar      from './components/CoinSidebar'
 import HeroSignal       from './components/HeroSignal'
 import MarketOverview   from './components/MarketOverview'
 import MarketSummary    from './components/MarketSummary'
@@ -28,7 +27,7 @@ import { coinName }     from './constants/coins'
 
 // 折疊面板動態載入（code splitting #29）：首屏不下載 recharts 等重依賴，
 // 進入詳細頁/展開面板時才抓對應 chunk（Suspense 顯示輕量載入字樣）。
-const CorrelationHeatmap = lazy(() => import('./components/CorrelationHeatmap'))
+// const CorrelationHeatmap = lazy(() => import('./components/CorrelationHeatmap'))  // 2026-07-06 暫停幣種相關性分析
 const BacktestPanel      = lazy(() => import('./components/BacktestPanel'))
 const SentimentPanel     = lazy(() => import('./components/SentimentPanel'))
 // const AIAnalystPanel     = lazy(() => import('./components/AIAnalystPanel')) // 2026-07-06 暫停 AI 智能分析
@@ -51,6 +50,14 @@ const HOUR_OPTIONS = [
   { label: '3M',  value: 90 },
 ]
 const POLL_INTERVAL = 60 * 1000  // 資料版本輪詢：每 60 秒
+
+// 詳細頁可自由開關的區塊（預設全開；偏好存 localStorage，取代固定塞滿的版面）
+const PANELS = [
+  { key: 'rules',     label: '買賣判斷依據' },
+  { key: 'backtest',  label: '策略回測' },
+  { key: 'sentiment', label: '市場情緒/新聞' },   // 新聞移到最後
+  // { key: 'correlation', label: '幣種相關性' },  // 2026-07-06 暫停幣種相關性分析
+]
 
 // 工具：日期物件 → "YYYY-MM-DD"
 function toDateStr(d) {
@@ -80,13 +87,18 @@ export default function App() {
   const [backtest,    setBacktest]    = useState(null)
   const [btParams,    setBtParams]    = useState({ stopLoss: -0.06, takeProfit: 0.20, feeRate: 0.001, slippage: 0.0005 })
   const [btLoading,   setBtLoading]   = useState(false)
-  const [correlation, setCorrelation] = useState(null)
+  // const [correlation, setCorrelation] = useState(null)                  // 2026-07-06 暫停幣種相關性分析
   const [dataVersion, setDataVersion] = useState('')        // 後端資料版本（變了=有新資料）
-  const [showCorrelation, setShowCorrelation] = useState(false)
+  // const [showCorrelation, setShowCorrelation] = useState(false)         // 2026-07-06 暫停幣種相關性分析
   const [showSentiment,   setShowSentiment]   = useState(false)
   const [showBacktest,    setShowBacktest]    = useState(false)
   // const [showAI,          setShowAI]          = useState(true) // 2026-07-06 暫停 AI 智能分析
   const [showRules,       setShowRules]       = useState(true)   // 買賣判斷依據面板（預設展開）
+  // 詳細頁「顯示哪些區塊」偏好（預設全開，使用者可關掉不看的；存 localStorage）
+  const [panelPrefs,      setPanelPrefs]      = useState(() => {
+    try { return JSON.parse(localStorage.getItem('cq_panels') || '{}') } catch { return {} }
+  })
+  useEffect(() => { localStorage.setItem('cq_panels', JSON.stringify(panelPrefs)) }, [panelPrefs])
   const [labTrades,       setLabTrades]       = useState(null)   // 自訂訊號實驗室的交易（null=未啟用，圖上顯示正式回測標記）
   // 首次造訪自動開新手導覽；Header「導覽」可重看
   // const [showTour, setShowTour] = useState(() => !localStorage.getItem('cq_tour_done')) // 2026-07-06 暫停新手導覽
@@ -139,7 +151,7 @@ export default function App() {
   useEffect(() => {
     fetchSymbols().then(setSymbols).catch(() => {})
     fetchIntervals().then(setIntervals).catch(() => {})
-    fetchCorrelation().then(setCorrelation).catch(() => {})
+    // fetchCorrelation().then(setCorrelation).catch(() => {})   // 2026-07-06 暫停幣種相關性分析
     refreshMarket(false)
   }, [refreshMarket])
 
@@ -214,6 +226,8 @@ export default function App() {
 
   const activeSignal = signals.find(s => s.symbol === active)
   const rangeOptions = interval === '1h' ? HOUR_OPTIONS : DAY_OPTIONS
+  const panelOn = (key) => panelPrefs[key] !== false                       // 預設開，明確設 false 才隱藏
+  const togglePanel = (key) => setPanelPrefs(p => ({ ...p, [key]: !(p[key] !== false) }))
 
   return (
     <div className="app">
@@ -285,14 +299,27 @@ export default function App() {
       {/* ── 幣種詳細模式 ────────────────────────────────────────────────── */}
       {view === 'detail' && (
         <div className="app-layout">
-          <CoinSidebar
-            symbols={symbols}
-            signals={signals}
-            active={active}
-            onSelect={handleSelectCoin}
-          />
-
           <main className="main-content">
+            {/* 詳細頁頂列：幣種下拉選擇 + 區塊顯示開關（取代左側整排幣種清單，版面更簡潔）*/}
+            <div className="detail-topbar">
+              <label className="coin-picker-wrap">
+                <span className="coin-picker-lbl">幣種</span>
+                <select className="coin-picker" value={active}
+                        onChange={e => handleSelectCoin(e.target.value)}>
+                  {symbols.map(s => <option key={s} value={s}>{coinName(s)}</option>)}
+                </select>
+              </label>
+              <div className="panel-prefs">
+                <span className="panel-prefs-lbl">顯示區塊</span>
+                {PANELS.map(p => (
+                  <label key={p.key} className={`panel-pref ${panelOn(p.key) ? 'on' : ''}`}>
+                    <input type="checkbox" checked={panelOn(p.key)} onChange={() => togglePanel(p.key)} />
+                    {p.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <HeroSignal signal={activeSignal} symbol={active} />
 
             <section className="chart-section">
@@ -393,6 +420,7 @@ export default function App() {
             </section>
 
             {/* 買賣判斷依據：系統訊號規則透明化 + 自訂指標/門檻值實驗室 */}
+            {panelOn('rules') && (
             <section className="collapsible-section">
               <button className="collapse-toggle" onClick={() => setShowRules(v => !v)}>
                 <span>買賣判斷依據（進出場規則 + 自訂訊號實驗室）</span>
@@ -408,6 +436,7 @@ export default function App() {
                 />
               )}
             </section>
+            )}
 
             {/* 2026-07-06 暫停 AI 智能分析
             <section className="collapsible-section">
@@ -419,14 +448,7 @@ export default function App() {
             </section>
             */}
 
-            <section className="collapsible-section">
-              <button className="collapse-toggle" onClick={() => setShowSentiment(v => !v)}>
-                <span>市場情緒 / 新聞</span>
-                <span className="collapse-arrow">{showSentiment ? '▲' : '▼'}</span>
-              </button>
-              {showSentiment && <Suspense fallback={panelFallback}><SentimentPanel symbol={active} /></Suspense>}
-            </section>
-
+            {panelOn('backtest') && (
             <section className="collapsible-section">
               <button className="collapse-toggle" onClick={() => setShowBacktest(v => !v)}>
                 <span>策略回測</span>
@@ -444,6 +466,21 @@ export default function App() {
                 </Suspense>
               )}
             </section>
+            )}
+
+            {/* 市場情緒 / 新聞：依需求移到最後面 */}
+            {panelOn('sentiment') && (
+            <section className="collapsible-section">
+              <button className="collapse-toggle" onClick={() => setShowSentiment(v => !v)}>
+                <span>市場情緒 / 新聞</span>
+                <span className="collapse-arrow">{showSentiment ? '▲' : '▼'}</span>
+              </button>
+              {showSentiment && <Suspense fallback={panelFallback}><SentimentPanel symbol={active} /></Suspense>}
+            </section>
+            )}
+
+            {/* 2026-07-06 暫停「幣種相關性分析」（依需求先註解；要恢復把此段 + 頂部 CorrelationHeatmap import、correlation/showCorrelation state、fetchCorrelation 呼叫一起取消註解）
+            {panelOn('correlation') && (
             <section className="collapsible-section">
               <button className="collapse-toggle" onClick={() => setShowCorrelation(v => !v)}>
                 <span>幣種相關性分析</span>
@@ -455,6 +492,8 @@ export default function App() {
                 </div>
               )}
             </section>
+            )}
+            */}
           </main>
         </div>
       )}

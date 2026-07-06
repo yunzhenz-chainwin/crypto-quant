@@ -48,31 +48,82 @@ function EquityCurve({ data }) {
   )
 }
 
+// 出場原因徽章：訊號出場藍 / 停損紅 / 停利綠
+function ExitBadge({ reason }) {
+  const M = {
+    signal_exit: { t: '訊號出場', c: '#60a5fa' },
+    stop_loss:   { t: '停損',     c: '#ef4444' },
+    take_profit: { t: '停利',     c: '#22c55e' },
+  }
+  const m = M[reason] ?? { t: EXIT_REASON_LABEL[reason] ?? reason, c: '#94a3b8' }
+  return <span className="tt-badge" style={{ color: m.c, borderColor: `${m.c}66`, background: `${m.c}1a` }}>{m.t}</span>
+}
+
+// 交易明細：精簡列一眼掃 → 點任一列展開「完整明細卡」（全部欄位，與後台一致）
 function TradeTable({ trades }) {
+  const [open, setOpen] = useState(null)
   if (!trades || trades.length === 0) return null
+  const rows = [...trades].reverse()             // 最新的排最上面
+  const px  = (v) => `$${fmtPrice(v)}`
+  const pct = (v) => `${v >= 0 ? '+' : ''}${v}%`
   return (
     <div className="trade-table-scroll" style={{ marginTop: 12 }}>
-      <table className="trade-table">
+      <table className="trade-table tt-rich">
         <thead>
           <tr>
-            <th>進場日</th><th>出場日</th>
-            <th>損益</th><th>持倉</th><th>原因</th>
+            <th aria-hidden="true"></th>
+            <th>進場日</th><th>買入價</th><th>出場日</th><th>賣出價</th>
+            <th>淨報酬</th><th>持倉</th><th>出場原因</th>
           </tr>
         </thead>
         <tbody>
-          {[...trades].reverse().map((t, i) => (
-            <tr key={i} className={t.profit ? 'win' : 'loss'}>
+          {rows.map((t, i) => ([
+            <tr key={`r${i}`}
+                className={`tt-row ${t.profit ? 'win' : 'loss'} ${open === i ? 'open' : ''}`}
+                onClick={() => setOpen(o => (o === i ? null : i))}
+                title="點一下看這一筆的完整明細">
+              <td className="tt-caret">{open === i ? '▾' : '▸'}</td>
               <td>{t.entry_date}</td>
+              <td>{px(t.entry_price)}</td>
               <td>{t.exit_date}</td>
-              <td className={t.return_pct >= 0 ? 'pos' : 'neg'}>
-                {t.return_pct >= 0 ? '+' : ''}{t.return_pct}%
-              </td>
-              <td>{t.hold_days}天</td>
-              <td className="reason">{EXIT_REASON_LABEL[t.exit_reason] ?? t.exit_reason}</td>
-            </tr>
-          ))}
+              <td>{px(t.exit_price)}</td>
+              <td className={t.return_pct >= 0 ? 'pos' : 'neg'}>{pct(t.return_pct)}</td>
+              <td>{t.hold_days} 天</td>
+              <td><ExitBadge reason={t.exit_reason} /></td>
+            </tr>,
+            open === i && (
+              <tr key={`d${i}`} className="tt-detail-row">
+                <td colSpan={8}>
+                  <div className="tt-detail">
+                    <div className="tt-detail-hero">
+                      <div className={`tt-ret ${t.profit ? 'pos' : 'neg'}`}>
+                        {t.return_pct >= 0 ? '+' : ''}{t.return_pct}<span>%</span>
+                      </div>
+                      <div className="tt-hero-tags">
+                        <span className={`tt-result ${t.profit ? 'win' : 'loss'}`}>{t.profit ? '獲利' : '虧損'}</span>
+                        <ExitBadge reason={t.exit_reason} />
+                        <span className="tt-hold">{t.entry_date} → {t.exit_date}．持有 {t.hold_days} 天</span>
+                      </div>
+                    </div>
+                    <div className="tt-detail-grid">
+                      <div className="tt-field"><span>買入價<i>含滑價</i></span><b>{px(t.entry_price)}</b></div>
+                      <div className="tt-field"><span>賣出價<i>含滑價</i></span><b>{px(t.exit_price)}</b></div>
+                      <div className="tt-field"><span>進場觸發價<i>原始開盤</i></span><b>{px(t.entry_trigger_price)}</b></div>
+                      <div className="tt-field"><span>出場觸發價<i>原始</i></span><b>{px(t.exit_trigger_price)}</b></div>
+                      <div className="tt-field"><span>毛報酬<i>未扣成本</i></span><b className={t.gross_return_pct >= 0 ? 'pos' : 'neg'}>{pct(t.gross_return_pct)}</b></div>
+                      <div className="tt-field"><span>成本<i>手續費+滑價</i></span><b>{t.cost_pct}%</b></div>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            ),
+          ]))}
         </tbody>
       </table>
+      <div className="trade-table-note">
+        ※ 點任一列可展開該筆完整明細。買入／賣出價＝含滑價的模擬成交價；進場一律為「訊號翻多的隔天開盤」，
+        出場依原因：停損／停利為當日觸價、訊號轉空為隔天開盤。
+      </div>
     </div>
   )
 }
@@ -152,6 +203,15 @@ function fmtPct(value, digits = 1) {
   return `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`
 }
 
+// 價位自適應小數位（低價幣如 DOGE $0.07 不能被捨成 0）
+function fmtPrice(value) {
+  const n = Number(value)
+  if (value === null || value === undefined || Number.isNaN(n)) return '-'
+  if (n < 1) return n.toFixed(4)
+  if (n < 100) return n.toFixed(2)
+  return Math.round(n).toLocaleString()
+}
+
 // 出場原因：後端用英文代碼，前端顯示成中文讓一般使用者看得懂
 const EXIT_REASON_LABEL = {
   stop_loss:   '停損出場',
@@ -185,6 +245,83 @@ function VerdictBanner({ data }) {
         代表策略{ddBetter ? '波動較小、比較抗跌' : '波動較大'}。
       </p>
       <p className="verdict-note">※ 這是已扣手續費與滑價的「歷史模擬」，訊號採日線波段，過去績效不代表未來。</p>
+    </div>
+  )
+}
+
+// 買賣點規則 + 三基準公正比較 + 驗證方法白話說明
+// 目的：讓決策者分得出「賺錢是選時的功勞，還是市場本來就在漲」，且每一步可稽核
+function MethodologySection({ data }) {
+  const m = data?.metrics
+  if (!m || m.error) return null
+  const rb  = data.random_baseline           // 舊版後端無此欄位 → 優雅降級
+  const pct = rb?.strategy_percentile
+
+  let verdict = null
+  if (pct != null) {
+    if (pct >= 95)      verdict = { cls: 'good', text: `本策略總報酬贏過 ${pct}% 的隨機進場——「選時」很可能有價值（仍受樣本數限制）。` }
+    else if (pct >= 75) verdict = { cls: 'mid',  text: `本策略總報酬贏過 ${pct}% 的隨機進場——略優於亂選日子，但證據還不算強。` }
+    else if (pct >= 40) verdict = { cls: 'warn', text: `本策略總報酬只贏過 ${pct}% 的隨機進場——選時與亂選差不多，賺賠主要來自市場本身的漲跌。` }
+    else                verdict = { cls: 'warn', text: `本策略總報酬只贏過 ${pct}% 的隨機進場——選時比亂選日子還差。` }
+  }
+
+  return (
+    <div className="mini-table-wrap methodology">
+      <div className="key-chart-title">
+        買賣點規則與公正比較
+        <Info text="把買賣規則、比較基準、驗證方法攤開講清楚：賺錢要分得出是「選時機的功勞」還是「市場本來就在漲」。" />
+      </div>
+
+      {/* 買賣點規則（白話、與 src/backtest.py 的實際邏輯一字一句對齊）*/}
+      <div className="method-rules">
+        <div><b>買點</b>：6 因子信心分數 ≥65（訊號翻多）→ <b>隔天開盤</b>買入</div>
+        <div><b>賣點</b>（先到先賣）：當日跌到停損價／漲到停利價 → 以觸發價賣出；訊號翻空（分數 ≤35）→ 隔天開盤賣出</div>
+        <div><b>成本</b>：每筆買賣皆已扣手續費與滑價（雙邊）</div>
+        <div className="method-rules-more">完整的 6 因子計分明細與「這顆幣現在幾分」，見上方「買賣判斷依據」面板。</div>
+      </div>
+
+      {/* 三基準比較 */}
+      <table className="mini-table">
+        <thead><tr><th>比較</th><th>總報酬</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>照訊號進出（本策略）</td>
+            <td className={m.total_return_pct >= 0 ? 'pos' : 'neg'}>{fmtPct(m.total_return_pct)}</td>
+            <td>由訊號選日子，共 {m.total_trades} 筆</td>
+          </tr>
+          <tr>
+            <td>買入持有</td>
+            <td className={m.buy_hold_return_pct >= 0 ? 'pos' : 'neg'}>{fmtPct(m.buy_hold_return_pct)}</td>
+            <td>第一天買、抱到最後（完全不選時）</td>
+          </tr>
+          <tr>
+            <td>隨機進場（模擬 {rb?.n_sims ?? 500} 次）</td>
+            {rb ? (
+              <>
+                <td className={rb.median_return_pct >= 0 ? 'pos' : 'neg'}>
+                  {fmtPct(rb.median_return_pct)}
+                  <span className="method-range">（5%~95%：{fmtPct(rb.p05_return_pct)} ~ {fmtPct(rb.p95_return_pct)}）</span>
+                </td>
+                <td>筆數、持有天數、停損停利全相同，只有「買的日子」亂選</td>
+              </>
+            ) : (
+              <>
+                <td>—</td>
+                <td>後端服務更新後顯示</td>
+              </>
+            )}
+          </tr>
+        </tbody>
+      </table>
+      {verdict && <div className={`method-verdict ${verdict.cls}`}>{verdict.text}</div>}
+
+      {/* 驗證方法（可稽核的四條）*/}
+      <ul className="method-notes">
+        <li>沒偷看未來：訊號只用「當天收盤前已知」的資料計算，隔天開盤才成交。</li>
+        <li>樣本內／外切分：前 60% 資料調規則、後 40% 當考試（見下方「樣本切分驗證」表），降低過度最佳化。</li>
+        <li>隨機基準用固定亂數種子：任何人重算，數字完全相同（可重現＝可稽核）。</li>
+        <li>誠實局限：共 {m.total_trades} 筆交易、樣本有限；「參數掃描 Top 5」屬事後挑最好、直接採用會偏樂觀；過去績效不代表未來。</li>
+      </ul>
     </div>
   )
 }
@@ -334,6 +471,9 @@ export default function BacktestPanel({ signal, data, loading, params, onParamsC
             </div>
           </div>
 
+          {/* 買賣點規則 + 三基準比較（買入持有／隨機進場）+ 驗證方法白話 */}
+          <MethodologySection data={data} />
+
           <div className="backtest-grid">
             <ValidationTable validation={data.validation} />
             <SweepTable rows={data.parameter_sweep} />
@@ -349,7 +489,7 @@ export default function BacktestPanel({ signal, data, loading, params, onParamsC
 
           {/* 展開更多 */}
           <button className="detail-toggle" onClick={() => setShowDetail(v => !v)}>
-            {showDetail ? '▲ 收起交易明細' : '▼ 查看最近交易記錄'}
+            {showDetail ? '▲ 收起交易明細' : `▼ 查看交易記錄（全部 ${data.recent_trades?.length ?? 0} 筆，點列看完整明細）`}
           </button>
           {showDetail && <TradeTable trades={data.recent_trades} />}
         </>

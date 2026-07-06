@@ -748,12 +748,15 @@ function TasksPage({ onLogout }) {
 const TABLE_ICONS = {
   prices: '📈', indicators: '📊', daily_signal: '🚦', fear_greed: '😱',
   tasks: '🗂️', app_config: '⚙️', job_runs: '🛠️', access_log: '🌐', news: '📰',
+  backtest_trade: '💹', backtest_summary: '🏁',
 }
 const TABLE_DESC = {
   prices: '每根 K 線的開高低收量', indicators: '各項技術指標數值',
   daily_signal: '逐日逐幣的信心分數與多空', fear_greed: '市場恐懼貪婪指數歷史',
   tasks: '後台工作項目與進度', app_config: '系統集中設定',
   job_runs: '排程 / 操作執行紀錄', access_log: 'API 使用紀錄', news: '新聞文章',
+  backtest_trade: '每一筆進出場的價格、報酬、持有天數、出場原因',
+  backtest_summary: '每幣回測整體績效（勝率、報酬、回撤、夏普…）',
 }
 // 每張表「怎麼算 / 怎麼來的」（透明說明，點選該表時顯示）
 const TABLE_HOWTO = {
@@ -766,6 +769,8 @@ const TABLE_HOWTO = {
   app_config: '系統集中設定（如追蹤幣種清單），非計算資料。',
   job_runs: '排程／手動操作每次執行的紀錄（開始、結束、狀態、訊息），自動寫入。',
   access_log: 'API 被呼叫的紀錄（路徑、狀態碼、耗時），自動寫入。',
+  backtest_trade: '用「目前判斷標準」跑歷史回測產生的每一筆進出場（進場＝分數首次≥65隔日開盤買、出場＝分數首次≤35隔日開盤賣或 −6%/+20% 觸價）。與前台即時回測同一套計算（src/backtest.py），每日排程自動重算。',
+  backtest_summary: '把上表每幣的所有交易彙總成整體績效：勝率＝賺錢筆數÷總筆數、總報酬＝各筆報酬複利、最大回撤、夏普比率、並與買入持有比較。',
 }
 const COLUMN_LABELS = {
   symbol: '幣種', interval: '週期', ts: '時間', date: '日期',
@@ -780,13 +785,30 @@ const COLUMN_LABELS = {
   published_at: '發布日', fetched_at: '存入時間',
   job_type: '類型', started_at: '開始', finished_at: '結束', message: '訊息',
   key: '設定鍵', value_json: '設定值', path: '路徑', status_code: '狀態碼', latency_ms: '耗時(ms)',
+  entry_date: '進場日', exit_date: '出場日', entry_price: '買入價', exit_price: '賣出價',
+  entry_trigger_price: '進場觸發價', exit_trigger_price: '出場觸發價',
+  return_pct: '淨報酬%', gross_return_pct: '毛報酬%', cost_pct: '成本%',
+  hold_days: '持有天數', exit_reason: '出場原因', profit: '賺賠',
+  total_trades: '交易次數', win_rate: '勝率%', total_return_pct: '總報酬%', cagr_pct: '年化%',
+  max_drawdown_pct: '最大回撤%', sharpe_ratio: '夏普', avg_hold_days: '平均持有',
+  profit_factor: '獲利因子', avg_win_pct: '平均獲利%', avg_loss_pct: '平均虧損%',
+  buy_hold_return_pct: '買入持有%', excess_return_pct: '超額%',
+  signal_exits: '訊號出場數', stop_loss_exits: '停損數', take_profit_exits: '停利數',
+  stop_loss: '停損設定', take_profit: '停利設定', fee_rate: '手續費率', slippage_rate: '滑價率',
+  period_start: '起始日', period_end: '結束日',
 }
 const NUMERIC_COLS = new Set([
   'open', 'high', 'low', 'close', 'volume', 'ma20', 'ma60', 'ma200', 'rsi', 'macd', 'hist',
   'bb_upper', 'bb_lower', 'vol_ma20', 'score', 'value', 'latency_ms', 'sort_order', 'status_code', 'id',
+  'entry_price', 'exit_price', 'entry_trigger_price', 'exit_trigger_price', 'return_pct',
+  'gross_return_pct', 'cost_pct', 'hold_days', 'total_trades', 'win_rate', 'total_return_pct',
+  'cagr_pct', 'max_drawdown_pct', 'sharpe_ratio', 'avg_hold_days', 'profit_factor', 'avg_win_pct',
+  'avg_loss_pct', 'buy_hold_return_pct', 'excess_return_pct', 'signal_exits', 'stop_loss_exits',
+  'take_profit_exits', 'stop_loss', 'take_profit', 'fee_rate', 'slippage_rate',
 ])
 const DB_SIG  = { BULL: { t: '多頭', c: '#22c55e' }, BEAR: { t: '空頭', c: '#ef4444' }, NEUTRAL: { t: '中立', c: '#f59e0b' } }
 const DB_SENT = { bullish: { t: '看多', c: '#22c55e' }, bearish: { t: '看空', c: '#ef4444' }, neutral: { t: '中立', c: '#94a3b8' } }
+const DB_EXIT = { signal_exit: { t: '訊號出場', c: '#60a5fa' }, stop_loss: { t: '停損', c: '#ef4444' }, take_profit: { t: '停利', c: '#22c55e' } }
 
 function DbBadge({ text, color }) {
   return <span className="db-badge" style={{ color, borderColor: color + '66', background: color + '1a' }}>{text}</span>
@@ -807,6 +829,14 @@ function renderCell(col, val, table) {
   if (col === 'sentiment' && DB_SENT[val]) return <DbBadge text={DB_SENT[val].t} color={DB_SENT[val].c} />
   if (col === 'status' && table === 'tasks' && TASK_STATUS[val])
     return <DbBadge text={TASK_STATUS[val].t} color={TASK_STATUS[val].c} />
+  if (col === 'exit_reason' && DB_EXIT[val])
+    return <DbBadge text={DB_EXIT[val].t} color={DB_EXIT[val].c} />
+  if (col === 'profit' && (val === 0 || val === 1))
+    return val ? <DbBadge text="賺" color="#22c55e" /> : <DbBadge text="賠" color="#ef4444" />
+  if ((col === 'return_pct' || col === 'total_return_pct' || col === 'excess_return_pct') && val !== null && val !== '') {
+    const n = Number(val)
+    return <b style={{ color: n >= 0 ? '#22c55e' : '#ef4444' }}>{n >= 0 ? '+' : ''}{n}</b>
+  }
   if (col === 'score') {
     const n = Number(val), c = n >= 65 ? '#22c55e' : n >= 50 ? '#84cc16' : n >= 35 ? '#f59e0b' : '#ef4444'
     return <b style={{ color: c }}>{n}</b>
@@ -830,6 +860,8 @@ function DbViewer({ onLogout }) {
   const [offset, setOffset] = useState(0)
   const [err, setErr]       = useState('')
   const [loading, setLoading] = useState(false)
+  const [hidden, setHidden] = useState(() => new Set())   // 被隱藏的欄位（欄位篩選，預設全開）
+  const [openRow, setOpenRow] = useState(null)            // 展開看細節的列 index
 
   useEffect(() => {
     fetchDbTables()
@@ -848,9 +880,13 @@ function DbViewer({ onLogout }) {
   }, [active, symbol, limit, offset, onLogout])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { setOpenRow(null) }, [active, offset, symbol, limit])   // 換表/換頁時收合細節
 
-  const changeTable = (name) => { setActive(name); setSymbol(''); setOffset(0) }
+  const changeTable = (name) => { setActive(name); setSymbol(''); setOffset(0); setHidden(new Set()) }
   const page = data ? Math.floor(data.offset / data.limit) + 1 : 1
+  const allCols = data?.columns ?? []
+  const visCols = allCols.filter(c => !hidden.has(c))     // 只顯示使用者勾選的欄位
+  const toggleCol = (c) => setHidden(h => { const n = new Set(h); if (n.has(c)) n.delete(c); else n.add(c); return n })
 
   return (
     <div className="admin-body">
@@ -883,6 +919,24 @@ function DbViewer({ onLogout }) {
               {[50, 100, 200, 500].map(n => <option key={n} value={n}>{n}</option>)}
             </select>
           </label>
+          {/* 欄位篩選：自選要看哪些欄（未勾選＝隱藏；切表時重置為全顯示）*/}
+          {data && allCols.length > 0 && (
+            <details className="db-col-filter">
+              <summary>欄位（{visCols.length}/{allCols.length}）</summary>
+              <div className="db-col-menu">
+                <div className="db-col-actions">
+                  <button type="button" onClick={() => setHidden(new Set())}>全選</button>
+                  <button type="button" onClick={() => setHidden(new Set(allCols))}>全不選</button>
+                </div>
+                {allCols.map(c => (
+                  <label key={c} className="db-col-item">
+                    <input type="checkbox" checked={!hidden.has(c)} onChange={() => toggleCol(c)} />
+                    {COLUMN_LABELS[c] ?? c}
+                  </label>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
         <button className="admin-link" onClick={load} disabled={loading}>
           {loading ? '載入中…' : '↻ 重新整理'}
@@ -906,25 +960,45 @@ function DbViewer({ onLogout }) {
           <div className="admin-table-wrap">
             <table className="admin-table db-table">
               <thead><tr>
-                {data.columns.map(c => (
+                {visCols.map(c => (
                   <th key={c} className={NUMERIC_COLS.has(c) ? 'db-num-cell' : ''}>
                     {COLUMN_LABELS[c] ?? c}
                   </th>
                 ))}
               </tr></thead>
               <tbody>
-                {data.rows.length === 0 && (
-                  <tr><td colSpan={data.columns.length} style={{ color: '#94a3b8' }}>沒有資料</td></tr>
+                {(data.rows.length === 0 || visCols.length === 0) && (
+                  <tr><td colSpan={Math.max(1, visCols.length)} style={{ color: '#94a3b8' }}>
+                    {visCols.length === 0 ? '請至少勾選一個欄位' : '沒有資料'}
+                  </td></tr>
                 )}
-                {data.rows.map((row, i) => (
-                  <tr key={i}>
-                    {data.columns.map(c => (
+                {visCols.length > 0 && data.rows.map((row, i) => ([
+                  <tr key={'r' + i}
+                      className={`db-row ${openRow === i ? 'open' : ''}`}
+                      onClick={() => setOpenRow(o => (o === i ? null : i))}
+                      title="點一下看這一筆的全部欄位">
+                    {visCols.map((c, ci) => (
                       <td key={c} className={NUMERIC_COLS.has(c) ? 'db-num-cell' : ''}>
+                        {ci === 0 && <span className="db-row-caret">{openRow === i ? '▾' : '▸'}</span>}
                         {renderCell(c, row[c], active)}
                       </td>
                     ))}
-                  </tr>
-                ))}
+                  </tr>,
+                  openRow === i && (
+                    <tr key={'d' + i} className="db-detail-row">
+                      <td colSpan={visCols.length}>
+                        <div className="db-detail">
+                          {allCols.map(c => (
+                            <div key={c} className="db-detail-item">
+                              <span className="db-detail-k">{COLUMN_LABELS[c] ?? c}</span>
+                              <span className="db-detail-v">{renderCell(c, row[c], active)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ),
+                ]))}
               </tbody>
             </table>
           </div>

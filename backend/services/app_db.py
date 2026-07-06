@@ -189,11 +189,50 @@ def init_db():
                 error             TEXT
             )
         """)
+        # 回測「逐筆進出場」明細：每筆一列（供前台/後台查勝率、報酬、持有天數）。
+        # 進場＝信心分數首次≥65（隔日開盤買）、出場＝分數首次≤35（隔日開盤賣）或
+        # −6% 停損 / +20% 停利觸價，先到先出——與 src/backtest.py（前台即時 API）同一套。
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS backtest_trade (
+                symbol      TEXT NOT NULL,
+                interval    TEXT NOT NULL DEFAULT '1d',
+                entry_date  TEXT NOT NULL,
+                exit_date   TEXT,
+                entry_price REAL, exit_price REAL,
+                entry_trigger_price REAL, exit_trigger_price REAL,
+                return_pct  REAL, gross_return_pct REAL, cost_pct REAL,
+                hold_days   INTEGER,
+                exit_reason TEXT,           -- signal_exit / stop_loss / take_profit
+                profit      INTEGER,        -- 1 賺 / 0 賠
+                PRIMARY KEY (symbol, interval, entry_date)
+            )
+        """)
+        # 回測「整體績效」摘要：每幣一列。與 backtest_trade 分兩張表：粒度不同
+        # （摘要是一對多的父列），分表欄位才不混雜、查詢也單純（符合正規化）。
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS backtest_summary (
+                symbol      TEXT NOT NULL,
+                interval    TEXT NOT NULL DEFAULT '1d',
+                total_trades INTEGER,
+                win_rate REAL,
+                total_return_pct REAL, cagr_pct REAL,
+                max_drawdown_pct REAL, sharpe_ratio REAL,
+                avg_hold_days REAL, profit_factor REAL,
+                avg_win_pct REAL, avg_loss_pct REAL,
+                buy_hold_return_pct REAL, excess_return_pct REAL,
+                signal_exits INTEGER, stop_loss_exits INTEGER, take_profit_exits INTEGER,
+                stop_loss REAL, take_profit REAL, fee_rate REAL, slippage_rate REAL,
+                period_start TEXT, period_end TEXT,
+                updated_at  TEXT,
+                PRIMARY KEY (symbol, interval)
+            )
+        """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_job_started ON job_runs(started_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_access_ts   ON access_log(ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_prices_sym  ON prices(symbol, interval, ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ind_sym     ON indicators(symbol, interval, ts)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bt_trade    ON backtest_trade(symbol, interval, entry_date)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_chat_ts  ON ai_chat(ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_usage_ts ON ai_usage(ts)")
         # 既有資料庫的欄位遷移：補上 tasks.notes（備註 / 交接說明）
@@ -533,6 +572,101 @@ def backfill_daily_signals() -> int:
             total += len(rows)
         conn.commit()
     return total
+
+
+def backfill_backtests(symbols: list[str] = None, stop_loss: float = -0.06,
+                       take_profit: float = 0.20, fee_rate: float = 0.001,
+                       slippage_rate: float = 0.0005) -> dict:
+    """
+    以「目前的判斷標準」跑歷史回測，把結果寫進資料庫：
+      進場＝信心分數首次 ≥65（隔日開盤買）、出場＝分數首次 ≤35（隔日開盤賣）
+      或 −6% 停損 / +20% 停利觸價，先到先出。
+
+    逐筆進出場 → backtest_trade；整體績效（勝率/報酬/持有/回撤/夏普…）→ backtest_summary。
+    與前台即時 API（src/backtest.py 的 run_backtest / compute_metrics）完全同一套計算，
+    可重複執行（先清該幣舊資料再寫，不殘留）。回傳 {symbols, trades}。
+    """
+    import sys
+    sys.path.insert(0, str(DB_PATH.parent.parent))
+    from src.backtest import load_indicators, run_backtest, compute_metrics
+
+    if symbols is None:
+        symbols = get_enabled_symbols()
+    now = _now()
+    n_syms = n_trades = 0
+    with _connect() as conn:
+        for symbol in symbols:
+            try:
+                df = load_indicators(symbol)
+            except SystemExit:
+                continue                                  # 該幣無指標檔（理論上不會）
+            if df is None or df.empty:
+                continue
+            trades = run_backtest(df, stop_loss=stop_loss, take_profit=take_profit,
+                                  fee_rate=fee_rate, slippage_rate=slippage_rate)
+            metrics = compute_metrics(trades, df)
+
+            # 先清該幣舊明細，再寫入本次結果（可重複執行、不殘留）
+            conn.execute("DELETE FROM backtest_trade WHERE symbol=? AND interval='1d'", (symbol,))
+            conn.executemany(
+                "INSERT OR REPLACE INTO backtest_trade "
+                "(symbol, interval, entry_date, exit_date, entry_price, exit_price, "
+                " entry_trigger_price, exit_trigger_price, return_pct, gross_return_pct, "
+                " cost_pct, hold_days, exit_reason, profit) "
+                "VALUES (?, '1d', ?,?,?,?,?,?,?,?,?,?,?,?)",
+                [(symbol, t["entry_date"], t["exit_date"], t["entry_price"], t["exit_price"],
+                  t["entry_trigger_price"], t["exit_trigger_price"], t["return_pct"],
+                  t["gross_return_pct"], t["cost_pct"], t["hold_days"], t["exit_reason"],
+                  1 if t["profit"] else 0) for t in trades])
+            n_trades += len(trades)
+            n_syms += 1
+
+            if "error" in metrics:                        # 無交易 → 清該幣摘要，跳過
+                conn.execute("DELETE FROM backtest_summary WHERE symbol=? AND interval='1d'", (symbol,))
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO backtest_summary "
+                "(symbol, interval, total_trades, win_rate, total_return_pct, cagr_pct, "
+                " max_drawdown_pct, sharpe_ratio, avg_hold_days, profit_factor, avg_win_pct, "
+                " avg_loss_pct, buy_hold_return_pct, excess_return_pct, signal_exits, "
+                " stop_loss_exits, take_profit_exits, stop_loss, take_profit, fee_rate, "
+                " slippage_rate, period_start, period_end, updated_at) "
+                "VALUES (?, '1d', ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (symbol, metrics["total_trades"], metrics["win_rate"], metrics["total_return_pct"],
+                 metrics["cagr_pct"], metrics["max_drawdown_pct"], metrics["sharpe_ratio"],
+                 metrics["avg_hold_days"], metrics["profit_factor"], metrics["avg_win_pct"],
+                 metrics["avg_loss_pct"], metrics["buy_hold_return_pct"], metrics["excess_return_pct"],
+                 metrics["signal_exits"], metrics["stop_loss_exits"], metrics["take_profit_exits"],
+                 stop_loss, take_profit, fee_rate, slippage_rate,
+                 str(df["date"].min())[:10], str(df["date"].max())[:10], now))
+        conn.commit()
+    return {"symbols": n_syms, "trades": n_trades}
+
+
+def load_backtest_summary(symbol: str = None) -> list[dict]:
+    """回測整體績效摘要；不給 symbol → 回全部幣，依總報酬遞減排序（跨幣比較用）。"""
+    with _connect() as conn:
+        if symbol:
+            rows = conn.execute(
+                "SELECT * FROM backtest_summary WHERE symbol=? AND interval='1d'",
+                (symbol.upper(),)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM backtest_summary WHERE interval='1d' "
+                "ORDER BY total_return_pct DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def load_backtest_trades(symbol: str, limit: int = 0) -> list[dict]:
+    """某幣的回測進出場明細（依進場日遞增；limit>0 只回最近 N 筆）。"""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT entry_date, exit_date, entry_price, exit_price, return_pct, "
+            "gross_return_pct, cost_pct, hold_days, exit_reason, profit "
+            "FROM backtest_trade WHERE symbol=? AND interval='1d' ORDER BY entry_date",
+            (symbol.upper(),)).fetchall()
+    out = [dict(r) for r in rows]
+    return out[-limit:] if (limit and limit > 0) else out
 
 
 def fetch_fear_greed_history(limit: int = 0) -> int:

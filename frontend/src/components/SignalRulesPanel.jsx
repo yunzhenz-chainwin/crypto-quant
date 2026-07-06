@@ -29,6 +29,10 @@ const SCORING_TABLE = [
   { factor: '新聞情緒', weight: '參考', rules: '每日新聞情緒 -100~+100（文字探勘彙總，該幣無新聞則用全市場）。實驗中：目前僅顯示方向、暫不計入分數（A/B 回測未證明跨幣穩定有效，待情緒判讀升級後再啟用）' },
 ]
 const FACTOR_ORDER = ['RSI', 'MACD', 'MA', 'MA200', 'Volume', 'BB', 'News']
+// 各因子的權重上限（與 src/scoring.py 一致；即時計分表顯示每個因子最多能加／減幾分）
+const FACTOR_WEIGHT = { RSI: '±20', MACD: '±18', MA: '±15', MA200: '±10', Volume: '±7', BB: '±12', News: '參考' }
+// 計算式用的短名
+const FACTOR_SHORT = { RSI: 'RSI', MACD: 'MACD', MA: '均線', MA200: 'MA200', Volume: '量', BB: '布林', News: '新聞' }
 
 const fmtSigned = (v) => (v > 0 ? `+${v}` : `${v}`)
 const scoreColor = (v) => (v > 0 ? '#22c55e' : v < 0 ? '#ef4444' : '#64748b')
@@ -60,6 +64,12 @@ export default function SignalRulesPanel({ signal, prices, indicators, interval,
   const factors = signal?.factors ?? {}
   const factorSum = FACTOR_ORDER.reduce((s, k) => s + (factors[k]?.score ?? 0), 0)
   const stanceZh  = { BULL: '偏多', BEAR: '偏空', NEUTRAL: '中立' }[signal?.signal] ?? '—'
+  // 計分「累計過程」：從基準 50 起，逐因子累加（供計算式與表格「累計」欄）
+  const shownFactors = FACTOR_ORDER.filter(k => factors[k])
+  const runningOf = {}
+  let running = 50
+  for (const k of shownFactors) { running += (factors[k].score ?? 0); runningOf[k] = running }
+  const totalColor = score >= 65 ? '#22c55e' : score >= 35 ? '#f59e0b' : '#ef4444'
 
   return (
     <section className="rules-panel">
@@ -95,29 +105,58 @@ export default function SignalRulesPanel({ signal, prices, indicators, interval,
           想驗證「均線黃金交叉」這類經典交叉策略 → 用下方實驗室的「均線交叉」規則，直接在圖上看買賣點與績效。
         </div>
 
-        {/* 當前幣的即時計分對照 */}
+        {/* 當前幣的即時計分明細（對齊：起始基準 50 + 六因子加減分 = 合計分數）*/}
         {score != null && (
           <div className="rules-live">
             <div className="rules-live-head">
-              目前這顆幣的計分：基準 50
-              {FACTOR_ORDER.filter(k => factors[k]?.score).map(k => (
-                <span key={k} style={{ color: scoreColor(factors[k].score) }}> {fmtSigned(factors[k].score)}</span>
-              ))}
-              　=　<b className="rules-live-score">{score} 分（{stanceZh}）</b>
-              {50 + factorSum !== score && <span className="rules-live-clip">（超界夾回 0~100）</span>}
+              這顆幣「現在」的即時計分——從基準 50 逐因子加減，每一分都對得出來（收盤後更新）
             </div>
+
+            {/* 計算式：一行看懂 50 ± 各因子 = 幾分 */}
+            <div className="rules-calc">
+              <span className="calc-term calc-base">50</span>
+              <span className="calc-note">基準</span>
+              {shownFactors.filter(k => factors[k].score !== 0).map(k => (
+                <span className="calc-seg" key={k}>
+                  <span className="calc-op">{factors[k].score > 0 ? '＋' : '－'}</span>
+                  <span className="calc-term" style={{ color: scoreColor(factors[k].score) }}>{Math.abs(factors[k].score)}</span>
+                  <span className="calc-note">{FACTOR_SHORT[k] ?? k}</span>
+                </span>
+              ))}
+              <span className="calc-op">＝</span>
+              <span className="calc-total" style={{ color: totalColor }}>{score} 分</span>
+              <span className="calc-stance" style={{ color: totalColor }}>（{stanceZh}）</span>
+              {50 + factorSum !== score && <span className="rules-live-clip">超界夾回 0~100</span>}
+            </div>
+
             <table className="mini-table rules-factor-table">
-              <thead><tr><th>因子</th><th>目前狀態</th><th>得分</th></tr></thead>
+              <thead><tr>
+                <th>指標</th>
+                <th title="權重＝這個因子最多能加或減幾分（詳見下方完整計分規則表）">權重</th>
+                <th>這根的實際情況（觸發哪條規則）</th><th>得分</th>
+                <th title="從 50 開始逐列累加後的分數">累計</th>
+              </tr></thead>
               <tbody>
-                {FACTOR_ORDER.filter(k => factors[k]).map(k => (
+                <tr className="rules-factor-base">
+                  <td>起始基準</td><td>—</td><td>中立起點（多空分界）</td><td>50</td><td>50</td>
+                </tr>
+                {shownFactors.map(k => (
                   <tr key={k}>
                     <td>{factors[k].label}</td>
+                    <td className="rules-factor-w">{FACTOR_WEIGHT[k] ?? '—'}</td>
                     <td>{factors[k].note}</td>
                     <td style={{ color: scoreColor(factors[k].score), fontWeight: 600 }}>
                       {fmtSigned(factors[k].score)}
                     </td>
+                    <td className="rules-factor-run">{runningOf[k]}</td>
                   </tr>
                 ))}
+                <tr className="rules-factor-total">
+                  <td>合計</td>
+                  <td>0~100</td>
+                  <td>{stanceZh}（分數 ≥65 偏多、≤35 偏空）</td>
+                  <td colSpan={2}><b style={{ color: totalColor }}>＝ {score} 分</b></td>
+                </tr>
               </tbody>
             </table>
           </div>

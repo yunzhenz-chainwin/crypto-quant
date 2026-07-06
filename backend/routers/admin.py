@@ -386,9 +386,11 @@ def coins_remove(symbol: str, _: str = Depends(require_admin)):
 # 白名單:只允許看這些表,並標明它在哪個 DB 檔(避免任意表名 / SQL 注入)
 def _table_registry():
     return {
-        "prices":       (app_db.DB_PATH,    "行情 K線"),
-        "indicators":   (app_db.DB_PATH,    "技術指標"),
-        "daily_signal": (app_db.DB_PATH,    "每日訊號"),
+        "prices":         (app_db.DB_PATH,    "行情 K線"),
+        "indicators":     (app_db.DB_PATH,    "技術指標"),
+        "daily_signal":   (app_db.DB_PATH,    "每日訊號"),
+        "backtest_trade": (app_db.DB_PATH,    "回測交易"),
+        "backtest_summary": (app_db.DB_PATH,  "回測績效"),
         "fear_greed":   (app_db.DB_PATH,    "恐懼貪婪"),
         "tasks":        (app_db.DB_PATH,    "工作項目"),
         "app_config":   (app_db.DB_PATH,    "設定"),
@@ -433,6 +435,7 @@ def db_table_rows(
         wsql = (" WHERE " + " AND ".join(where)) if where else ""
         # 排序欄:優先時間,其次 id;皆無則用第一欄
         order = "ts" if "ts" in cols else "date" if "date" in cols else \
+                "entry_date" if "entry_date" in cols else \
                 "fetched_at" if "fetched_at" in cols else "id" if "id" in cols else cols[0]
         total = c.execute(f"SELECT COUNT(*) FROM {name}{wsql}", params).fetchone()[0]
         rows = c.execute(

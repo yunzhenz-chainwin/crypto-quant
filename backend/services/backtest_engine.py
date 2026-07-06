@@ -10,6 +10,7 @@ from src.backtest import (
     run_backtest,
     compute_metrics,
     walk_forward_split_report,
+    random_entry_baseline,
     REPORT_DIR,
     INTERVAL,
 )
@@ -52,6 +53,19 @@ def get_backtest(symbol: str,
         signals=signals,
     )
     metrics = compute_metrics(trades, df)
+
+    # 隨機進場基準：同筆數/同持有天數/同停損停利，只有「買的日子」亂選（固定種子可重現）。
+    # 回答「策略的選時是否贏過亂選」——非關鍵功能，失敗回 None、前端優雅降級。
+    baseline = None
+    if "error" not in metrics:
+        try:
+            baseline = random_entry_baseline(
+                df, trades, metrics["total_return_pct"],
+                stop_loss=stop_loss, take_profit=take_profit,
+                fee_rate=fee_rate, slippage_rate=slippage_rate)
+        except Exception:
+            baseline = None
+
     split = walk_forward_split_report(
         df,
         stop_loss=stop_loss,
@@ -79,8 +93,9 @@ def get_backtest(symbol: str,
             "end":   str(df["date"].max().date()),
         },
         "metrics": {k: v for k, v in metrics.items() if k != "equity_curve"},
+        "random_baseline": baseline,
         "equity_curve": metrics.get("equity_curve", []),
-        "recent_trades": trades[-20:],  # 最近 20 筆，夠前端顯示
+        "recent_trades": trades,  # 全部交易（前端明細表顯示全部、與後台一致；K 線僅畫視窗內可見的標記）
         "validation": split,
         "parameter_sweep": sweep[:5],
     }

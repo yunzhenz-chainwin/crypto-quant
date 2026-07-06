@@ -225,12 +225,24 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
     }
 
     // ── 買賣標記（回測是日線策略，僅日線圖顯示；時線時間軸型別也不相容）──
-    // t.exit_label 可覆寫出場文字（自訂訊號實驗室用「賣出」而非「獲利/停損」）
+    // t.exit_label 可覆寫出場文字（自訂訊號實驗室用「賣出」而非出場原因）
     if (interval === '1d' && showMarkers && trades && trades.length > 0) {
+      // 出場標記用「真實出場原因」（停損/停利/訊號出場），與交易明細表一致；
+      // 舊版用賺賠推斷成「獲利/停損」——訊號出場也可能賺錢，會標錯原因。
+      const EXIT_MARK = { stop_loss: '停損', take_profit: '停利', signal_exit: '訊號出場' }
+      // 標記上的價位自適應小數（低價幣不能被 toFixed(0) 捨成 0）
+      const fmtPx = (v) => { const n = Number(v); return !(n > 0) ? '' : n < 1 ? n.toFixed(3) : n < 100 ? n.toFixed(1) : n.toFixed(0) }
       const markers = []
       trades.forEach(t => {
-        if (t.entry_date) markers.push({ time: t.entry_date, position: 'belowBar', color: '#22c55e', shape: 'arrowUp', text: `買入 $${Number(t.entry_price).toFixed(0)}` })
-        if (t.exit_date)  markers.push({ time: t.exit_date, position: 'aboveBar', color: t.profit ? '#60a5fa' : '#ef4444', shape: 'arrowDown', text: `${t.exit_label ?? (t.profit ? '獲利' : '停損')} ${t.return_pct > 0 ? '+' : ''}${t.return_pct}%` })
+        if (t.entry_date) {
+          const px = fmtPx(t.entry_price)
+          markers.push({ time: t.entry_date, position: 'belowBar', color: '#22c55e', shape: 'arrowUp', text: px ? `買入 $${px}` : '買入' })
+        }
+        if (t.exit_date) {
+          const label = t.exit_label ?? EXIT_MARK[t.exit_reason] ?? (t.profit ? '獲利' : '停損')
+          const px = fmtPx(t.exit_price)
+          markers.push({ time: t.exit_date, position: 'aboveBar', color: t.profit ? '#60a5fa' : '#ef4444', shape: 'arrowDown', text: `${label}${px ? ` $${px}` : ''} ${t.return_pct > 0 ? '+' : ''}${t.return_pct}%` })
+        }
       })
       markers.sort((a, b) => a.time.localeCompare(b.time))
       createSeriesMarkers(candleSeries, markers)
