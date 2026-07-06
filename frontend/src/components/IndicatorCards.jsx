@@ -16,8 +16,9 @@ const FACTOR_META = {
   MA200:  { name: '長期趨勢',  tip: '站上或跌破 200 日均線,長線多空的分界' },
   Volume: { name: '成交量',    tip: '放量代表訊號較可信,縮量則較存疑' },
   BB:     { name: '布林位置',  tip: '價格在常態波動帶的高低(靠上偏貴、靠下便宜)' },
+  News:   { name: '新聞情緒',  tip: '近日新聞偏多或偏空(文字探勘每日彙總,-100~+100;該幣無新聞則用全市場)' },
 }
-const FACTOR_ORDER = ['RSI', 'MACD', 'MA', 'MA200', 'Volume', 'BB']
+const FACTOR_ORDER = ['RSI', 'MACD', 'MA', 'MA200', 'Volume', 'BB', 'News']
 
 const factorArrow = (s) => (s > 0 ? '↗' : s < 0 ? '↘' : '—')
 const factorColor = (s) => (s > 0 ? '#22c55e' : s < 0 ? '#ef4444' : '#64748b')

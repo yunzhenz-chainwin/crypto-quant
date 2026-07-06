@@ -26,11 +26,18 @@ def _fmt_price(v):
 
 
 def score_row(rsi, hist, prev_hist, close, ma20, ma60, ma200,
-              volume, vol_ma20, bb_upper, bb_lower):
+              volume, vol_ma20, bb_upper, bb_lower, news_score=None,
+              news_scoring=True):
     """
-    6 因子信心分數（0–100），50 為中立基準。
+    技術 6 因子 + 新聞情緒（共 7 因子）信心分數（0–100），50 為中立基準。
     ≥65 → BULL，≤35 → BEAR，其餘 NEUTRAL（門檻見 signal_from_score）。
     回傳 (score, factors)，factors 供前端顯示各因子明細。
+
+    news_score：可選，當日新聞情緒分數 -100(極空)~+100(極多)，來自
+      news_sentiment_daily（文字探勘每日彙總）。不給（None）→ 情緒因子不計分，
+      分數與原本純技術 6 因子完全相同（向後相容；回測/歷史回填不傳即維持原狀）。
+    news_scoring：True → 情緒計入分數（±8，回測 A/B 用）；False → 只在 factors
+      顯示情緒方向、得分固定 0（live 預設，避免未驗證訊號影響實際買賣決策）。
     """
     score = 50
     factors = {}
@@ -118,6 +125,29 @@ def score_row(rsi, hist, prev_hist, close, ma20, ma60, ma200,
             else:               bb_note = f"中間區 {bb_pct:.0%}"
     factors["BB"] = {"score": bb_score, "note": bb_note, "label": "布林通道"}
     score += bb_score
+
+    # 7. 新聞情緒（±8）— 文字探勘（news_sentiment_daily）接進技術面
+    #    刻意小權重、排在六大技術因子之後：情緒只微調、不喧賓奪主。
+    #    news_scoring=False → 只顯示方向、不計分：A/B 回測顯示此詞庫版情緒在 BTC
+    #    略減分、ETH 略加分、跨幣不穩且樣本小，故 live 預設「顯示但不計入分數」，
+    #    待文字探勘升級（GPT/FinBERT）並重新回測證明穩定有效後，再把 live 改回計分。
+    news_factor = 0
+    news_note   = "無資料"
+    if news_score is not None:
+        if   news_score >=  40: mag, news_note = +8, f"新聞偏多 {news_score:+.0f}"
+        elif news_score >=  15: mag, news_note = +4, f"新聞略多 {news_score:+.0f}"
+        elif news_score <= -40: mag, news_note = -8, f"新聞偏空 {news_score:+.0f}"
+        elif news_score <= -15: mag, news_note = -4, f"新聞略空 {news_score:+.0f}"
+        else:                   mag, news_note = 0,  f"新聞中性 {news_score:+.0f}"
+        if news_scoring:
+            news_factor = mag
+        elif mag != 0:
+            news_note += "（參考，未計入）"
+    factors["News"] = {"score": news_factor,
+                       "value": round(news_score) if news_score is not None else None,
+                       "note":  news_note,
+                       "label": "新聞情緒"}
+    score += news_factor
 
     return max(0, min(100, round(score))), factors
 

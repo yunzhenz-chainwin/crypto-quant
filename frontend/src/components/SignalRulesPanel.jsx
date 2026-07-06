@@ -18,7 +18,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { simulateRules, DEFAULT_RULES } from '../lib/signalLab'
 
-// ── 6 因子完整計分表（與 src/scoring.py 一字一句對齊；改規則時兩邊同步）──
+// ── 7 因子完整計分表（與 src/scoring.py 一字一句對齊；改規則時兩邊同步）──
 const SCORING_TABLE = [
   { factor: 'RSI 動量', weight: '±20', rules: '＜30 跌深超賣 +20｜30~35 +12｜35~45 +5｜55~65 −5｜65~70 −12｜＞70 漲多超買 −20' },
   { factor: 'MACD',     weight: '±18', rules: '黃金交叉（柱由負轉正）+18｜動能增強 +10｜動能減弱 −10｜死亡交叉（柱由正轉負）−18' },
@@ -26,8 +26,9 @@ const SCORING_TABLE = [
   { factor: '長期趨勢 MA200', weight: '±10', rules: '站上 MA200 +10｜跌破 MA200 −10' },
   { factor: '成交量',   weight: '±7',  rules: '放量＞1.5x 均量 +7｜量增＞1.1x +4｜量縮＜0.9x −4｜大縮量＜0.6x −7' },
   { factor: '布林位置', weight: '±12', rules: '跌破下軌 +12｜近下軌(<20%) +7｜下半段 +3｜上半段 −3｜近上軌(>80%) −7｜突破上軌 −12' },
+  { factor: '新聞情緒', weight: '參考', rules: '每日新聞情緒 -100~+100（文字探勘彙總，該幣無新聞則用全市場）。實驗中：目前僅顯示方向、暫不計入分數（A/B 回測未證明跨幣穩定有效，待情緒判讀升級後再啟用）' },
 ]
-const FACTOR_ORDER = ['RSI', 'MACD', 'MA', 'MA200', 'Volume', 'BB']
+const FACTOR_ORDER = ['RSI', 'MACD', 'MA', 'MA200', 'Volume', 'BB', 'News']
 
 const fmtSigned = (v) => (v > 0 ? `+${v}` : `${v}`)
 const scoreColor = (v) => (v > 0 ? '#22c55e' : v < 0 ? '#ef4444' : '#64748b')

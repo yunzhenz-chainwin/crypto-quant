@@ -56,13 +56,18 @@ def _num(v):
     return float(v) if (v is not None and v == v) else None
 
 
-def compute_signals(df: pd.DataFrame) -> list[str]:
+def compute_signals(df: pd.DataFrame, sentiment_by_date: dict = None) -> list[str]:
     """逐日計算訊號，回傳與 df 等長的訊號清單。
     sigs[i] = 第 i 天收盤後可得知的訊號（用第 i 天 vs 第 i-1 天資料計算）。
     進場條件：sigs[i-1]=='BULL' and sigs[i-2]!='BULL' → 第 i 天開盤買入（隔日開盤）。
 
-    使用與前端「信心分數」完全相同的 6 因子計分（src/scoring.score_row），
+    使用與前端「信心分數」完全相同的計分（src/scoring.score_row），
     確保回測驗證的策略 == 畫面上建議的策略（分數 ≥65 視為 BULL）。
+
+    sentiment_by_date：可選 {'YYYY-MM-DD': 情緒分數 -100~100}。給了就把「當日
+      情緒」當第 7 因子餵進 score_row（回測「技術 + 新聞」用）；不給則維持純
+      6 因子、結果與原本完全相同。查無當日情緒的列 → news_score=None（不計分），
+      且只用「當根 K 棒當日或更早」的分數，不會製造前視偏誤（look-ahead bias）。
     """
     n = len(df)
     if n == 0:
@@ -72,13 +77,20 @@ def compute_signals(df: pd.DataFrame) -> list[str]:
     ma20 = _col(df, "MA20"); ma60 = _col(df, "MA60");  ma200 = _col(df, "MA200")
     vol = _col(df, "volume"); vma = _col(df, "VOL_MA20")
     bbu = _col(df, "BB_UPPER"); bbl = _col(df, "BB_LOWER")
+    # 只有要疊情緒時才算日期字串（對齊每日情緒表的 key）
+    dstr = None
+    if sentiment_by_date:
+        raw = df["date"].tolist()
+        dstr = [d.date().isoformat() if hasattr(d, "date") else str(d)[:10] for d in raw]
 
     sigs = ["NEUTRAL"]  # index 0：第一天無前日資料，給預設 NEUTRAL
     for i in range(1, n):
+        ns = sentiment_by_date.get(dstr[i]) if sentiment_by_date else None
         score, _ = score_row(
             _num(rsi[i]), _num(hist[i]), _num(hist[i - 1]),
             _num(close[i]), _num(ma20[i]), _num(ma60[i]), _num(ma200[i]),
             _num(vol[i]), _num(vma[i]), _num(bbu[i]), _num(bbl[i]),
+            news_score=ns,
         )
         sigs.append(signal_from_score(score))
     return sigs
