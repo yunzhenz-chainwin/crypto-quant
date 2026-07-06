@@ -153,14 +153,6 @@ const SENTIMENT_STYLE = {
   neutral: { label: '中立', color: '#94a3b8', bg: 'rgba(148,163,184,0.1)' },
 }
 
-const CAT_ICONS = {
-  '市場行情': '📊',
-  '監管法規': '⚖️',
-  '機構投資': '🏦',
-  '技術發展': '🔧',
-  '安全事件': '🚨',
-}
-
 // 新聞文章列表：最新模式和歷史模式都用同一個元件，只差資料來源不同
 function NewsArticles({ items }) {
   if (!items || items.length === 0)
@@ -249,7 +241,6 @@ function NewsFeed({ symbol, news, historyData, isHistory, availableDates, histor
                     className={`news-tab ${activeTab === cat.name ? 'active' : ''}`}
                     onClick={() => setActiveTab(cat.name)}
                   >
-                    <span>{CAT_ICONS[cat.name] ?? '📰'}</span>
                     <span>{cat.name}</span>
                     <span className="news-tab-count">{cat.items.length}</span>
                   </button>

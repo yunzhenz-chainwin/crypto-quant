@@ -33,11 +33,11 @@ export const COIN_INFO = {
  * 新增幣種時在 COIN_INFO 給 cat；查無 cat 的幣自動歸入 'l1'（見 coinCat）。
  */
 export const CATEGORIES = [
-  { key: 'major', label: '主流幣',    icon: '👑', hint: '市值最大、機構參與最深，波動相對溫和' },
-  { key: 'l1',    label: '公鏈平台',  icon: '⛓️', hint: '智能合約公鏈與擴容方案，靠生態應用支撐價值' },
-  { key: 'defi',  label: 'DeFi 基礎', icon: '🏦', hint: '去中心化金融與基礎設施（預言機、交易所）' },
-  { key: 'pay',   label: '支付轉帳',  icon: '💸', hint: '主打支付與跨境轉帳的老牌幣種' },
-  { key: 'meme',  label: '迷因幣',    icon: '🐕', hint: '社群與話題驅動，波動最大、風險最高' },
+  { key: 'major', label: '主流幣',    hint: '市值最大、機構參與最深，波動相對溫和' },
+  { key: 'l1',    label: '公鏈平台',  hint: '智能合約公鏈與擴容方案，靠生態應用支撐價值' },
+  { key: 'defi',  label: 'DeFi 基礎', hint: '去中心化金融與基礎設施（預言機、交易所）' },
+  { key: 'pay',   label: '支付轉帳',  hint: '主打支付與跨境轉帳的老牌幣種' },
+  { key: 'meme',  label: '迷因幣',    hint: '社群與話題驅動，波動最大、風險最高' },
 ]
 
 // 用法：coinName('BTCUSDT') → '比特幣 BTC'
@@ -67,7 +67,7 @@ export function coinWhy(symbol) {
   return COIN_INFO[symbol]?.why ?? ''
 }
 
-// 種類 key → 定義物件（label/icon/hint）
+// 種類 key → 定義物件（label/hint）
 export function catInfo(key) {
   return CATEGORIES.find(c => c.key === key) ?? CATEGORIES[1]
 }

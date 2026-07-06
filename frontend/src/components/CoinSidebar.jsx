@@ -38,7 +38,7 @@ export default function CoinSidebar({ symbols, signals, active, onSelect }) {
       {groups.map(({ cat, syms }) => (
         <div key={cat.key} className="sidebar-group">
           <div className="sidebar-group-title" title={cat.hint}>
-            {cat.icon} {cat.label}
+            {cat.label}
             <span className="sidebar-group-count">{syms.length}</span>
           </div>
           {syms.map(sym => {

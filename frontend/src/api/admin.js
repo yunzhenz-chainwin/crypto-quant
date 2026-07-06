@@ -26,6 +26,7 @@ export async function adminLogin(username, password) {
 
 async function adminGet(path) {
   const res = await fetch(BASE + path, {
+    cache: 'no-store',
     headers: { Authorization: `Bearer ${getToken()}` },
   })
   if (res.status === 401) {
@@ -40,6 +41,7 @@ async function adminGet(path) {
 async function adminSend(path, method, body) {
   const res = await fetch(BASE + path, {
     method,
+    cache: 'no-store',
     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
@@ -75,6 +77,7 @@ export const ingestMarket = () => adminSend('/ingest', 'POST')
 export const runOp = async (job) => {
   const res = await fetch(`${BASE}/ops/run/${job}`, {
     method: 'POST',
+    cache: 'no-store',
     headers: { Authorization: `Bearer ${getToken()}` },
   })
   if (res.status === 401) { clearToken(); throw new Error('UNAUTH') }

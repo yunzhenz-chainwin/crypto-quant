@@ -25,6 +25,11 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 
+# 後端執行期資料庫（app.db 等，執行時產生，勿提交）
+backend/*.db
+backend/*.db-wal
+backend/*.db-shm
+
 # 報告圖片（二進位檔，不追蹤）
 reports/*.png
 

@@ -2,7 +2,7 @@
  * IndicatorCards.jsx — 指標白話卡(共用元件)
  *
  * 把訊號的各因子(RSI / MACD / 均線 / MA200 / 量 / 布林)用
- * 「圖示 + 名稱 + ⓘ說明 + 方向箭頭 + 一句白話」呈現,RSI 另附溫度條。
+ * 「名稱 + ⓘ說明 + 方向箭頭 + 一句白話」呈現,RSI 另附溫度條。
  * 目前用於「策略回測」區塊頂部,說明策略依據的指標即時狀態。
  *
  * Props:
@@ -10,12 +10,12 @@
  *   rsi      signal.rsi(供 RSI 溫度條)
  */
 const FACTOR_META = {
-  RSI:    { icon: '🌡️', name: 'RSI 強弱',  tip: '看最近是不是漲太多(偏貴)或跌太多(便宜)' },
-  MACD:   { icon: '📊', name: 'MACD 動能', tip: '上漲或下跌的「力道」變化;交叉是轉折訊號' },
-  MA:     { icon: '📈', name: '均線趨勢',  tip: '價格相對短中期平均成本的位置(多頭/空頭排列)' },
-  MA200:  { icon: '🧭', name: '長期趨勢',  tip: '站上或跌破 200 日均線,長線多空的分界' },
-  Volume: { icon: '🔊', name: '成交量',    tip: '放量代表訊號較可信,縮量則較存疑' },
-  BB:     { icon: '📏', name: '布林位置',  tip: '價格在常態波動帶的高低(靠上偏貴、靠下便宜)' },
+  RSI:    { name: 'RSI 強弱',  tip: '看最近是不是漲太多(偏貴)或跌太多(便宜)' },
+  MACD:   { name: 'MACD 動能', tip: '上漲或下跌的「力道」變化;交叉是轉折訊號' },
+  MA:     { name: '均線趨勢',  tip: '價格相對短中期平均成本的位置(多頭/空頭排列)' },
+  MA200:  { name: '長期趨勢',  tip: '站上或跌破 200 日均線,長線多空的分界' },
+  Volume: { name: '成交量',    tip: '放量代表訊號較可信,縮量則較存疑' },
+  BB:     { name: '布林位置',  tip: '價格在常態波動帶的高低(靠上偏貴、靠下便宜)' },
 }
 const FACTOR_ORDER = ['RSI', 'MACD', 'MA', 'MA200', 'Volume', 'BB']
 
@@ -39,14 +39,14 @@ function RsiMini({ rsi }) {
   )
 }
 
-// 單一指標白話卡:圖示 + 名稱 + ⓘ + 方向箭頭 + 一句白話(RSI 另附溫度條)
+// 單一指標白話卡:名稱 + ⓘ + 方向箭頭 + 一句白話(RSI 另附溫度條)
 function IndicatorCard({ fkey, f, rsi }) {
-  const meta  = FACTOR_META[fkey] ?? { icon: '•', name: f.label, tip: '' }
+  const meta  = FACTOR_META[fkey] ?? { name: f.label, tip: '' }
   const color = factorColor(f.score)
   return (
     <div className="ind-card">
       <div className="ind-card-head">
-        <span className="ind-card-name">{meta.icon} {meta.name}</span>
+        <span className="ind-card-name">{meta.name}</span>
         {meta.tip && <span className="info-tip" title={meta.tip}>ⓘ</span>}
         <span className="ind-card-arrow" style={{ color }}>{factorArrow(f.score)}</span>
       </div>

@@ -145,25 +145,25 @@ export default function AIAnalystPanel({ symbol, refreshKey }) {
         <div className="ai-cols">
           {/* 本地規則引擎 */}
           <div className="ai-col">
-            <div className="ai-col-head">🧮 規則引擎（6 因子量化）</div>
+            <div className="ai-col-head">規則引擎（6 因子量化）</div>
             <div className="ai-headline">{local.headline}</div>
             <ul className="ai-points">
               {local.points.map(p => (
-                <li key={p.tag}><b>{p.emoji} {p.tag}</b>｜{p.text}</li>
+                <li key={p.tag}><b>{p.tag}</b>｜{p.text}</li>
               ))}
             </ul>
             {local.risks?.length > 0 && (
               <div className="ai-risks">
-                {local.risks.map((r, i) => <div key={i}>⚠️ {r}</div>)}
+                {local.risks.map((r, i) => <div key={i}>注意：{r}</div>)}
               </div>
             )}
-            <div className="ai-suggestion">💡 {local.suggestion}</div>
+            <div className="ai-suggestion">{local.suggestion}</div>
           </div>
 
           {/* GPT 深度解讀 */}
           <div className="ai-col">
             <div className="ai-col-head">
-              🤖 GPT 深度解讀
+              GPT 深度解讀
               {gpt?.model && <span className="ai-model">{gpt.model}</span>}
             </div>
             {gpt ? (
@@ -172,17 +172,17 @@ export default function AIAnalystPanel({ symbol, refreshKey }) {
                 <Md text={gpt.analysis} />
                 {gpt.risks?.length > 0 && (
                   <div className="ai-risks">
-                    {gpt.risks.map((r, i) => <div key={i}>⚠️ {r}</div>)}
+                    {gpt.risks.map((r, i) => <div key={i}>注意：{r}</div>)}
                   </div>
                 )}
                 {gpt.watch?.length > 0 && (
                   <div className="ai-watch">
-                    <b>👀 接下來觀察：</b>
+                    <b>接下來觀察：</b>
                     <ul>{gpt.watch.map((w, i) => <li key={i}>{w}</li>)}</ul>
                   </div>
                 )}
                 {gpt.agree_with_rules === false && gpt.disagree_reason && (
-                  <div className="ai-disagree">🗣 GPT 與規則引擎看法不同：{gpt.disagree_reason}</div>
+                  <div className="ai-disagree">GPT 與規則引擎看法不同：{gpt.disagree_reason}</div>
                 )}
               </>
             ) : gptLoading ? (
@@ -223,7 +223,7 @@ export default function AIAnalystPanel({ symbol, refreshKey }) {
           <div className="ai-chat">
             {[...chat].reverse().map((m, i) => (
               <div key={i} className="ai-chat-item">
-                <div className="ai-chat-q">🙋 {m.q}</div>
+                <div className="ai-chat-q">{m.q}</div>
                 <div className="ai-chat-a">
                   {m.a === null ? <span className="ai-loading">思考中…</span> : <Md text={m.a} />}
                   {m.source === 'gpt' && <span className="ai-chat-src">{m.coin ? `${m.coin} · ` : ''}by GPT</span>}

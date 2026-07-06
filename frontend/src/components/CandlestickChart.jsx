@@ -363,7 +363,7 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
       {osc !== '無' && OSC_DETAIL[osc] && (
         <div className="osc-help">
           <div className="osc-help-row">
-            <span><span className="osc-help-tag">📖 怎麼看 {osc}</span>{OSC_DETAIL[osc].summary}</span>
+            <span><span className="osc-help-tag">怎麼看 {osc}</span>{OSC_DETAIL[osc].summary}</span>
             <button className="osc-help-more" onClick={() => setOscDetail(v => !v)}>
               {oscDetail ? '收合 ▲' : '看詳細 ▾'}
             </button>

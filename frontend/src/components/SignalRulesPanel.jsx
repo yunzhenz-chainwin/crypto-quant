@@ -255,14 +255,14 @@ export default function SignalRulesPanel({ signal, prices, indicators, interval,
                 </div>
                 {result.open && (
                   <div className="lab-open-pos">
-                    ⏳ 目前持有中（未平倉）：{result.open.entry_date} 進場 ${result.open.entry_price.toLocaleString()}
+                    目前持有中（未平倉）：{result.open.entry_date} 進場 ${result.open.entry_price.toLocaleString()}
                     → 最新收盤 ${result.open.last_close.toLocaleString()}
                     （未實現 <b style={{ color: result.open.unrealized_pct >= 0 ? '#22c55e' : '#ef4444' }}>
                       {result.open.unrealized_pct >= 0 ? '+' : ''}{result.open.unrealized_pct}%</b>）
                   </div>
                 )}
                 <div className="lab-note">
-                  ✅ 買賣點已標在上方 K 線圖（綠↑買入、↓賣出）。模擬區間＝圖表目前顯示的
+                  買賣點已標在上方 K 線圖（綠↑買入、↓賣出）。模擬區間＝圖表目前顯示的
                   {result.stats.periodStart} ~ {result.stats.periodEnd}（{result.stats.bars} 根日 K；
                   切換上方 1M/3M/6M/1Y 會跟著重算）。已含手續費 0.1%/邊＋滑價 0.05%，訊號隔日開盤成交。
                 </div>
@@ -277,7 +277,7 @@ export default function SignalRulesPanel({ signal, prices, indicators, interval,
 
             {/* 怎麼選才有依據 */}
             <div className="lab-guide">
-              <div className="lab-guide-title">💡 怎麼選指標與數值才「正確」？</div>
+              <div className="lab-guide-title">怎麼選指標與數值才「正確」？</div>
               <ul>
                 <li><b>沒有萬用的正確答案，但有經典起點</b>：RSI 30/70（震盪市有效、單邊趨勢會鈍化）；
                     MACD 交叉（趨勢市有效、盤整假訊號多）；均線 MA20 抓波段、MA60/200 抓大趨勢；布林軌道抓極端價。</li>

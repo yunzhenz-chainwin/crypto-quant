@@ -1,5 +1,5 @@
 /**
- * GlossaryModal.jsx — 名詞小辭典彈窗（Header「📖 辭典」開啟）
+ * GlossaryModal.jsx — 名詞小辭典彈窗（Header「辭典」開啟）
  *
  * 搜尋 + 分組列表；點詞條展開詳細說明。
  */
@@ -22,7 +22,7 @@ export default function GlossaryModal({ onClose }) {
     <div className="tour-backdrop" onClick={onClose}>
       <div className="gloss-card" onClick={e => e.stopPropagation()}>
         <div className="gloss-head">
-          <span className="gloss-title">📖 名詞小辭典</span>
+          <span className="gloss-title">名詞小辭典</span>
           <button className="bot-close" onClick={onClose} aria-label="關閉">✕</button>
         </div>
         <input

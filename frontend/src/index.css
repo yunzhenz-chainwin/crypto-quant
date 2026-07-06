@@ -75,6 +75,13 @@ body { background: var(--bg); }
 }
 .nav-btn:hover  { color: var(--text); border-color: var(--accent); }
 .nav-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.nav-back-btn {
+  width: 34px;
+  min-width: 34px;
+  padding-inline: 0;
+  font-size: 18px;
+  line-height: 1;
+}
 
 /* ── StatusBar ─────────────────────────────────────── */
 .status-bar { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); }

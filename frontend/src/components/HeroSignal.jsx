@@ -99,7 +99,7 @@ export default function HeroSignal({ signal, symbol }) {
         <div className="hero-coin">{coinName(symbol)}</div>
         <div className="hero-cat-row">
           <span className={`card-cat cat-${coinCat(symbol)}`}>
-            {catInfo(coinCat(symbol)).icon} {catInfo(coinCat(symbol)).label}
+            {catInfo(coinCat(symbol)).label}
           </span>
           <span className="hero-cat-why">{coinWhy(symbol)}</span>
         </div>

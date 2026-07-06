@@ -153,14 +153,14 @@ export default function MarketOverview({ signals, onSelect }) {
               onClick={() => setCat(c.key)}
               title={c.hint}
             >
-              {c.icon} {c.label} <span className="cat-tab-count">{countOf(c.key)}</span>
+              {c.label} <span className="cat-tab-count">{countOf(c.key)}</span>
             </button>
           )
         ))}
       </div>
       {/* 選中種類的一句話說明 */}
       {cat !== 'all' && (
-        <div className="cat-hint">{catInfo(cat).icon} {catInfo(cat).label}：{catInfo(cat).hint}</div>
+        <div className="cat-hint">{catInfo(cat).label}：{catInfo(cat).hint}</div>
       )}
       <div className="overview-grid">
         {sorted.map(s => (

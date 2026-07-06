@@ -20,7 +20,7 @@ export default function VerifyModal({ onClose }) {
     <div className="vm-overlay" onClick={onClose}>
       <div className="vm" onClick={e => e.stopPropagation()}>
         <div className="vm-head">
-          <span className="vm-title">🔍 指標交叉驗證</span>
+          <span className="vm-title">指標交叉驗證</span>
           <button className="vm-x" onClick={onClose}>✕</button>
         </div>
 
@@ -35,7 +35,7 @@ export default function VerifyModal({ onClose }) {
         {d && (
           <>
             <div className={`vm-summary ${d.ok ? 'ok' : 'warn'}`}>
-              {d.ok ? '✅' : '⚠️'} {d.passed} / {d.total} 個幣 —— 指標完全一致
+              {d.ok ? '通過：' : '注意：'}{d.passed} / {d.total} 個幣 —— 指標完全一致
             </div>
 
             <div className="vm-items">

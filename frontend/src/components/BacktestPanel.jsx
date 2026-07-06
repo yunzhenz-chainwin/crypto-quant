@@ -176,7 +176,7 @@ function VerdictBanner({ data }) {
   return (
     <div className={`backtest-verdict ${beat ? 'good' : 'warn'}`}>
       <div className="verdict-head">
-        {beat ? '✅ 這段期間「照訊號操作」贏過「買了就放著」' : '⚠️ 這段期間「照訊號操作」輸給「買了就放著」'}
+        {beat ? '這段期間「照訊號操作」贏過「買了就放著」' : '注意：這段期間「照訊號操作」輸給「買了就放著」'}
       </div>
       <p className="verdict-body">
         {period} 共進出場 <b>{m.total_trades}</b> 次：策略總報酬 <b>{fmtPct(m.total_return_pct)}</b>、

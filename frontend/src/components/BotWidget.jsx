@@ -133,7 +133,7 @@ export default function BotWidget({ defaultSymbol = null }) {
             <div className="bot-bubble bot-bubble-bot">
               {brief?.market ? (
                 <>
-                  <div className="bot-brief-line"><b>📊 全市場現況</b></div>
+                  <div className="bot-brief-line"><b>全市場現況</b></div>
                   <div className="bot-brief-sub">
                     {brief.market.fg ? `恐懼貪婪指數 ${brief.market.fg.value}（${
                       {'Extreme Fear':'極度恐慌','Fear':'恐慌','Neutral':'中性','Greed':'貪婪','Extreme Greed':'極度貪婪'}[brief.market.fg.value_classification] ?? brief.market.fg.value_classification ?? ''}）` : ''}
@@ -207,7 +207,7 @@ export default function BotWidget({ defaultSymbol = null }) {
       {/* 漂浮按鈕（吉祥物本體） */}
       <button className={`bot-fab ${open ? 'open' : ''}`} onClick={toggle}
               aria-label="開啟 AI 小幫手">
-        {hello && !open && <span className="bot-hello">嗨！我是小Q，什麼幣都能問我 👋</span>}
+        {hello && !open && <span className="bot-hello">嗨！我是小Q，什麼幣都能問我</span>}
         <BotMascot mood={open ? mood : 'idle'} size={92} />
       </button>
     </div>

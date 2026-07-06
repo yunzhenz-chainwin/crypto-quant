@@ -22,7 +22,7 @@ import MarketOverview   from './components/MarketOverview'
 import MarketSummary    from './components/MarketSummary'
 import SignalRulesPanel from './components/SignalRulesPanel'
 // import BotWidget     from './components/BotWidget'   // 2026-07-06 暫時下架：使用者確定為主管/老闆，聊天小幫手先隱藏（要恢復連同底部掛載一起取消註解）
-import OnboardingTour   from './components/OnboardingTour'
+// import OnboardingTour   from './components/OnboardingTour' // 2026-07-06 暫停新手導覽
 import GlossaryModal    from './components/GlossaryModal'
 import { coinName }     from './constants/coins'
 
@@ -31,7 +31,7 @@ import { coinName }     from './constants/coins'
 const CorrelationHeatmap = lazy(() => import('./components/CorrelationHeatmap'))
 const BacktestPanel      = lazy(() => import('./components/BacktestPanel'))
 const SentimentPanel     = lazy(() => import('./components/SentimentPanel'))
-const AIAnalystPanel     = lazy(() => import('./components/AIAnalystPanel'))
+// const AIAnalystPanel     = lazy(() => import('./components/AIAnalystPanel')) // 2026-07-06 暫停 AI 智能分析
 const panelFallback = <div className="chart-empty">面板載入中…</div>
 
 // 日線的區間預設（單位：天）
@@ -85,11 +85,11 @@ export default function App() {
   const [showCorrelation, setShowCorrelation] = useState(false)
   const [showSentiment,   setShowSentiment]   = useState(false)
   const [showBacktest,    setShowBacktest]    = useState(false)
-  const [showAI,          setShowAI]          = useState(true)
+  // const [showAI,          setShowAI]          = useState(true) // 2026-07-06 暫停 AI 智能分析
   const [showRules,       setShowRules]       = useState(true)   // 買賣判斷依據面板（預設展開）
   const [labTrades,       setLabTrades]       = useState(null)   // 自訂訊號實驗室的交易（null=未啟用，圖上顯示正式回測標記）
-  // 首次造訪自動開新手導覽；Header「❓ 導覽」可重看
-  const [showTour, setShowTour] = useState(() => !localStorage.getItem('cq_tour_done'))
+  // 首次造訪自動開新手導覽；Header「導覽」可重看
+  // const [showTour, setShowTour] = useState(() => !localStorage.getItem('cq_tour_done')) // 2026-07-06 暫停新手導覽
   const [showGlossary, setShowGlossary] = useState(false)
   const [apiError, setApiError] = useState(false)   // API 失敗橫幅（輕量版 #22）
   const versionRef = useRef('')
@@ -207,6 +207,11 @@ export default function App() {
     if (!(intervals['1h'] ?? []).includes(symbol)) setKInterval('1d')
   }
 
+  const handleBackToOverview = () => {
+    setView('overview')
+    setLabTrades(null)
+  }
+
   const activeSignal = signals.find(s => s.symbol === active)
   const rangeOptions = interval === '1h' ? HOUR_OPTIONS : DAY_OPTIONS
 
@@ -215,32 +220,46 @@ export default function App() {
 
       {/* ── Header ────────────────────────────────────────────────────── */}
       <header className="header">
-        <span className="logo">📈 Crypto Quant</span>
+        <span className="logo">Crypto Quant</span>
         <nav className="header-nav">
+          {view === 'detail' && (
+            <button
+              className="nav-btn nav-back-btn"
+              onClick={handleBackToOverview}
+              aria-label="返回市場總覽"
+              title="返回市場總覽"
+            >
+              ←
+            </button>
+          )}
           <button
             className={`nav-btn ${view === 'overview' ? 'active' : ''}`}
-            onClick={() => setView('overview')}
+            onClick={handleBackToOverview}
           >
             市場總覽
           </button>
           <button className="nav-btn" onClick={() => setShowGlossary(true)} title="名詞小辭典">
-            📖 辭典
+            辭典
           </button>
+          {/* 2026-07-06 暫停新手導覽
           <button className="nav-btn" onClick={() => setShowTour(true)} title="重看新手導覽">
-            ❓ 導覽
+            導覽
           </button>
+          */}
         </nav>
         <StatusBar />
       </header>
 
       {/* ── 新手導覽（首次造訪自動開啟）／名詞辭典 ─────────────────────── */}
+      {/* 2026-07-06 暫停新手導覽
       {showTour && <OnboardingTour onClose={() => setShowTour(false)} />}
+      */}
       {showGlossary && <GlossaryModal onClose={() => setShowGlossary(false)} />}
 
       {/* ── API 失敗橫幅（取代永遠的「載入中…」）───────────────────────── */}
       {apiError && (
         <div className="api-error-banner">
-          ⚠️ 資料載入失敗（網路或伺服器暫時無回應）
+          注意：資料載入失敗（網路或伺服器暫時無回應）
           <button onClick={() => { refreshMarket(true); if (view === 'detail') loadDetail(true) }}>
             重試
           </button>
@@ -328,7 +347,7 @@ export default function App() {
                           }
                         }}
                       >
-                        📅 自訂
+                        自訂
                       </button>
                     )}
                   </div>
@@ -376,7 +395,7 @@ export default function App() {
             {/* 買賣判斷依據：系統訊號規則透明化 + 自訂指標/門檻值實驗室 */}
             <section className="collapsible-section">
               <button className="collapse-toggle" onClick={() => setShowRules(v => !v)}>
-                <span>📋 買賣判斷依據（進出場規則 + 自訂訊號實驗室）</span>
+                <span>買賣判斷依據（進出場規則 + 自訂訊號實驗室）</span>
                 <span className="collapse-arrow">{showRules ? '▲' : '▼'}</span>
               </button>
               {showRules && (
@@ -390,13 +409,15 @@ export default function App() {
               )}
             </section>
 
+            {/* 2026-07-06 暫停 AI 智能分析
             <section className="collapsible-section">
               <button className="collapse-toggle" onClick={() => setShowAI(v => !v)}>
-                <span>🤖 AI 智能分析（規則引擎 + GPT）</span>
+                <span>AI 智能分析（規則引擎 + GPT）</span>
                 <span className="collapse-arrow">{showAI ? '▲' : '▼'}</span>
               </button>
               {showAI && <Suspense fallback={panelFallback}><AIAnalystPanel symbol={active} refreshKey={dataVersion} /></Suspense>}
             </section>
+            */}
 
             <section className="collapsible-section">
               <button className="collapse-toggle" onClick={() => setShowSentiment(v => !v)}>
