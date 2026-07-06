@@ -431,6 +431,43 @@ def print_report(symbol: str, metrics: dict, trades: list[dict], df: pd.DataFram
               f"{flag} {t['exit_reason']}")
 
 
+def regenerate_reports(symbols: list[str] = None) -> int:
+    """
+    重產 reports/backtest_trades_*.csv 與 backtest_metrics_*.json 靜態報表。
+
+    與即時 API（backtest_engine.get_backtest）走完全相同的 load_indicators / run_backtest /
+    compute_metrics（皆用預設停損停利），因此重產後「靜態報表 == API 結果」，
+    也讓 verify_backtest.py 對得起來（修 #111 / #116 的報表漂移）。
+
+    symbols 不給 → 掃 reports/ 內所有 indicators_*_1d.csv 的幣種。回傳成功處理的幣數。
+    """
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    if symbols is None:
+        symbols = sorted(
+            p.stem.replace("indicators_", "").replace(f"_{INTERVAL}", "")
+            for p in REPORT_DIR.glob(f"indicators_*_{INTERVAL}.csv")
+        )
+    done = 0
+    for sym in symbols:
+        try:
+            df = load_indicators(sym)
+            trades = run_backtest(df)
+            metrics = compute_metrics(trades, df)
+            pd.DataFrame(trades).to_csv(
+                REPORT_DIR / f"backtest_trades_{sym}_{INTERVAL}.csv", index=False)
+            metrics_out = {k: v for k, v in metrics.items() if k != "equity_curve"}
+            with open(REPORT_DIR / f"backtest_metrics_{sym}_{INTERVAL}.json",
+                      "w", encoding="utf-8") as f:
+                json.dump(metrics_out, f, indent=2, ensure_ascii=False)
+            done += 1
+        except SystemExit:
+            continue  # load_indicators 找不到該幣指標檔（理論上不會，因幣種取自現有檔）
+        except Exception as e:
+            print(f"[reports] {sym} 重產失敗：{e}")
+            continue
+    return done
+
+
 def main():
     args = sys.argv[1:]
     symbol     = args[0].upper() if args else "BTCUSDT"

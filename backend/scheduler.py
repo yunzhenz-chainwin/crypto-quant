@@ -101,6 +101,15 @@ def run_pipeline():
         ing = ingest_market_data()
         sig = backfill_daily_signals()
 
+        # 4b) 重產 backtest 靜態報表，與即時 API（get_backtest 同一套計算）保持一致，
+        #     避免 reports/backtest_* 隨每日資料更新而漂移（#111 / #116）。非關鍵，失敗只記錄。
+        try:
+            from src.backtest import regenerate_reports
+            n_reports = regenerate_reports()
+            print(f"[scheduler] regenerated {n_reports} backtest reports")
+        except Exception as e:
+            print(f"[scheduler] backtest reports skip: {e}")
+
         # 5) 新鮮度防線：資料若沒更新到近期就視為失敗（抓出隱性失敗，避免假性成功）
         date_max, lag = _assert_data_fresh()
 

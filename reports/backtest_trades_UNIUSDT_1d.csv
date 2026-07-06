@@ -1,5 +1,4 @@
 entry_date,exit_date,entry_price,exit_price,entry_trigger_price,exit_trigger_price,gross_return_pct,return_pct,cost_pct,hold_days,exit_reason,profit
-2021-07-22,2021-07-26,16.7354,20.0624,16.727,20.0724,20.0,19.641,0.359,4,take_profit,True
 2021-09-01,2021-09-07,29.3847,27.594,29.37,27.6078,-6.0,-6.282,0.282,6,stop_loss,False
 2021-09-16,2021-09-17,27.4937,25.8183,27.48,25.8312,-6.0,-6.282,0.282,1,stop_loss,False
 2021-09-27,2021-09-28,24.052,22.5863,24.04,22.5976,-6.0,-6.282,0.282,1,stop_loss,False
