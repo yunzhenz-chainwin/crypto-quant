@@ -22,6 +22,14 @@ import os
 import pandas as pd
 import pandas_ta as ta
 
+# Windows 主控台預設 cp950 無法輸出 ✅/⚠ 等符號 → 先把 stdout/stderr 轉 UTF-8，
+# 避免驗證結果印到一半 UnicodeEncodeError 崩潰（#112）。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MJS = os.path.join(ROOT, "scripts", "verify_frontend_indicators.mjs")
 

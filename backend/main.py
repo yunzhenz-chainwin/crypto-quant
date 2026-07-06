@@ -10,7 +10,9 @@ API 前綴一律為 /api，例如：
   /api/signals          所有幣種訊號
   /api/sentiment/news   最新新聞
 """
-from fastapi import FastAPI
+import time
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -19,6 +21,7 @@ from pathlib import Path
 
 from backend.routers import meta, prices, indicators, correlation, signals, backtest, sentiment, admin, ai
 from backend.scheduler import start_scheduler
+from backend.services import app_db
 
 # React build 輸出目錄（npm run build 產生）
 DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
@@ -45,6 +48,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── 使用紀錄 middleware（access_log）─────────────────────────────────────────
+# 只記錄業務 API（/api/*）的路徑、幣種、狀態碼與延遲，供後台使用分析／熱門 API 統計。
+# 靜態資源與 SPA fallback 不記；寫入失敗一律吞掉，絕不影響請求本身（#113）。
+@app.middleware("http")
+async def access_log_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    try:
+        path = request.url.path
+        if path.startswith("/api/"):
+            symbol = request.query_params.get("symbol")
+            if not symbol:
+                # 從 /api/prices/BTCUSDT 這類路徑抓最後一段像 symbol 的（結尾 USDT）
+                tail = path.rstrip("/").rsplit("/", 1)[-1].upper()
+                if tail.endswith("USDT"):
+                    symbol = tail
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            app_db.log_access(path, symbol, response.status_code, latency_ms)
+    except Exception:
+        pass  # 記錄是輔助功能，任何錯誤都不能讓正常請求失敗
+    return response
 
 # ── 各功能模組的路由（全部掛在 /api 下）─────────────────────────────────────
 app.include_router(meta.router,        prefix="/api")  # /api/symbols, /api/status

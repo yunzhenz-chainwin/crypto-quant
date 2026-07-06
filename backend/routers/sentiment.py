@@ -21,7 +21,7 @@ import re
 import time
 import feedparser
 import requests
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from backend.routers.admin import require_admin   # 寫入型端點的登入保護
 from backend.services.news_store import (
     save_articles, query_by_date, available_dates, total_count,
@@ -465,6 +465,8 @@ def _hn_fetch_range(from_date: str, to_date: str) -> int:
     KEYWORDS = ["bitcoin", "ethereum", "cryptocurrency", "crypto", "blockchain"]
     seen_urls    = set()   # 跨關鍵字去重，避免同一篇被存入多次
     all_articles = []
+    ok_requests     = 0    # 成功取得回應的請求數（用來判斷「是否全部失敗」）
+    failed_requests = 0    # 失敗（連線 / HTTP 錯誤）的請求數
 
     for keyword in KEYWORDS:
         page = 0
@@ -481,6 +483,8 @@ def _hn_fetch_range(from_date: str, to_date: str) -> int:
                     },
                     timeout=15,
                 )
+                resp.raise_for_status()   # HTTP 4xx/5xx 也算失敗，不當成功處理
+                ok_requests += 1
                 data  = resp.json()
                 hits  = data.get("hits", [])
                 pages = data.get("nbPages", 0)  # API 回傳的總頁數
@@ -526,11 +530,14 @@ def _hn_fetch_range(from_date: str, to_date: str) -> int:
                 time.sleep(0.2)  # 稍微暫停，避免請求太密集被限流
 
             except Exception as e:
+                failed_requests += 1
                 print(f"[backfill] {keyword} page {page} error: {e}")
                 break
 
     # 所有關鍵字查完後，一次性批次存入（重複 URL 自動略過）
-    return save_articles(all_articles)
+    saved = save_articles(all_articles)
+    return saved, {"ok_requests": ok_requests, "failed_requests": failed_requests,
+                   "articles_found": len(all_articles)}
 
 
 # ── 歷史回補 API（2026-07-06 安全修補：掛上後台登入保護，不再對外開放寫入）──
@@ -547,13 +554,22 @@ def backfill_news(from_date: str, to_date: str, _admin: str = Depends(require_ad
     需帶後台 token（Authorization: Bearer …）——這是寫入型端點，避免被外部濫用。
     """
     try:
-        saved = _hn_fetch_range(from_date, to_date)
-        return {
-            "ok":        True,
-            "from_date": from_date,
-            "to_date":   to_date,
-            "saved":     saved,         # 這次新增的筆數
-            "db_total":  total_count(), # 資料庫目前的總筆數
-        }
+        saved, meta = _hn_fetch_range(from_date, to_date)
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        # 非預期錯誤：明確回 502，不要假性成功
+        raise HTTPException(status_code=502, detail=f"回補失敗：{e}")
+    # 所有請求都失敗（來源 / 網路異常）→ 回 502，避免「saved:0 卻顯示成功」誤導使用者
+    if meta["ok_requests"] == 0:
+        raise HTTPException(
+            status_code=502,
+            detail=f"來源 HackerNews API 全部請求失敗（{meta['failed_requests']} 次），未回補任何資料",
+        )
+    return {
+        "ok":              True,
+        "from_date":       from_date,
+        "to_date":         to_date,
+        "saved":           saved,           # 這次新增的筆數
+        "db_total":        total_count(),   # 資料庫目前的總筆數
+        "ok_requests":     meta["ok_requests"],
+        "failed_requests": meta["failed_requests"],
+    }

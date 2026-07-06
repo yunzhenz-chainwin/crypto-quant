@@ -1,3 +1,5 @@
+import { getToken } from './admin'
+
 const BASE = '/api'
 
 async function get(path) {
@@ -94,9 +96,21 @@ export const fetchNewsSentiment = (symbol = 'MARKET', days = 14) =>
   get(`/sentiment/summary?symbol=${symbol}&days=${days}`)
 
 // 回補歷史新聞（從 HackerNews 撈舊資料存入資料庫）
-export const backfillNews = (fromDate, toDate) =>
-  fetch(`/api/sentiment/news/backfill?from_date=${fromDate}&to_date=${toDate}`, { method: 'POST' })
-    .then(r => r.json())
+// 此端點為後台維護型寫入，需帶後台 token；未登入或來源失敗時回清楚訊息（#117 / #118）
+export const backfillNews = async (fromDate, toDate) => {
+  const res = await fetch(
+    `/api/sentiment/news/backfill?from_date=${fromDate}&to_date=${toDate}`,
+    { method: 'POST', headers: { Authorization: `Bearer ${getToken() || ''}` } },
+  )
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const msg = res.status === 401
+      ? '此為後台維護功能，請先登入後台再匯入'
+      : (data.detail || data.error || `伺服器錯誤（${res.status}）`)
+    return { ok: false, error: msg }
+  }
+  return data
+}
 
 // ── AI 分析機器人 ───────────────────────────────────────────────────────────
 // 完整分析：gpt=false 只跑本地規則引擎（即時）；gpt=true 加上 GPT 深度解讀
