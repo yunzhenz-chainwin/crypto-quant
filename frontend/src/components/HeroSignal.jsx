@@ -1,11 +1,12 @@
 /**
- * HeroSignal.jsx — 大訊號卡 + 7 因子信心分數量表
+ * HeroSignal.jsx — 大訊號卡 + 6 因子信心分數量表
+ * （因子：RSI / MACD / 均線排列 / MA200 / 成交量 / 布林位置，見 src/scoring.py）
  *
  * Props：
  *   signal  後端 /api/signals/{symbol} 回傳的物件
  *   symbol  幣種代號
  */
-import { coinName } from '../constants/coins'
+import { coinName, coinCat, coinWhy, catInfo } from '../constants/coins'
 
 const SIGNAL_CONFIG = {
   BULL:    { cls: 'hero-bull',    label: '多頭', desc: '指標顯示上漲動能較強，可考慮觀察買入機會', icon: '▲' },
@@ -93,9 +94,15 @@ export default function HeroSignal({ signal, symbol }) {
 
   return (
     <section className={`hero-signal ${cfg.cls}`}>
-      {/* 左：幣名、價格、訊號 */}
+      {/* 左：幣名、分類（含歸類原因）、價格、訊號 */}
       <div className="hero-left">
         <div className="hero-coin">{coinName(symbol)}</div>
+        <div className="hero-cat-row">
+          <span className={`card-cat cat-${coinCat(symbol)}`}>
+            {catInfo(coinCat(symbol)).icon} {catInfo(coinCat(symbol)).label}
+          </span>
+          <span className="hero-cat-why">{coinWhy(symbol)}</span>
+        </div>
         <div className="hero-price">{price}</div>
         <div className="hero-signal-row">
           <span className="hero-icon">{cfg.icon}</span>
@@ -104,9 +111,11 @@ export default function HeroSignal({ signal, symbol }) {
         <div className="hero-desc">{cfg.desc}</div>
       </div>
 
-      {/* 右：信心分數量表 */}
-      <div className="hero-gauge-col">
+      {/* 右：信心分數量表（ⓘ 白話說明） */}
+      <div className="hero-gauge-col"
+           title="信心分數＝6 個技術因子的加權合成（RSI、MACD、均線排列、MA200、成交量、布林位置），基準 50、範圍 0~100。≥65 判偏多、≤35 判偏空。完整計分規則見下方「買賣判斷依據」面板。">
         <ScoreGauge score={signal?.score} />
+        <span className="hero-gauge-info">ⓘ 6 因子合成，計分規則見「買賣判斷依據」</span>
       </div>
     </section>
   )

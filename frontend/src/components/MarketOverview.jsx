@@ -1,7 +1,11 @@
 /**
  * MarketOverview.jsx — 市場總覽卡片網格（含信心分數條）
+ *
+ * 幣別種類區分：頂部種類頁籤（全部/主流幣/公鏈平台/DeFi/支付/迷因）可篩選，
+ * 每張卡片右上角也標示所屬種類。
  */
-import { coinZh, coinTicker } from '../constants/coins'
+import { useState } from 'react'
+import { coinZh, coinTicker, coinCat, coinWhy, catInfo, CATEGORIES } from '../constants/coins'
 
 const SIG = {
   BULL:    { label: '多頭', icon: '▲', cls: 'bull' },
@@ -69,7 +73,15 @@ function CoinCard({ s, onSelect }) {
     >
       <div className="card-header">
         <span className={`card-sig card-sig-${sig.cls}`}>{sig.icon} {sig.label}</span>
-        <span className="card-ticker">{coinTicker(s.symbol)}</span>
+        <span className="card-header-right">
+          <span
+            className={`card-cat cat-${coinCat(s.symbol)}`}
+            title={`為什麼是${catInfo(coinCat(s.symbol)).label}：${coinWhy(s.symbol)}`}
+          >
+            {catInfo(coinCat(s.symbol)).label}
+          </span>
+          <span className="card-ticker">{coinTicker(s.symbol)}</span>
+        </span>
       </div>
 
       <div className="card-name">{coinZh(s.symbol)}</div>
@@ -95,10 +107,17 @@ function CoinCard({ s, onSelect }) {
 }
 
 export default function MarketOverview({ signals, onSelect }) {
-  // 先按分數排：高分 BULL → 低分 BEAR
-  const sorted = [...(signals ?? [])].sort((a, b) => (b.score ?? 50) - (a.score ?? 50))
+  const [cat, setCat] = useState('all')   // 幣別種類篩選：'all' 或 CATEGORIES 的 key
 
-  if (sorted.length === 0) {
+  // 先按分數排：高分 BULL → 低分 BEAR；再依選中的種類篩選
+  const sorted = [...(signals ?? [])]
+    .sort((a, b) => (b.score ?? 50) - (a.score ?? 50))
+    .filter(s => cat === 'all' || coinCat(s.symbol) === cat)
+
+  // 各種類的幣數（顯示在頁籤上）
+  const countOf = (key) => (signals ?? []).filter(s => coinCat(s.symbol) === key).length
+
+  if ((signals ?? []).length === 0) {
     // 載入骨架：先給版面形狀，不要整片空白
     return (
       <section className="overview-section">
@@ -118,6 +137,31 @@ export default function MarketOverview({ signals, onSelect }) {
 
   return (
     <section className="overview-section">
+      {/* 幣別種類頁籤 */}
+      <div className="cat-tabs">
+        <button
+          className={`cat-tab ${cat === 'all' ? 'active' : ''}`}
+          onClick={() => setCat('all')}
+        >
+          全部 <span className="cat-tab-count">{(signals ?? []).length}</span>
+        </button>
+        {CATEGORIES.map(c => (
+          countOf(c.key) > 0 && (
+            <button
+              key={c.key}
+              className={`cat-tab ${cat === c.key ? 'active' : ''}`}
+              onClick={() => setCat(c.key)}
+              title={c.hint}
+            >
+              {c.icon} {c.label} <span className="cat-tab-count">{countOf(c.key)}</span>
+            </button>
+          )
+        ))}
+      </div>
+      {/* 選中種類的一句話說明 */}
+      {cat !== 'all' && (
+        <div className="cat-hint">{catInfo(cat).icon} {catInfo(cat).label}：{catInfo(cat).hint}</div>
+      )}
       <div className="overview-grid">
         {sorted.map(s => (
           <CoinCard key={s.symbol} s={s} onSelect={onSelect} />

@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   adminLogin, getToken, setToken, clearToken,
   fetchHealth, fetchDbStats, fetchJobs,
-  fetchTasks, createTask, updateTask, deleteTask, ingestMarket,
+  fetchTasks, createTask, updateTask, deleteTask, ingestMarket, runOp,
   fetchDbTables, fetchDbTable, fetchVerifyIndicators, fetchSignalScorecard, fetchStrategy,
   fetchCoins, addCoin, updateCoin, deleteCoin,
 } from '../api/admin'
@@ -165,6 +165,23 @@ function Dashboard({ onLogout }) {
     finally { setIngesting(false) }
   }
 
+  // 手動操作：一鍵觸發資料管線（背景執行，job_runs 會出現 running → success/failed）
+  const [opsBusy, setOpsBusy] = useState(null)   // 'daily' | 'hourly' | 'news' | null
+  const [opsMsg,  setOpsMsg]  = useState('')
+  const triggerOp = async (job) => {
+    setOpsBusy(job); setOpsMsg('')
+    try {
+      const r = await runOp(job)
+      setOpsMsg(`✅ ${r.message}`)
+      await load()                       // 讓「工作紀錄」馬上出現 running 那筆
+    } catch (e) {
+      if (e.message === 'UNAUTH') { onLogout(); return }
+      setOpsMsg(`⚠️ ${e.message}`)
+    } finally {
+      setOpsBusy(null)
+    }
+  }
+
   const freshTone = health
     ? (health.symbols_fresh === health.symbols_total ? 'good'
        : health.symbols_fresh === 0 ? 'bad' : 'warn')
@@ -179,6 +196,24 @@ function Dashboard({ onLogout }) {
       </div>
 
       {err && <div className="admin-error">{err}</div>}
+
+      {/* 手動操作：不等排程、立即執行資料管線（背景執行，狀態見下方工作紀錄） */}
+      <h2 className="admin-section-title">手動操作</h2>
+      <div className="ops-row">
+        <button className="admin-mini-btn" disabled={!!opsBusy} onClick={() => triggerOp('daily')}
+                title="從 Binance 抓最新日線 → 算指標 → 入庫 → 回填訊號（約 2 分鐘）。日線 K 棒台灣時間 08:00 收盤、排程 09:00 自動跑；想立刻要最新就按這裡。">
+          {opsBusy === 'daily' ? '執行中…' : '▶ 立即更新日線'}
+        </button>
+        <button className="admin-mini-btn" disabled={!!opsBusy} onClick={() => triggerOp('hourly')}
+                title="增量抓 BTC/ETH 的 1 小時 K 線並更新指標（約 15 秒）">
+          {opsBusy === 'hourly' ? '執行中…' : '▶ 立即更新時線'}
+        </button>
+        <button className="admin-mini-btn" disabled={!!opsBusy} onClick={() => triggerOp('news')}
+                title="立即從 10 家媒體 RSS 抓最新新聞並標註情緒（約 30 秒）">
+          {opsBusy === 'news' ? '執行中…' : '▶ 立即抓新聞'}
+        </button>
+        {opsMsg && <span className="ops-msg">{opsMsg}</span>}
+      </div>
 
       {/* 系統健康 */}
       <h2 className="admin-section-title">系統健康</h2>
@@ -722,7 +757,7 @@ const TABLE_DESC = {
 }
 // 每張表「怎麼算 / 怎麼來的」（透明說明，點選該表時顯示）
 const TABLE_HOWTO = {
-  prices: '從 Binance API 抓的原始日線（開／高／低／收／量），每天 01:00 自動更新。屬市場真實成交資料，不是算出來的。',
+  prices: '從 Binance API 抓的原始日線（開／高／低／收／量），每天 09:00 自動更新（日線 K 棒台灣 08:00 收盤後）。屬市場真實成交資料，不是算出來的。',
   indicators: '用 prices 的收盤價／成交量算出來：MA＝過去 N 天平均、RSI＝Wilder 平滑(漲力道÷跌力道)、MACD＝EMA12−EMA26、布林＝20日均 ± 2×標準差、量能均線＝20日量平均。程式 src/indicators.py，且經獨立交叉驗證確認算得對。',
   daily_signal: '把每天每幣的指標丟進「6 因子信心分數」計算（src/scoring.py）：RSI／MACD／均線／MA200／量／布林 各打分加總成 0~100，≥65 偏多、≤35 偏空。',
   fear_greed: '從 alternative.me 抓的「市場恐懼貪婪指數」(0~100)，屬外部資料源，不是我們算的。',
@@ -985,7 +1020,7 @@ function StatusPage({ onLogout }) {
     })
     goods.push({
       title: `${health.symbols_fresh ?? 0}/${health.symbols_total ?? 0} 幣資料即時更新`,
-      detail: `每日 01:00 自動抓取，排程狀態：${lp.status || '—'}`,
+      detail: `每日 09:00 自動抓取，排程狀態：${lp.status || '—'}`,
     })
   }
   if (verify) {

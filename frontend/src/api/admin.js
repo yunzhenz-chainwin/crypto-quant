@@ -70,6 +70,19 @@ export const deleteTask  = (id)         => adminSend(`/tasks/${id}`, 'DELETE')
 // 手動把最新 K 線 / 指標匯入資料庫
 export const ingestMarket = () => adminSend('/ingest', 'POST')
 
+// 操作觸發：一鍵執行資料管線（daily=日線 / hourly=時線 / news=新聞）。
+// 背景執行，進度看「工作紀錄」；409=同型任務還在跑（回傳後端的說明文字）。
+export const runOp = async (job) => {
+  const res = await fetch(`${BASE}/ops/run/${job}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}` },
+  })
+  if (res.status === 401) { clearToken(); throw new Error('UNAUTH') }
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data?.detail || `API 回應 ${res.status}`)
+  return data
+}
+
 // 幣種管理:列出 / 新增(觸發抓取管線)/ 編輯或啟用停用 / 移除
 export const fetchCoins = () => adminGet('/coins')
 export const addCoin    = (coin)           => adminSend('/coins', 'POST', coin)

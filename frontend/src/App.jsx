@@ -9,25 +9,30 @@
  *   每 60 秒輪詢 /api/status 的 data_version（各週期最新 K 棒時間戳），
  *   有變化才重拉 訊號/恐懼貪婪/當前圖表資料/AI 分析；分頁切回前景時也立即檢查。
  */
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import {
   fetchSymbols, fetchAllSignals, fetchOHLC, fetchStatus, fetchIntervals,
   fetchIndicators, fetchCorrelation, fetchBacktest, fetchFearGreed,
 } from './api/client'
 import StatusBar        from './components/StatusBar'
 import CandlestickChart from './components/CandlestickChart'
-import CorrelationHeatmap from './components/CorrelationHeatmap'
-import BacktestPanel    from './components/BacktestPanel'
 import CoinSidebar      from './components/CoinSidebar'
 import HeroSignal       from './components/HeroSignal'
-import SentimentPanel   from './components/SentimentPanel'
 import MarketOverview   from './components/MarketOverview'
 import MarketSummary    from './components/MarketSummary'
-import AIAnalystPanel   from './components/AIAnalystPanel'
-import BotWidget        from './components/BotWidget'
+import SignalRulesPanel from './components/SignalRulesPanel'
+// import BotWidget     from './components/BotWidget'   // 2026-07-06 暫時下架：使用者確定為主管/老闆，聊天小幫手先隱藏（要恢復連同底部掛載一起取消註解）
 import OnboardingTour   from './components/OnboardingTour'
 import GlossaryModal    from './components/GlossaryModal'
 import { coinName }     from './constants/coins'
+
+// 折疊面板動態載入（code splitting #29）：首屏不下載 recharts 等重依賴，
+// 進入詳細頁/展開面板時才抓對應 chunk（Suspense 顯示輕量載入字樣）。
+const CorrelationHeatmap = lazy(() => import('./components/CorrelationHeatmap'))
+const BacktestPanel      = lazy(() => import('./components/BacktestPanel'))
+const SentimentPanel     = lazy(() => import('./components/SentimentPanel'))
+const AIAnalystPanel     = lazy(() => import('./components/AIAnalystPanel'))
+const panelFallback = <div className="chart-empty">面板載入中…</div>
 
 // 日線的區間預設（單位：天）
 const DAY_OPTIONS = [
@@ -81,6 +86,8 @@ export default function App() {
   const [showSentiment,   setShowSentiment]   = useState(false)
   const [showBacktest,    setShowBacktest]    = useState(false)
   const [showAI,          setShowAI]          = useState(true)
+  const [showRules,       setShowRules]       = useState(true)   // 買賣判斷依據面板（預設展開）
+  const [labTrades,       setLabTrades]       = useState(null)   // 自訂訊號實驗室的交易（null=未啟用，圖上顯示正式回測標記）
   // 首次造訪自動開新手導覽；Header「❓ 導覽」可重看
   const [showTour, setShowTour] = useState(() => !localStorage.getItem('cq_tour_done'))
   const [showGlossary, setShowGlossary] = useState(false)
@@ -361,9 +368,26 @@ export default function App() {
               <CandlestickChart
                 prices={ohlc}
                 indicators={indicators}
-                trades={interval === '1d' ? (backtest?.recent_trades ?? []) : []}
+                trades={interval === '1d' ? (labTrades ?? backtest?.recent_trades ?? []) : []}
                 interval={interval}
               />
+            </section>
+
+            {/* 買賣判斷依據：系統訊號規則透明化 + 自訂指標/門檻值實驗室 */}
+            <section className="collapsible-section">
+              <button className="collapse-toggle" onClick={() => setShowRules(v => !v)}>
+                <span>📋 買賣判斷依據（進出場規則 + 自訂訊號實驗室）</span>
+                <span className="collapse-arrow">{showRules ? '▲' : '▼'}</span>
+              </button>
+              {showRules && (
+                <SignalRulesPanel
+                  signal={activeSignal}
+                  prices={ohlc}
+                  indicators={indicators}
+                  interval={interval}
+                  onTrades={setLabTrades}
+                />
+              )}
             </section>
 
             <section className="collapsible-section">
@@ -371,7 +395,7 @@ export default function App() {
                 <span>🤖 AI 智能分析（規則引擎 + GPT）</span>
                 <span className="collapse-arrow">{showAI ? '▲' : '▼'}</span>
               </button>
-              {showAI && <AIAnalystPanel symbol={active} refreshKey={dataVersion} />}
+              {showAI && <Suspense fallback={panelFallback}><AIAnalystPanel symbol={active} refreshKey={dataVersion} /></Suspense>}
             </section>
 
             <section className="collapsible-section">
@@ -379,7 +403,7 @@ export default function App() {
                 <span>市場情緒 / 新聞</span>
                 <span className="collapse-arrow">{showSentiment ? '▲' : '▼'}</span>
               </button>
-              {showSentiment && <SentimentPanel symbol={active} />}
+              {showSentiment && <Suspense fallback={panelFallback}><SentimentPanel symbol={active} /></Suspense>}
             </section>
 
             <section className="collapsible-section">
@@ -388,13 +412,15 @@ export default function App() {
                 <span className="collapse-arrow">{showBacktest ? '▲' : '▼'}</span>
               </button>
               {showBacktest && (
-                <BacktestPanel
-                  signal={activeSignal}
-                  data={backtest}
-                  loading={btLoading}
-                  params={btParams}
-                  onParamsChange={patch => setBtParams(p => ({ ...p, ...patch }))}
-                />
+                <Suspense fallback={panelFallback}>
+                  <BacktestPanel
+                    signal={activeSignal}
+                    data={backtest}
+                    loading={btLoading}
+                    params={btParams}
+                    onParamsChange={patch => setBtParams(p => ({ ...p, ...patch }))}
+                  />
+                </Suspense>
               )}
             </section>
             <section className="collapsible-section">
@@ -404,7 +430,7 @@ export default function App() {
               </button>
               {showCorrelation && (
                 <div className="correlation-body">
-                  <CorrelationHeatmap data={correlation} />
+                  <Suspense fallback={panelFallback}><CorrelationHeatmap data={correlation} /></Suspense>
                 </div>
               )}
             </section>
@@ -413,8 +439,10 @@ export default function App() {
       )}
 
       {/* ── 全站漂浮 AI 小幫手「小Q」（右下角）──────────────────────────
-          詳細頁＝跟隨當前幣；總覽頁＝全市場模式（不綁定任何幣） */}
+          詳細頁＝跟隨當前幣；總覽頁＝全市場模式（不綁定任何幣）
+          2026-07-06 暫時下架（使用者為主管/老闆）；要恢復把下行與頂部 import 取消註解即可。
       <BotWidget defaultSymbol={view === 'detail' ? active : null} />
+      */}
 
     </div>
   )

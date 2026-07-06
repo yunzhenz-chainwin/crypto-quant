@@ -107,6 +107,7 @@ const OSC_DETAIL = {
 
 export default function CandlestickChart({ prices, indicators, trades, interval = '1d' }) {
   const containerRef = useRef(null)
+  const tooltipRef   = useRef(null)   // 懸停資訊框（直接操作 DOM，避免高頻 re-render）
   const [maType, setMaType] = useState('EMA')   // 均線類型:SMA / EMA
   // 多條可調均線(天數可改、可逐條開關;顏色對應圖上的線)
   const [mas, setMas] = useState([
@@ -224,15 +225,78 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
     }
 
     // ── 買賣標記（回測是日線策略，僅日線圖顯示；時線時間軸型別也不相容）──
+    // t.exit_label 可覆寫出場文字（自訂訊號實驗室用「賣出」而非「獲利/停損」）
     if (interval === '1d' && showMarkers && trades && trades.length > 0) {
       const markers = []
       trades.forEach(t => {
         if (t.entry_date) markers.push({ time: t.entry_date, position: 'belowBar', color: '#22c55e', shape: 'arrowUp', text: `買入 $${Number(t.entry_price).toFixed(0)}` })
-        if (t.exit_date)  markers.push({ time: t.exit_date, position: 'aboveBar', color: t.profit ? '#60a5fa' : '#ef4444', shape: 'arrowDown', text: `${t.profit ? '獲利' : '停損'} ${t.return_pct > 0 ? '+' : ''}${t.return_pct}%` })
+        if (t.exit_date)  markers.push({ time: t.exit_date, position: 'aboveBar', color: t.profit ? '#60a5fa' : '#ef4444', shape: 'arrowDown', text: `${t.exit_label ?? (t.profit ? '獲利' : '停損')} ${t.return_pct > 0 ? '+' : ''}${t.return_pct}%` })
       })
       markers.sort((a, b) => a.time.localeCompare(b.time))
       createSeriesMarkers(candleSeries, markers)
     }
+
+    // ── 滑鼠懸停資訊框：游標指到哪根 K 棒，就顯示那根的完整數據 ─────────
+    // 查找表 key 與圖表時間一致：日線 'YYYY-MM-DD' 字串 / 時線 epoch 數字。
+    const infoMap = new Map()
+    prices.forEach((p, i) => {
+      infoMap.set(String(toChartTime(p.date)), { p, prev: i > 0 ? prices[i - 1] : null, ind: null, rawDate: p.date })
+    })
+    ;(indicators ?? []).forEach(d => {
+      const e = infoMap.get(String(toChartTime(d.date)))
+      if (e) e.ind = d
+    })
+    // 日線的 crosshair time 回傳 BusinessDay 物件 {year,month,day}，正規化回字串
+    const timeKey = (t) => (t && typeof t === 'object')
+      ? `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`
+      : String(t)
+    // 價位自適應小數位（低價幣 DOGE $0.07 不能捨成 0）
+    const fp = (v) => v == null ? '—' : v < 1 ? v.toFixed(4) : v < 100 ? v.toFixed(2) : Math.round(v).toLocaleString()
+    const fpct = (v) => v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`
+
+    chart.subscribeCrosshairMove(param => {
+      const tip = tooltipRef.current
+      if (!tip) return
+      const entry = param.time != null ? infoMap.get(timeKey(param.time)) : null
+      if (!entry || !param.point) { tip.style.display = 'none'; return }
+      const { p, prev, ind, rawDate } = entry
+      const chg = prev?.close ? (p.close - prev.close) / prev.close * 100 : null   // 對前一根收盤的漲跌
+      const amp = p.low > 0 ? (p.high - p.low) / p.low * 100 : null                // 當根振幅
+      const up  = p.close >= p.open
+      const chgUp = chg == null || chg >= 0
+      // 標題：日線=日期；時線=本地時間（軸上顯示的也是本地時間，兩者一致）
+      let label = rawDate
+      if (rawDate.length > 10) {
+        const dt = new Date(rawDate.replace(' ', 'T') + 'Z')
+        label = `${dt.getFullYear()}/${dt.getMonth() + 1}/${dt.getDate()} ${String(dt.getHours()).padStart(2, '0')}:00`
+      }
+      const volRatio = (ind?.VOL_MA20 > 0 && p.volume != null) ? p.volume / ind.VOL_MA20 : null
+      const bbPct = (ind?.BB_UPPER != null && ind?.BB_LOWER != null && ind.BB_UPPER > ind.BB_LOWER)
+        ? (p.close - ind.BB_LOWER) / (ind.BB_UPPER - ind.BB_LOWER) * 100 : null
+
+      const rows = [
+        ['開盤', `$${fp(p.open)}`], ['最高', `$${fp(p.high)}`],
+        ['最低', `$${fp(p.low)}`],
+        ['收盤', `<b style="color:${up ? '#22c55e' : '#ef4444'}">$${fp(p.close)}</b>`],
+        ['漲跌', `<b style="color:${chgUp ? '#22c55e' : '#ef4444'}">${fpct(chg)}</b>`],
+        ['振幅', fpct(amp).replace('+', '')],
+        ['成交量', p.volume != null ? Math.round(p.volume).toLocaleString() + (volRatio ? `（${volRatio.toFixed(1)}x 均量）` : '') : '—'],
+      ]
+      if (ind?.RSI != null)  rows.push(['RSI', ind.RSI.toFixed(1)])
+      if (ind?.MA20 != null) rows.push(['MA20', `$${fp(ind.MA20)}`])
+      if (ind?.MA60 != null) rows.push(['MA60', `$${fp(ind.MA60)}`])
+      if (bbPct != null)     rows.push(['布林位置', `${bbPct.toFixed(0)}%（0=下軌 100=上軌）`])
+
+      tip.innerHTML = `<div class="ct-date">${label}</div>` +
+        rows.map(([k, v]) => `<div class="ct-row"><span class="ct-k">${k}</span><span class="ct-v">${v}</span></div>`).join('')
+      tip.style.display = 'block'
+      // 位置跟著游標；靠右半邊時翻到左側，避免出界
+      const w = containerRef.current?.clientWidth ?? 0
+      let x = param.point.x + 18
+      if (x + tip.offsetWidth > w - 8) x = param.point.x - tip.offsetWidth - 18
+      tip.style.left = `${Math.max(4, x)}px`
+      tip.style.top  = `${Math.max(4, Math.min(param.point.y - 16, (containerRef.current?.clientHeight ?? 400) - tip.offsetHeight - 8))}px`
+    })
 
     // 擺盪副面板高度(等版面算完再設)
     const raf = requestAnimationFrame(() => {
@@ -248,7 +312,12 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
       if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth })
     }
     window.addEventListener('resize', handleResize)
-    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', handleResize); chart.remove() }
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', handleResize)
+      if (tooltipRef.current) tooltipRef.current.style.display = 'none'   // 重建圖表時清掉殘留的資訊框
+      chart.remove()
+    }
   }, [prices, indicators, trades, maType, mas, showBB, showVol, showMarkers, osc, interval])
 
   if (!prices || prices.length === 0) {
@@ -287,7 +356,10 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
           ))}
         </span>
       </div>
-      <div ref={containerRef} className="candlestick-wrap" />
+      <div ref={containerRef} className="candlestick-wrap">
+        {/* 懸停資訊框（subscribeCrosshairMove 直接寫入內容與座標） */}
+        <div ref={tooltipRef} className="chart-tooltip" />
+      </div>
       {osc !== '無' && OSC_DETAIL[osc] && (
         <div className="osc-help">
           <div className="osc-help-row">

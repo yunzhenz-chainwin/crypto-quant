@@ -1,7 +1,7 @@
 /**
  * GlossaryModal.jsx — 名詞小辭典彈窗（Header「📖 辭典」開啟）
  *
- * 搜尋 + 分組列表；點詞條展開詳細說明；底部引導問小Q。
+ * 搜尋 + 分組列表；點詞條展開詳細說明。
  */
 import { useState } from 'react'
 import { GLOSSARY } from '../constants/glossary'
@@ -32,7 +32,7 @@ export default function GlossaryModal({ onClose }) {
         />
         <div className="gloss-body">
           {groups.length === 0 && (
-            <div className="gloss-empty">找不到「{q}」— 可以直接問右下角的小Q！</div>
+            <div className="gloss-empty">找不到「{q}」——試試其他關鍵字（例：RSI、回撤、均線）</div>
           )}
           {groups.map(g => (
             <div key={g.group} className="gloss-group">
@@ -54,7 +54,7 @@ export default function GlossaryModal({ onClose }) {
             </div>
           ))}
         </div>
-        <div className="gloss-foot">想更深入？直接問右下角的小Q 🤖（例：「背離是什麼？」）</div>
+        <div className="gloss-foot">更完整的指標教學：K 線圖下方選擇擺盪指標後，點「看詳細」。</div>
       </div>
     </div>
   )

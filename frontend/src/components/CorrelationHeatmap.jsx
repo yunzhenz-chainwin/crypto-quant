@@ -31,6 +31,7 @@ export default function CorrelationHeatmap({ data }) {
     <div className="heatmap-wrap">
       <h3 className="chart-title">
         日報酬相關性
+        <span className="info-tip" title="相關係數 -1~+1：+1=兩幣完全同漲同跌、0=無關、-1=完全反向。幣圈普遍 0.6~0.9 高相關，代表「幣圈內分散買很多幣」的避險效果有限。">ⓘ</span>
         <span className="chart-subtitle"> {period?.start} ~ {period?.end}（{period?.days} 天）</span>
       </h3>
 
@@ -73,7 +74,7 @@ export default function CorrelationHeatmap({ data }) {
       {/* 波動度表格 */}
       {volatility && (
         <div className="vol-table">
-          <h4 className="vol-title">年化波動度</h4>
+          <h4 className="vol-title">年化波動度<span className="info-tip" title="把日波動換算成年：數字越大代表這顆幣越「顛簸」。例如 80% 表示一年內上下 80% 幅度屬正常範圍，倉位應相應縮小。">ⓘ</span></h4>
           <div className="vol-row">
             {Object.entries(volatility).map(([sym, vol]) => (
               <div key={sym} className="vol-item">

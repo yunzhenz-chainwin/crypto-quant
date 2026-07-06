@@ -384,7 +384,7 @@ export default function SentimentPanel({ symbol }) {
       <div className="sentiment-body">
         {/* 左：錶盤 */}
         <div className="fg-panel">
-          <div className="fg-panel-title">恐懼貪婪指數</div>
+          <div className="fg-panel-title">恐懼貪婪指數<span className="info-tip" title="0~100 的市場情緒溫度計（綜合波動、動能、社群聲量）：0~25 極度恐慌、75~100 極度貪婪。極端值常被當反向參考——別人恐懼我貪婪，但不是精準擇時工具。">ⓘ</span></div>
           {current
             ? <FearGreedGauge value={current.value} />
             : <div className="chart-empty">載入中…</div>
