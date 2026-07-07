@@ -24,6 +24,7 @@ import MarketSummary    from './components/MarketSummary'
 // import BotWidget     from './components/BotWidget'   // 2026-07-06 暫時下架：使用者確定為主管/老闆，聊天小幫手先隱藏（要恢復連同底部掛載一起取消註解）
 // import OnboardingTour   from './components/OnboardingTour' // 2026-07-06 暫停新手導覽
 import GlossaryModal    from './components/GlossaryModal'
+import useLivePrices    from './lib/useLivePrices'
 import { coinName }     from './constants/coins'
 
 // 折疊面板動態載入（code splitting #29）：首屏不下載 recharts 等重依賴，
@@ -33,6 +34,14 @@ const SentimentPanel     = lazy(() => import('./components/SentimentPanel'))
 const StrategyPanel      = lazy(() => import('./components/StrategyPanel'))   // 詳細資訊彈窗用（計分明細＋回測表格＋實驗室）
 // const AIAnalystPanel     = lazy(() => import('./components/AIAnalystPanel')) // 2026-07-06 暫停 AI 智能分析
 const panelFallback = <div className="chart-empty">面板載入中…</div>
+// 詳細資訊彈窗的載入骨架（比純文字「載入中」順，不會空白跳一下）
+const detailFallback = (
+  <div className="detail-skeleton" aria-label="載入中">
+    <div className="skeleton" style={{ height: 44, borderRadius: 8 }} />
+    <div className="skeleton" style={{ height: 220, borderRadius: 8 }} />
+    <div className="skeleton" style={{ height: 150, borderRadius: 8 }} />
+  </div>
+)
 
 // 日線的區間預設（單位：天）
 const DAY_OPTIONS = [
@@ -109,6 +118,8 @@ export default function App() {
 
   // 這顆幣有沒有時線資料（目前只開 BTC/ETH）
   const hasHourly = (intervals['1h'] ?? []).includes(active)
+  // Binance WS 即時最新價（{SYM:{price,changePct}}）——讓最新價/漲跌秒級跳動
+  const livePrices = useLivePrices(symbols)
 
   // 刷新市場摘要資料（訊號 + 恐懼貪婪）
   const refreshMarket = useCallback(async (showSpinner = true) => {
@@ -303,7 +314,7 @@ export default function App() {
       {/* ── 市場總覽模式 ────────────────────────────────────────────────── */}
       {view === 'overview' && (
         <div className="overview-layout">
-          <MarketOverview signals={signals} backtests={btSummary} onSelect={handleSelectCoin} />
+          <MarketOverview signals={signals} backtests={btSummary} livePrices={livePrices} onSelect={handleSelectCoin} />
         </div>
       )}
 
@@ -331,7 +342,7 @@ export default function App() {
               </div>
             </div>
 
-            <HeroSignal signal={activeSignal} symbol={active} slim />
+            <HeroSignal signal={activeSignal} symbol={active} live={livePrices[active]} slim />
 
             {/* 儀表板主區：左＝蠟燭圖（縮小、點🔍放大看大圖），右＝分數＋指標即時解讀 */}
             <div className="detail-main">
@@ -525,7 +536,7 @@ export default function App() {
                     </span>
                     <button className="chart-modal-close" onClick={() => setDetailView(null)} aria-label="關閉詳細">✕</button>
                   </div>
-                  <Suspense fallback={panelFallback}>
+                  <Suspense fallback={detailFallback}>
                     <StrategyPanel
                       view={detailView}
                       signal={activeSignal}

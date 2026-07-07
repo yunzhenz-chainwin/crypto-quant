@@ -212,6 +212,16 @@ body { background: var(--bg); }
 .hero-left { flex-shrink: 0; }
 .hero-coin  { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .hero-price { font-size: 28px; font-weight: 700; line-height: 1; margin-bottom: 8px; }
+.hero-chg { font-size: 14px; font-weight: 700; margin-left: 8px; }
+/* 即時報價：漲跌小標 + 脈動小綠點（Binance WS 有資料時才顯示）*/
+.card-chg { font-size: 11px; font-weight: 600; margin-left: 6px; white-space: nowrap; }
+.live-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: #22c55e; margin-right: 5px; vertical-align: middle;
+  animation: live-pulse 1.4s ease-in-out infinite;
+}
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 .hero-signal-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .hero-bull  .hero-icon  { color: var(--bull); font-size: 18px; }
 .hero-bear  .hero-icon  { color: var(--bear); font-size: 18px; }
@@ -303,7 +313,17 @@ body { background: var(--bg); }
   display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
   gap: 14px; align-items: stretch; margin-bottom: 14px;   /* stretch＝左右欄同高 */
 }
-@media (max-width: 960px) { .detail-main { grid-template-columns: 1fr; align-items: start; } }
+@media (max-width: 960px) {
+  .detail-main { grid-template-columns: 1fr; align-items: start; }
+  /* 堆疊(非拉伸)時給圖一個確定高度，避免 flex 撐高鏈塌成過矮 */
+  .detail-chart-col .candlestick-wrap { flex: none; height: 400px; }
+}
+/* 手機：backdrop 內距縮小(多點空間給彈窗)、彈窗內距與圖高調適中 */
+@media (max-width: 640px) {
+  .chart-modal-backdrop { padding: 8px; }
+  .chart-modal, .detail-modal { padding: 12px; }
+  .chart-modal .candlestick-wrap { height: 62vh; }
+}
 /* 左圖欄拉伸到與右欄同高：chart-section → chart-root → candlestick-wrap 一路 flex 撐滿 */
 .detail-chart-col { display: flex; flex-direction: column; }
 .detail-chart-col .chart-root { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
@@ -341,21 +361,22 @@ body { background: var(--bg); }
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
 .chart-modal {
-  width: min(94vw, 1500px); max-height: 92vh; overflow: auto;
+  width: 100%; max-width: 1500px; max-height: 92vh; overflow: auto;   /* width:100% 尊重 backdrop 內距、永不溢出 */
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 12px; padding: 14px 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
 }
 .chart-modal .candlestick-wrap { height: 74vh; }   /* 放大彈窗給圖固定大高度 */
 /* 「詳細資訊」彈窗（計分明細＋回測表格＋實驗室，內容較窄長）*/
 .detail-modal {
-  width: min(97vw, 1320px); max-height: 94vh; overflow: auto;
+  width: 100%; max-width: 1320px; max-height: 94vh; overflow: auto;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 12px; padding: 16px 20px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
 }
 .detail-modal .strategy-panel { padding-left: 0; padding-right: 0; }   /* 彈窗已有內距，避免雙重 */
-.chart-modal-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-.chart-modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.chart-modal-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.chart-modal-title { font-size: 15px; font-weight: 700; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chart-modal-close {
+  flex-shrink: 0;
   background: transparent; border: 1px solid var(--border); color: var(--muted);
   border-radius: 6px; width: 30px; height: 30px; font-size: 15px; cursor: pointer;
 }
@@ -1605,6 +1626,9 @@ body { background: var(--bg); }
 .sk-line.lg { height: 20px; }
 .sk-bar { height: 8px; margin: 10px 0; }
 .skeleton-card { pointer-events: none; }
+/* 回測計算中 / 詳細彈窗載入中 的骨架排版（用 .skeleton shimmer 方塊）*/
+.bt-skeleton { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+.detail-skeleton { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
 .chart-skeleton { padding: 2px; }
 
 /* ── 名詞小辭典 ──────────────────────────────────────────────── */

@@ -376,7 +376,17 @@ export default function BacktestPanel({ data, loading, params, onParamsChange, h
         )}
       </div>
 
-      {loading && <div className="chart-empty">計算中…</div>}
+      {loading && (
+        <div className="bt-skeleton" aria-label="回測計算中">
+          <div className="skeleton" style={{ height: 62, borderRadius: 10 }} />
+          <div className="key-metrics">
+            <div className="skeleton" style={{ height: 92, borderRadius: 12 }} />
+            <div className="skeleton" style={{ height: 92, borderRadius: 12 }} />
+            <div className="skeleton" style={{ height: 92, borderRadius: 12 }} />
+          </div>
+          <div className="skeleton" style={{ height: 180, borderRadius: 8 }} />
+        </div>
+      )}
 
       {/* 友善的空狀態：沒有資料或沒有任何交易時，不要顯示一堆空白數字 */}
       {!loading && data?.error && (

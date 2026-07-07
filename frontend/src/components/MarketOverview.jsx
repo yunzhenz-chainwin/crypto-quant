@@ -84,11 +84,13 @@ function RsiMini({ rsi }) {
   )
 }
 
-function CoinCard({ s, bt, onSelect }) {
+function CoinCard({ s, bt, live, onSelect }) {
   const sig   = SIG[s.signal] ?? SIG.NEUTRAL
-  const price = s.close
-    ? `$${Number(s.close).toLocaleString(undefined, { maximumFractionDigits: 4 })}`
+  const px    = live?.price ?? s.close          // 有即時價就用即時價，否則排程價
+  const price = px
+    ? `$${Number(px).toLocaleString(undefined, { maximumFractionDigits: px < 1 ? 4 : px < 100 ? 2 : 2 })}`
     : '—'
+  const chg   = live?.changePct
 
   return (
     <div
@@ -111,7 +113,15 @@ function CoinCard({ s, bt, onSelect }) {
       </div>
 
       <div className="card-name">{coinZh(s.symbol)}</div>
-      <div className="card-price">{price}</div>
+      <div className="card-price">
+        {live && <span className="live-dot" title="即時報價（Binance）" />}
+        {price}
+        {chg != null && (
+          <span className="card-chg" style={{ color: chg >= 0 ? '#22c55e' : '#ef4444' }}>
+            {chg >= 0 ? '▲' : '▼'}{Math.abs(chg).toFixed(2)}%
+          </span>
+        )}
+      </div>
 
       {/* 評估窗：① 信心分數(第一標準) ＋ ② 回測(第二標準) 框成一組，與下方 RSI/理由分開 */}
       <div className="card-eval">
@@ -136,7 +146,7 @@ function CoinCard({ s, bt, onSelect }) {
   )
 }
 
-export default function MarketOverview({ signals, backtests = [], onSelect }) {
+export default function MarketOverview({ signals, backtests = [], livePrices = {}, onSelect }) {
   const [cat, setCat] = useState('all')   // 幣別種類篩選：'all' 或 CATEGORIES 的 key
 
   // 幣種 → 回測摘要，供卡片顯示與第二排序鍵
@@ -199,7 +209,7 @@ export default function MarketOverview({ signals, backtests = [], onSelect }) {
       )}
       <div className="overview-grid">
         {sorted.map(s => (
-          <CoinCard key={s.symbol} s={s} bt={btMap.get(s.symbol)} onSelect={onSelect} />
+          <CoinCard key={s.symbol} s={s} bt={btMap.get(s.symbol)} live={livePrices[s.symbol]} onSelect={onSelect} />
         ))}
       </div>
     </section>

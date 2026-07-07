@@ -80,11 +80,11 @@ export function ScoreGauge({ score }) {
 
 // 指標白話卡已抽成共用元件,移至「策略回測」區塊顯示:見 ./IndicatorCards.jsx
 
-export default function HeroSignal({ signal, symbol, slim = false }) {
+export default function HeroSignal({ signal, symbol, live, slim = false }) {
   const cfg   = SIGNAL_CONFIG[signal?.signal ?? 'UNKNOWN']
-  const price = signal?.close
-    ? `$${signal.close.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-    : '—'
+  const px    = live?.price ?? signal?.close          // 有即時價就用即時價
+  const price = px ? `$${Number(px).toLocaleString(undefined, { maximumFractionDigits: px < 1 ? 4 : 2 })}` : '—'
+  const chg   = live?.changePct
 
 
   return (
@@ -98,7 +98,15 @@ export default function HeroSignal({ signal, symbol, slim = false }) {
           </span>
           <span className="hero-cat-why">{coinWhy(symbol)}</span>
         </div>
-        <div className="hero-price">{price}</div>
+        <div className="hero-price">
+          {live && <span className="live-dot" title="即時報價（Binance）" />}
+          {price}
+          {chg != null && (
+            <span className="hero-chg" style={{ color: chg >= 0 ? '#22c55e' : '#ef4444' }}>
+              {chg >= 0 ? '▲' : '▼'}{Math.abs(chg).toFixed(2)}%
+            </span>
+          )}
+        </div>
         <div className="hero-signal-row">
           <span className="hero-icon">{cfg.icon}</span>
           <span className="hero-label">{cfg.label}</span>
