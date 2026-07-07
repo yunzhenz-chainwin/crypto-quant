@@ -15,7 +15,7 @@ import {
   createChart, CandlestickSeries, HistogramSeries, LineSeries,
   CrosshairMode, createSeriesMarkers,
 } from 'lightweight-charts'
-import { movingAvg, kdj, dmi, bias } from '../lib/indicators'
+import { movingAvg, kdj, dmi, bias, atr, obv } from '../lib/indicators'
 
 // 一般圖層開關按鈕
 function Toggle({ on, onClick, color, children }) {
@@ -40,7 +40,7 @@ function toChartTime(date) {
   return Math.floor(Date.parse(date.replace(' ', 'T') + 'Z') / 1000) + TZ_OFFSET_SEC
 }
 
-const OSC_LIST = ['RSI', 'MACD', 'KDJ', 'DMI', 'BIAS', '無']
+const OSC_LIST = ['RSI', 'MACD', 'KDJ', 'DMI', 'BIAS', 'ATR', 'OBV', '無']
 
 // 擺盪指標的中文名（顯示在按鈕上；與下方「怎麼看」說明用詞一致）
 const OSC_NAME = {
@@ -49,6 +49,8 @@ const OSC_NAME = {
   KDJ: '隨機指標',
   DMI: '趨向指標',
   BIAS: '乖離率',
+  ATR: '平均真實區間',
+  OBV: '能量潮',
 }
 
 // 各擺盪指標的說明：summary（一句話）＋ sections（按「看詳細」展開的完整教學）
@@ -101,6 +103,26 @@ const OSC_DETAIL = {
       ['怎麼看', '正值 ＝ 價在均線上方（偏強）、負值 ＝ 下方（偏弱）；絕對值越大代表偏離越多。'],
       ['實戰訊號', '① 正乖離過大 → 短線漲多、易拉回均線（偏空回檔）。② 負乖離過大 → 跌深、易反彈回均線（偏多）。③「過大」無絕對值，需看該幣歷史區間相對判斷。'],
       ['注意', '強趨勢中乖離可持續很大，不代表馬上反轉；門檻因幣而異，宜參考該幣過去的乖離區間。'],
+    ],
+  },
+  ATR: {
+    summary: '平均真實區間：衡量波動「大小」（不分方向），常用來設停損、判斷行情冷熱。',
+    sections: [
+      ['是什麼', '衡量每根 K 棒「真實波動幅度」的平均值——只看波動多大，不管漲或跌。'],
+      ['怎麼算', '真實區間 TR ＝ max（當根高低差、|最高−前收|、|最低−前收|）；ATR ＝ TR 的 14 期 Wilder 平滑。'],
+      ['怎麼看', 'ATR 變大 ＝ 波動加劇（行情轉熱或恐慌）；變小 ＝ 波動收斂（盤整、量縮）。數值大小與該幣價位成正比。'],
+      ['實戰訊號', '① 設停損：常用「進場價 − N×ATR」，讓停損隨波動自動放寬或收緊。② ATR 由低檔開始放大，常伴隨突破或變盤。'],
+      ['注意', 'ATR 只講波動、不講方向；低價幣數字小、高價幣大，別用絕對值跨幣比較。'],
+    ],
+  },
+  OBV: {
+    summary: '能量潮：把成交量依漲跌累加，看「量」有沒有支撐「價」（量價背離）。',
+    sections: [
+      ['是什麼', '累積型量能指標——收漲把當根量加上去、收跌減掉，觀察資金是流入還是流出。'],
+      ['怎麼算', '收盤＞前收 → OBV ＋ 當根量；收盤＜前收 → OBV − 當根量；持平不變。（絕對值無意義，看走勢方向）'],
+      ['怎麼看', 'OBV 與價格同步走高 ＝ 上漲有量能支撐；OBV 走平或與價背離 ＝ 上漲缺量、較不健康。'],
+      ['實戰訊號', '① 頂背離：價創新高、OBV 沒創新高 → 追高動能不足（警戒）。② 底背離：價創新低、OBV 沒創新低 → 賣壓趨緩（偏多）。'],
+      ['注意', 'OBV 是相對趨勢工具，絕對數值不重要；單日爆量可能來自特殊事件，需搭配價格一起判讀。'],
     ],
   },
 }
@@ -221,6 +243,12 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
           s.createPriceLine({ price: 0, color: 'rgba(148,163,184,0.5)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false })
         }
         if (b24.length) chart.addSeries(LineSeries, { color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'BIAS24' }, pane).setData(b24)
+      } else if (osc === 'ATR') {
+        const a = atr(P, 14)
+        if (a.length) chart.addSeries(LineSeries, { color: '#a78bfa', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true, title: 'ATR' }, pane).setData(a)
+      } else if (osc === 'OBV') {
+        const o = obv(P)
+        if (o.length) chart.addSeries(LineSeries, { color: '#38bdf8', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: true, title: 'OBV' }, pane).setData(o)
       }
     }
 

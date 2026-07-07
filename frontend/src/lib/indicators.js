@@ -117,3 +117,44 @@ export function bias(prices, period) {
   }
   return out
 }
+
+// ATR 平均真實區間：波動度（不分方向）。TR = max(高低差, |高−前收|, |低−前收|)，
+// 首值取前 n 根 TR 平均、之後 Wilder 平滑（與 pandas_ta 預設一致）。回傳 [{time, value}]
+export function atr(prices, n = 14) {
+  const out = []
+  if (prices.length < n + 1) return out
+  const tr = new Array(prices.length).fill(0)
+  for (let i = 1; i < prices.length; i++) {
+    const p = prices[i], prevC = prices[i - 1].close
+    tr[i] = Math.max(p.high - p.low, Math.abs(p.high - prevC), Math.abs(p.low - prevC))
+  }
+  let prev = null
+  for (let i = n; i < prices.length; i++) {
+    if (i === n) {
+      let sum = 0
+      for (let j = 1; j <= n; j++) sum += tr[j]
+      prev = sum / n
+    } else {
+      prev = (prev * (n - 1) + tr[i]) / n
+    }
+    out.push({ time: prices[i].date, value: prev })
+  }
+  return out
+}
+
+// OBV 能量潮：累積成交量（收漲加量、收跌減量、持平不變）；看量價背離。
+// 絕對值無意義，只看走勢方向。回傳 [{time, value}]
+export function obv(prices) {
+  const out = []
+  let cum = 0
+  for (let i = 0; i < prices.length; i++) {
+    const p = prices[i]
+    if (i > 0) {
+      const prevC = prices[i - 1].close
+      if (p.close > prevC) cum += (p.volume || 0)
+      else if (p.close < prevC) cum -= (p.volume || 0)
+    }
+    out.push({ time: p.date, value: cum })
+  }
+  return out
+}
