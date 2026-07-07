@@ -264,6 +264,15 @@ body { background: var(--bg); }
 .ind-card-name { font-size: 12px; font-weight: 600; color: var(--text); }
 .ind-card-arrow { margin-left: auto; font-size: 15px; font-weight: 700; line-height: 1; }
 .ind-card-note { font-size: 11px; margin-top: 3px; line-height: 1.4; font-weight: 600; }
+/* 指標詳解（詳細資訊彈窗的「指標」視圖）*/
+.ind-detail { display: flex; flex-direction: column; gap: 8px; }
+.ind-detail-hd { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.ind-detail-row { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.ind-detail-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.ind-detail-name { font-size: 13px; font-weight: 700; color: var(--text); }
+.ind-detail-score { font-size: 12px; font-weight: 700; white-space: nowrap; }
+.ind-detail-note { font-size: 12.5px; margin-top: 4px; font-weight: 600; }
+.ind-detail-tip { font-size: 11.5px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
 .ind-rsi { margin-top: 6px; }
 .ind-rsi-track {
   position: relative; height: 6px; background: var(--border);
@@ -284,9 +293,73 @@ body { background: var(--bg); }
   padding: 14px 16px;
 }
 .chart-section-header {
-  display: flex; justify-content: space-between; align-items: flex-start;
+  display: flex; justify-content: flex-start; align-items: center;
   margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
 }
+.chart-section-header .range-controls { margin-left: auto; }
+
+/* ── 詳細頁儀表板主區：左＝蠟燭圖(縮小、可放大)，右＝分數＋指標即時解讀 ── */
+.detail-main {
+  display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
+  gap: 14px; align-items: stretch; margin-bottom: 14px;   /* stretch＝左右欄同高 */
+}
+@media (max-width: 960px) { .detail-main { grid-template-columns: 1fr; align-items: start; } }
+/* 左圖欄拉伸到與右欄同高：chart-section → chart-root → candlestick-wrap 一路 flex 撐滿 */
+.detail-chart-col { display: flex; flex-direction: column; }
+.detail-chart-col .chart-root { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.detail-chart-col .candlestick-wrap { flex: 1 1 auto; min-height: 340px; }
+.detail-side-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.side-block {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px;
+}
+.side-block-title {
+  font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 8px;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+}
+.side-block-note { font-size: 11px; color: var(--muted); text-align: center; margin-top: 4px; }
+/* 可點擊看詳細的右欄區塊 */
+.side-clickable { cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.side-block.side-clickable:hover { border-color: var(--accent); }
+.side-clickable:hover .side-more,
+.side-clickable:hover .side-more-inline { color: #7dd3fc; }
+.side-clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.side-more { margin-top: 6px; font-size: 11px; color: var(--accent); text-align: right; font-weight: 600; }
+.side-more-inline { font-size: 11px; color: var(--accent); font-weight: 600; }
+/* 放大按鈕 */
+.chart-zoom-btn {
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+  transition: color .12s, border-color .12s;
+}
+.chart-zoom-btn:hover { color: var(--text); border-color: var(--accent); }
+
+/* 蠟燭圖放大彈窗（點背景 / ✕ / Esc 關閉） */
+.chart-modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(2, 6, 23, 0.72);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.chart-modal {
+  width: min(94vw, 1500px); max-height: 92vh; overflow: auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+}
+.chart-modal .candlestick-wrap { height: 74vh; }   /* 放大彈窗給圖固定大高度 */
+/* 「詳細資訊」彈窗（計分明細＋回測表格＋實驗室，內容較窄長）*/
+.detail-modal {
+  width: min(97vw, 1320px); max-height: 94vh; overflow: auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 20px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+}
+.detail-modal .strategy-panel { padding-left: 0; padding-right: 0; }   /* 彈窗已有內距，避免雙重 */
+.chart-modal-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.chart-modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.chart-modal-close {
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  border-radius: 6px; width: 30px; height: 30px; font-size: 15px; cursor: pointer;
+}
+.chart-modal-close:hover { color: var(--text); border-color: var(--accent); }
 
 /* 右側控制群組（快速按鈕 + 自訂面板） */
 .range-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
@@ -376,6 +449,23 @@ body { background: var(--bg); }
   border: 1px solid var(--border); border-radius: 5px;
   padding: 4px 8px; font-size: 12px; cursor: pointer;
 }
+/* 停損／停利手動輸入框 */
+.pct-input {
+  display: inline-flex; align-items: center; gap: 1px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 5px; padding: 3px 8px;
+}
+.pct-input:focus-within { border-color: var(--accent); }
+.pct-input .pct-sign, .pct-input .pct-suffix { font-size: 12px; color: var(--muted); }
+.pct-input input {
+  width: 40px; background: transparent; border: none; color: var(--text);
+  font-size: 12px; text-align: right; padding: 0;
+}
+.pct-input input:focus { outline: none; }
+/* 隱藏數字框上下微調小箭頭，版面更乾淨 */
+.pct-input input::-webkit-inner-spin-button,
+.pct-input input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.pct-input input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 
 /* 白話結論 banner */
 .backtest-verdict {
@@ -729,6 +819,21 @@ body { background: var(--bg); }
   background: var(--bg); border: 1px solid var(--border);
   font-size: 10px; color: var(--muted);
 }
+
+/* 卡片回測策略摘要（第二評估標準）：一行精簡，不佔版面 */
+.card-bt { display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: help; }
+.card-bt-lbl { color: var(--muted); }
+.card-bt-val { font-weight: 700; }
+
+/* 評估窗：把 ① 信心分數 ＋ ② 回測 框成一組（窗格），和下方 RSI/理由分開 */
+.card-eval {
+  display: flex; flex-direction: column; gap: 8px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 11px 11px;
+}
+.card-eval-hd { font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 0.3px; }
 
 /* 底部查看 CTA */
 .card-cta {
@@ -1776,6 +1881,11 @@ body { background: var(--bg); }
 .chart-tooltip .ct-row { display: flex; justify-content: space-between; gap: 12px; }
 .chart-tooltip .ct-k { color: var(--muted); flex-shrink: 0; }
 .chart-tooltip .ct-v { color: var(--text); text-align: right; }
+/* 對應圖上某條線的列：標籤前的小色點（線色由 inline style 帶入） */
+.chart-tooltip .ct-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-right: 6px; vertical-align: middle;
+}
 
 /* ── 買賣判斷依據面板 ─────────────────────────────────── */
 .rules-panel {
@@ -1814,6 +1924,77 @@ body { background: var(--bg); }
 .rules-table-toggle:hover { color: var(--text); border-color: var(--accent); }
 .rules-scoring-table { margin-top: 8px; }
 .rules-scoring-detail { line-height: 1.7; }
+/* 合併表（規則＋即時得分）：6 欄較寬，窄畫面可水平捲動；規則欄可折行、觸發欄不折 */
+.rules-table-scroll { overflow-x: auto; }
+.rules-merged-table { min-width: 660px; }
+/* 兩行式：每個指標＝主資料列（指標/權重/觸發/得分/累計）＋ 下方獨立一列放完整計分規則。
+   長長的規則不再擠在同一行，表格變窄、右側欄位不會被切掉。 */
+.rules-merged-table.two-row { min-width: 0; }
+.rules-merged-table.two-row .rmt-main td { border-bottom: none; padding-bottom: 3px; }
+.rules-merged-table.two-row .rmt-rule td {
+  padding: 2px 8px 10px; border-top: none;
+  font-size: 11.5px; color: var(--muted); line-height: 1.6; white-space: normal;
+}
+.rmt-rule-lbl { color: #64748b; margin-right: 4px; }
+
+/* ── 合併後的「買賣策略」面板：整片呈現，不是盒中盒 ───────────────────
+   折疊區(.collapsible-section)本身就是一張卡；內部各段（現在狀態/規則/回測/實驗室）
+   抹平自身邊框與底色、改用細分隔線區隔，讓整個面板讀起來是「一塊」。
+   左右內距在此統一給，各段只留上下內距、內容左緣對齊。 */
+.strategy-panel { display: flex; flex-direction: column; padding: 2px 16px 16px; }
+.strategy-panel > * + * { border-top: 1px solid var(--border); }
+/* 把內層兩種面板的「卡片外殼」抹平成扁平段落（內部的指標卡/計分盒等內容保留）*/
+.strategy-panel .rules-panel,
+.strategy-panel .backtest-section {
+  background: transparent; border: none; border-radius: 0; padding: 16px 0;
+}
+/* ① 綜合建議卡：面板最上方的結論（訊號 × 回測 融成一句話 + 依據 + 賺賠風險）。
+   底色與左緣顏色依結論（進場綠／謹慎黃／避開紅／觀望灰）由 inline style 帶入。 */
+.strat-reco {
+  margin: 0 0 8px; padding: 13px 15px;
+  border: 1px solid var(--border); border-left-width: 3px; border-radius: 10px;
+}
+.strat-reco-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; flex-wrap: wrap; margin-bottom: 7px;
+}
+.strat-reco-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .5px; color: var(--muted); }
+.strat-reco-cred { font-size: 11px; font-weight: 700; padding: 2px 8px; border: 1px solid; border-radius: 20px; white-space: nowrap; }
+.strat-reco-verdict {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 15px; font-weight: 800; line-height: 1.4; margin-bottom: 9px;
+}
+.strat-reco-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.strat-reco-lines { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--text); line-height: 1.65; }
+.strat-reco-muted { color: var(--muted); }
+.strat-reco-disc { margin-top: 9px; font-size: 11px; color: var(--muted); }
+/* 綜合建議卡：量表(左) + 訊號/回測/若進場(右) 並排；底部兩個詳細連結 */
+.strat-reco-body { display: flex; align-items: flex-start; gap: 10px; }
+.strat-reco-gauge { flex-shrink: 0; }
+.strat-reco-gauge .score-gauge-svg { width: 112px; height: 64px; }
+.strat-reco-gauge .score-gauge-axis { width: 104px; font-size: 8px; }
+.strat-reco-body .strat-reco-lines { flex: 1 1 auto; min-width: 0; }
+/* 整張綜合建議卡可點 → 開「計分明細＋回測驗證」合併彈窗 */
+.strat-reco-click { cursor: pointer; transition: box-shadow .12s; }
+.strat-reco-click:hover { box-shadow: 0 0 0 1px var(--accent) inset; }
+.strat-reco-click:hover .strat-reco-more { color: #7dd3fc; }
+.strat-reco-click:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.strat-reco-more { margin-top: 10px; font-size: 12px; color: var(--accent); font-weight: 700; text-align: right; }
+@media (max-width: 520px) { .strat-reco-body { flex-direction: column; align-items: center; } }
+/* 出場規則裡的停損／停利輸入列 */
+.rules-stoptake {
+  display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin-top: 8px; padding: 7px 10px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--border);
+}
+.rules-stoptake-lbl  { font-size: 12px; color: var(--muted); font-weight: 600; }
+.rules-stoptake-note { font-size: 12px; color: var(--muted); }
+.rules-why-toggle {
+  background: transparent; border: 1px dashed var(--border);
+  color: var(--muted); border-radius: 6px; margin-top: 8px;
+  padding: 6px 12px; font-size: 12px; cursor: pointer; width: 100%;
+}
+.rules-why-toggle:hover { color: var(--text); border-color: var(--accent); }
 
 /* ── 自訂買賣點實驗室 ─────────────────────────────────── */
 .lab-title-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }

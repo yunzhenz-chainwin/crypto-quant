@@ -23,8 +23,8 @@ function scoreColor(score) {
   return '#ef4444'
 }
 
-// 半圓弧量表 SVG
-function ScoreGauge({ score }) {
+// 半圓弧量表 SVG（匯出供右側欄位重用）
+export function ScoreGauge({ score }) {
   if (score == null) return null
   const r  = 50
   const cx = 70, cy = 70
@@ -80,7 +80,7 @@ function ScoreGauge({ score }) {
 
 // 指標白話卡已抽成共用元件,移至「策略回測」區塊顯示:見 ./IndicatorCards.jsx
 
-export default function HeroSignal({ signal, symbol }) {
+export default function HeroSignal({ signal, symbol, slim = false }) {
   const cfg   = SIGNAL_CONFIG[signal?.signal ?? 'UNKNOWN']
   const price = signal?.close
     ? `$${signal.close.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
@@ -103,15 +103,17 @@ export default function HeroSignal({ signal, symbol }) {
           <span className="hero-icon">{cfg.icon}</span>
           <span className="hero-label">{cfg.label}</span>
         </div>
-        <div className="hero-desc">{cfg.desc}</div>
+        {!slim && <div className="hero-desc">{cfg.desc}</div>}
       </div>
 
-      {/* 右：信心分數量表（ⓘ 白話說明） */}
-      <div className="hero-gauge-col"
-           title="信心分數＝6 個技術因子的加權合成（RSI、MACD、均線排列、MA200、成交量、布林位置），基準 50、範圍 0~100。≥65 判偏多、≤35 判偏空。完整計分規則見下方「買賣判斷依據」面板。">
-        <ScoreGauge score={signal?.score} />
-        <span className="hero-gauge-info">ⓘ 6 因子合成，計分規則見「買賣判斷依據」</span>
-      </div>
+      {/* 右：信心分數量表（slim 時隱藏——分數量表改放右側欄位，避免重複） */}
+      {!slim && (
+        <div className="hero-gauge-col"
+             title="信心分數＝6 個技術因子的加權合成（RSI、MACD、均線排列、MA200、成交量、布林位置），基準 50、範圍 0~100。≥65 判偏多、≤35 判偏空。完整計分規則見下方「買賣判斷依據」面板。">
+          <ScoreGauge score={signal?.score} />
+          <span className="hero-gauge-info">ⓘ 6 因子合成，計分規則見「買賣判斷依據」</span>
+        </div>
+      )}
     </section>
   )
 }

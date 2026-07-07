@@ -105,7 +105,7 @@ const OSC_DETAIL = {
   },
 }
 
-export default function CandlestickChart({ prices, indicators, trades, interval = '1d' }) {
+export default function CandlestickChart({ prices, indicators, trades, interval = '1d', compact = false }) {
   const containerRef = useRef(null)
   const tooltipRef   = useRef(null)   // 懸停資訊框（直接操作 DOM，避免高頻 re-render）
   const [maType, setMaType] = useState('EMA')   // 均線類型:SMA / EMA
@@ -135,7 +135,7 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
       rightPriceScale: { borderColor: '#334155' },
       timeScale: { borderColor: '#334155', timeVisible: true, secondsVisible: false },
       width: containerRef.current.clientWidth,
-      height: oscOn ? 560 : 420,
+      height: containerRef.current.clientHeight || (oscOn ? (compact ? 420 : 560) : (compact ? 300 : 420)),
     })
 
     // 正規化時間欄：日線維持日期字串、時線轉為本地化 epoch 秒。
@@ -226,12 +226,15 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
 
     // ── 買賣標記（回測是日線策略，僅日線圖顯示；時線時間軸型別也不相容）──
     // t.exit_label 可覆寫出場文字（自訂訊號實驗室用「賣出」而非出場原因）
+    let declutterMarkers = null   // 供 rAF / resize / cleanup 引用（無標記時維持 null）
     if (interval === '1d' && showMarkers && trades && trades.length > 0) {
       // 出場標記用「真實出場原因」（停損/停利/訊號出場），與交易明細表一致；
       // 舊版用賺賠推斷成「獲利/停損」——訊號出場也可能賺錢，會標錯原因。
       const EXIT_MARK = { stop_loss: '停損', take_profit: '停利', signal_exit: '訊號出場' }
       // 標記上的價位自適應小數（低價幣不能被 toFixed(0) 捨成 0）
       const fmtPx = (v) => { const n = Number(v); return !(n > 0) ? '' : n < 1 ? n.toFixed(3) : n < 100 ? n.toFixed(1) : n.toFixed(0) }
+      // 報酬率精簡：≥10% 取整、其餘 1 位，避免「-6.282%」這種長字串塞爆版面
+      const fmtPct = (v) => { const n = Number(v); if (!Number.isFinite(n)) return ''; return `${n > 0 ? '+' : ''}${Math.abs(n) >= 10 ? n.toFixed(0) : n.toFixed(1)}%` }
       const markers = []
       trades.forEach(t => {
         if (t.entry_date) {
@@ -241,11 +244,37 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
         if (t.exit_date) {
           const label = t.exit_label ?? EXIT_MARK[t.exit_reason] ?? (t.profit ? '獲利' : '停損')
           const px = fmtPx(t.exit_price)
-          markers.push({ time: t.exit_date, position: 'aboveBar', color: t.profit ? '#60a5fa' : '#ef4444', shape: 'arrowDown', text: `${label}${px ? ` $${px}` : ''} ${t.return_pct > 0 ? '+' : ''}${t.return_pct}%` })
+          const pct = fmtPct(t.return_pct)
+          markers.push({ time: t.exit_date, position: 'aboveBar', color: t.profit ? '#60a5fa' : '#ef4444', shape: 'arrowDown', text: `${label}${px ? ` $${px}` : ''}${pct ? ` ${pct}` : ''}` })
         }
       })
       markers.sort((a, b) => a.time.localeCompare(b.time))
-      createSeriesMarkers(candleSeries, markers)
+
+      // 箭頭恆亮；文字依縮放疏密自動取捨——買點(下)、賣點(上)各自成一垂直區，
+      // 由左到右貪婪保留互不重疊的標籤，其餘只留箭頭。放大時標籤自然變多、縮到
+      // 「全部」時只留稀疏幾個，避免整片文字糊成一團（原本每筆都硬印才會壅擠）。
+      const markerApi = createSeriesMarkers(candleSeries, markers)
+      const estWidth = (text) => {   // 概估標籤像素寬（CJK/全形字 12px、其餘 7px）
+        let w = 12
+        for (const ch of text) {
+          const c = ch.charCodeAt(0)
+          w += (c >= 0x3000 && c <= 0x9fff) || (c >= 0xff00 && c <= 0xffef) ? 12 : 7
+        }
+        return w
+      }
+      declutterMarkers = () => {
+        const ts = chart.timeScale()
+        const W = containerRef.current?.clientWidth ?? 800
+        const edge = { aboveBar: -Infinity, belowBar: -Infinity }   // 各區已佔用的最右緣
+        markerApi.setMarkers(markers.map(m => {
+          const x = ts.timeToCoordinate(m.time)
+          if (x == null || x < 0 || x > W) return { ...m, text: '' }   // 畫面外：只留箭頭
+          const half = estWidth(m.text) / 2
+          if (x - half > edge[m.position] + 8) { edge[m.position] = x + half; return m }
+          return { ...m, text: '' }   // 與前一個標籤重疊：退成純箭頭
+        }))
+      }
+      chart.timeScale().subscribeVisibleLogicalRangeChange(declutterMarkers)
     }
 
     // ── 滑鼠懸停資訊框：游標指到哪根 K 棒，就顯示那根的完整數據 ─────────
@@ -265,6 +294,12 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
     // 價位自適應小數位（低價幣 DOGE $0.07 不能捨成 0）
     const fp = (v) => v == null ? '—' : v < 1 ? v.toFixed(4) : v < 100 ? v.toFixed(2) : Math.round(v).toLocaleString()
     const fpct = (v) => v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`
+    // 已開啟的各條均線在每根 K 棒的值 → 懸停框以「線色」標示，一眼對得上圖上哪條線
+    // （週期/EMA·SMA/顏色都與主圖那幾條線同源，取代舊的固定 MA20/MA60——那兩條其實沒畫在圖上）
+    const maLookup = mas.filter(m => m.on).map(m => ({
+      label: `${maType}${m.p}`, color: m.color,
+      map: new Map(movingAvg(P, m.p, maType).map(d => [String(d.time), d.value])),
+    }))
 
     chart.subscribeCrosshairMove(param => {
       const tip = tooltipRef.current
@@ -294,13 +329,22 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
         ['振幅', fpct(amp).replace('+', '')],
         ['成交量', p.volume != null ? Math.round(p.volume).toLocaleString() + (volRatio ? `（${volRatio.toFixed(1)}x 均量）` : '') : '—'],
       ]
-      if (ind?.RSI != null)  rows.push(['RSI', ind.RSI.toFixed(1)])
-      if (ind?.MA20 != null) rows.push(['MA20', `$${fp(ind.MA20)}`])
-      if (ind?.MA60 != null) rows.push(['MA60', `$${fp(ind.MA60)}`])
+      // 均線各列帶第三元素＝線色，讓標籤與圖上那條線同色
+      maLookup.forEach(ma => {
+        const v = ma.map.get(timeKey(param.time))
+        if (v != null) rows.push([ma.label, `$${fp(v)}`, ma.color])
+      })
+      if (ind?.RSI != null)  rows.push(['RSI', ind.RSI.toFixed(1), '#34d399'])   // 綠＝RSI 線色
       if (bbPct != null)     rows.push(['布林位置', `${bbPct.toFixed(0)}%（0=下軌 100=上軌）`])
 
+      // 第三元素 color：有線色的列 → 標籤上色＋小色點（像圖例），對得上圖上那條線
       tip.innerHTML = `<div class="ct-date">${label}</div>` +
-        rows.map(([k, v]) => `<div class="ct-row"><span class="ct-k">${k}</span><span class="ct-v">${v}</span></div>`).join('')
+        rows.map(([k, v, color]) => {
+          const key = color
+            ? `<span class="ct-k" style="color:${color}"><i class="ct-dot" style="background:${color}"></i>${k}</span>`
+            : `<span class="ct-k">${k}</span>`
+          return `<div class="ct-row">${key}<span class="ct-v">${v}</span></div>`
+        }).join('')
       tip.style.display = 'block'
       // 位置跟著游標；靠右半邊時翻到左側，避免出界
       const w = containerRef.current?.clientWidth ?? 0
@@ -316,21 +360,32 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
         const panes = chart.panes()
         if (oscOn && panes[1]) panes[1].setHeight(160)
       } catch { /* 舊版無 panes API */ }
+      if (declutterMarkers) declutterMarkers()   // 首次排版完成後算一次標籤疏密
     })
 
     chart.timeScale().scrollToPosition(-5, false)
 
-    const handleResize = () => {
-      if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth })
+    // 尺寸同步：圖表跟著「容器實際大小」走——容器由 CSS 拉伸(儀表板欄位/彈窗)時，
+    // 高度就等於容器高，達成「左圖高度＝右欄高度」；容器沒定高時退回固定高度。
+    const fallbackH = oscOn ? (compact ? 420 : 560) : (compact ? 300 : 420)
+    const applySize = () => {
+      const el = containerRef.current
+      if (!el) return
+      chart.applyOptions({ width: el.clientWidth, height: el.clientHeight || fallbackH })
+      if (declutterMarkers) declutterMarkers()   // 尺寸變了、座標跟著變，重算標籤疏密
     }
-    window.addEventListener('resize', handleResize)
+    const ro = new ResizeObserver(applySize)
+    if (containerRef.current) ro.observe(containerRef.current)
+    window.addEventListener('resize', applySize)
     return () => {
       cancelAnimationFrame(raf)
-      window.removeEventListener('resize', handleResize)
+      ro.disconnect()
+      window.removeEventListener('resize', applySize)
+      if (declutterMarkers) chart.timeScale().unsubscribeVisibleLogicalRangeChange(declutterMarkers)
       if (tooltipRef.current) tooltipRef.current.style.display = 'none'   // 重建圖表時清掉殘留的資訊框
       chart.remove()
     }
-  }, [prices, indicators, trades, maType, mas, showBB, showVol, showMarkers, osc, interval])
+  }, [prices, indicators, trades, maType, mas, showBB, showVol, showMarkers, osc, interval, compact])
 
   if (!prices || prices.length === 0) {
     return (
@@ -342,7 +397,7 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
   }
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div className="chart-root" style={{ position: 'relative' }}>
             <div className="chart-toolbar">
         <span className="toolbar-lbl">圖層：</span>
         <button className="matype-btn" onClick={() => setMaType(t => t === 'SMA' ? 'EMA' : 'SMA')} title="切換 簡單(SMA)/指數(EMA) 移動平均">均線:{maType}</button>

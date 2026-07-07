@@ -21,7 +21,7 @@ import {
   ResponsiveContainer, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, Legend,
 } from 'recharts'
-import IndicatorCards from './IndicatorCards'
+import PctInput from './PctInput'
 
 // 資產倍數曲線圖：X 軸是第幾筆交易，Y 軸是資產倍數（1.0 = 起始本金）
 function EquityCurve({ data }) {
@@ -251,7 +251,7 @@ function VerdictBanner({ data }) {
 
 // 買賣點規則 + 三基準公正比較 + 驗證方法白話說明
 // 目的：讓決策者分得出「賺錢是選時的功勞，還是市場本來就在漲」，且每一步可稽核
-function MethodologySection({ data }) {
+function MethodologySection({ data, hideRules = false }) {
   const m = data?.metrics
   if (!m || m.error) return null
   const rb  = data.random_baseline           // 舊版後端無此欄位 → 優雅降級
@@ -272,13 +272,16 @@ function MethodologySection({ data }) {
         <Info text="把買賣規則、比較基準、驗證方法攤開講清楚：賺錢要分得出是「選時機的功勞」還是「市場本來就在漲」。" />
       </div>
 
-      {/* 買賣點規則（白話、與 src/backtest.py 的實際邏輯一字一句對齊）*/}
-      <div className="method-rules">
-        <div><b>買點</b>：6 因子信心分數 ≥65（訊號翻多）→ <b>隔天開盤</b>買入</div>
-        <div><b>賣點</b>（先到先賣）：當日跌到停損價／漲到停利價 → 以觸發價賣出；訊號翻空（分數 ≤35）→ 隔天開盤賣出</div>
-        <div><b>成本</b>：每筆買賣皆已扣手續費與滑價（雙邊）</div>
-        <div className="method-rules-more">完整的 6 因子計分明細與「這顆幣現在幾分」，見上方「買賣判斷依據」面板。</div>
-      </div>
+      {/* 買賣點規則（白話、與 src/backtest.py 的實際邏輯一字一句對齊）。
+          hideRules：併入「買賣策略」面板時，規則已在上方「進出場規則」講過，這裡不重複。 */}
+      {!hideRules && (
+        <div className="method-rules">
+          <div><b>買點</b>：6 因子信心分數 ≥65（訊號翻多）→ <b>隔天開盤</b>買入</div>
+          <div><b>賣點</b>（先到先賣）：當日跌到停損價／漲到停利價 → 以觸發價賣出；訊號翻空（分數 ≤35）→ 隔天開盤賣出</div>
+          <div><b>成本</b>：每筆買賣皆已扣手續費與滑價（雙邊）</div>
+          <div className="method-rules-more">完整的 6 因子計分明細與「這顆幣現在幾分」，見上方「進出場規則」。</div>
+        </div>
+      )}
 
       {/* 三基準比較 */}
       <table className="mini-table">
@@ -329,18 +332,11 @@ function MethodologySection({ data }) {
 // 回測資料與參數由父層(App)集中管理,面板為受控元件:
 //   - 與 K 線買賣標記共用同一份回測(不再各抓一次)
 //   - 調整停損/停利時,K 線上的箭頭會跟著一起變
-// 一鍵參數組合：新手不用懂四個 %，選風格就好（專業模式仍可微調下拉）
-const PRESETS = [
-  { key: '保守', hint: '小賠就跑、小賺就收',   p: { stopLoss: -0.05, takeProfit: 0.10, feeRate: 0.001, slippage: 0.001 } },
-  { key: '平衡', hint: '預設參數',             p: { stopLoss: -0.06, takeProfit: 0.20, feeRate: 0.001, slippage: 0.0005 } },
-  { key: '積極', hint: '拉大停損停利抱久一點', p: { stopLoss: -0.10, takeProfit: 0.30, feeRate: 0.001, slippage: 0.0005 } },
-]
-
-export default function BacktestPanel({ signal, data, loading, params, onParamsChange }) {
+// 手續費/滑價不再開放調整(後台用合理預設值計算,結果仍有扣成本);只留停損/停利供輸入。
+// hideParams：併入「買賣策略」面板後,停損/停利輸入已移到上方「出場規則」,這裡不再重複顯示。
+export default function BacktestPanel({ data, loading, params, onParamsChange, hideParams = false }) {
   const [showDetail, setShowDetail] = useState(false)   // 交易明細預設收起
-  const activePreset = PRESETS.find(pr =>
-    pr.p.stopLoss === params.stopLoss && pr.p.takeProfit === params.takeProfit &&
-    pr.p.feeRate === params.feeRate && pr.p.slippage === params.slippage)?.key
+  const [showValidation, setShowValidation] = useState(false)   // 樣本內外/參數掃描深水區,預設收起
 
   const m = data?.metrics
   // beatsHold=true 表示策略報酬 > 單純買入持有，用來決定顯示綠色還是警告色
@@ -350,64 +346,35 @@ export default function BacktestPanel({ signal, data, loading, params, onParamsC
 
   return (
     <section className="backtest-section">
-      {/* 標題列 */}
+      {/* 標題列（併入「買賣策略」面板時改標題、且不重複顯示停損停利——那已移到上方出場規則）*/}
       <div className="backtest-header">
         <div>
-          <h2 className="section-title">策略回測</h2>
-          <p className="section-subtitle">模擬過去 5 年依訊號買賣的假設績效</p>
+          <h2 className="section-title">{hideParams ? '回測驗證：這樣進出過去會賺多少 / 賠多少' : '策略回測'}</h2>
+          <p className="section-subtitle">
+            {hideParams
+              ? '用你在上方設定的停損／停利，回測過去 5 年依訊號買賣的假設績效'
+              : '模擬過去 5 年依訊號買賣的假設績效'}
+          </p>
         </div>
-        <div className="param-col">
-        <div className="preset-row">
-          <span className="preset-lbl">參數風格：</span>
-          {PRESETS.map(pr => (
-            <button key={pr.key} title={pr.hint}
-              className={`preset-btn ${activePreset === pr.key ? 'active' : ''}`}
-              onClick={() => onParamsChange(pr.p)}>
-              {pr.key}
-            </button>
-          ))}
-          {!activePreset && <span className="preset-custom">自訂中</span>}
-        </div>
-        <div className="param-row">
-          <label>停損<Info text="跌幅達多少就認賠出場，保護本金。例如 -6% = 買進後跌 6% 就賣。" />
-            <select value={params.stopLoss} onChange={e => onParamsChange({ stopLoss: +e.target.value })}>
-              {[-0.03, -0.05, -0.06, -0.08, -0.10, -0.15].map(v => (
-                <option key={v} value={v}>{(v * 100).toFixed(0)}%</option>
-              ))}
-            </select>
-          </label>
-          <label>停利<Info text="漲幅達多少就獲利了結。例如 +20% = 買進後漲 20% 就賣。" />
-            <select value={params.takeProfit} onChange={e => onParamsChange({ takeProfit: +e.target.value })}>
-              {[0.10, 0.15, 0.20, 0.25, 0.30, 0.50].map(v => (
-                <option key={v} value={v}>+{(v * 100).toFixed(0)}%</option>
-              ))}
-            </select>
-          </label>
-          <label>手續費<Info text="每次買或賣交易所收取的成本，單邊計算。一般現貨約 0.1%。" />
-            <select value={params.feeRate} onChange={e => onParamsChange({ feeRate: +e.target.value })}>
-              {[0, 0.0005, 0.001, 0.002].map(v => (
-                <option key={v} value={v}>{(v * 100).toFixed(2)}%</option>
-              ))}
-            </select>
-          </label>
-          <label>滑價<Info text="實際成交價與預期價的落差（市場波動造成）。模擬越保守可設越高。" />
-            <select value={params.slippage} onChange={e => onParamsChange({ slippage: +e.target.value })}>
-              {[0, 0.0005, 0.001, 0.0025, 0.005].map(v => (
-                <option key={v} value={v}>{(v * 100).toFixed(2)}%</option>
-              ))}
-            </select>
-          </label>
-        </div>
-        </div>
+        {!hideParams && (
+          <div className="param-col">
+            <div className="param-row">
+              <label>停損<Info text="跌幅達多少就認賠出場，保護本金。可輸入 1~30；例如 6 = 買進後跌 6% 就賣。" />
+                <PctInput
+                  value={Math.round(Math.abs(params.stopLoss) * 100)} sign="-" min={1} max={30}
+                  onCommit={pct => onParamsChange({ stopLoss: -pct / 100 })}
+                />
+              </label>
+              <label>停利<Info text="漲幅達多少就獲利了結。可輸入 5~100；例如 20 = 買進後漲 20% 就賣。" />
+                <PctInput
+                  value={Math.round(params.takeProfit * 100)} sign="+" min={5} max={100}
+                  onCommit={pct => onParamsChange({ takeProfit: pct / 100 })}
+                />
+              </label>
+            </div>
+          </div>
+        )}
       </div>
-
-      {/* 策略依據的指標(白話卡)— 不等回測,立即顯示 */}
-      {signal?.factors && (
-        <div className="bt-indicators">
-          <div className="key-chart-title">策略依據的指標(即時解讀)</div>
-          <IndicatorCards factors={signal.factors} rsi={signal.rsi} />
-        </div>
-      )}
 
       {loading && <div className="chart-empty">計算中…</div>}
 
@@ -471,13 +438,35 @@ export default function BacktestPanel({ signal, data, loading, params, onParamsC
             </div>
           </div>
 
-          {/* 買賣點規則 + 三基準比較（買入持有／隨機進場）+ 驗證方法白話 */}
-          <MethodologySection data={data} />
-
-          <div className="backtest-grid">
-            <ValidationTable validation={data.validation} />
-            <SweepTable rows={data.parameter_sweep} />
-          </div>
+          {/* 三基準比較（買入持有／隨機進場）+ 樣本內外 + 參數掃描 = 回測「深水區」。
+              併入「買賣策略」面板時預設收起（規則已在上方講過，這裡 hideRules 不重複）；
+              單獨使用時維持全部攤開。 */}
+          {hideParams ? (
+            <>
+              <button className="detail-toggle" onClick={() => setShowValidation(v => !v)}>
+                {showValidation
+                  ? '▲ 收起完整回測驗證'
+                  : '▼ 展開完整回測驗證（三基準比較・樣本內外・參數掃描）'}
+              </button>
+              {showValidation && (
+                <>
+                  <MethodologySection data={data} hideRules />
+                  <div className="backtest-grid">
+                    <ValidationTable validation={data.validation} />
+                    <SweepTable rows={data.parameter_sweep} />
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <MethodologySection data={data} />
+              <div className="backtest-grid">
+                <ValidationTable validation={data.validation} />
+                <SweepTable rows={data.parameter_sweep} />
+              </div>
+            </>
+          )}
 
           {/* 資產曲線 */}
           <div style={{ marginTop: 16 }}>

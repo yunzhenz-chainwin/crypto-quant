@@ -17,6 +17,7 @@
  */
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { simulateRules, DEFAULT_RULES } from '../lib/signalLab'
+import PctInput from './PctInput'
 
 // ── 7 因子完整計分表（與 src/scoring.py 一字一句對齊；改規則時兩邊同步）──
 const SCORING_TABLE = [
@@ -33,14 +34,19 @@ const FACTOR_ORDER = ['RSI', 'MACD', 'MA', 'MA200', 'Volume', 'BB', 'News']
 const FACTOR_WEIGHT = { RSI: '±20', MACD: '±18', MA: '±15', MA200: '±10', Volume: '±7', BB: '±12', News: '參考' }
 // 計算式用的短名
 const FACTOR_SHORT = { RSI: 'RSI', MACD: 'MACD', MA: '均線', MA200: 'MA200', Volume: '量', BB: '布林', News: '新聞' }
+// 因子 key → 完整計分規則（SCORING_TABLE 與 FACTOR_ORDER 同序），供「規則＋即時得分」合併表用
+const RULE_BY_KEY = Object.fromEntries(FACTOR_ORDER.map((k, i) => [k, SCORING_TABLE[i]?.rules]))
 
 const fmtSigned = (v) => (v > 0 ? `+${v}` : `${v}`)
 const scoreColor = (v) => (v > 0 ? '#22c55e' : v < 0 ? '#ef4444' : '#64748b')
 
-export default function SignalRulesPanel({ signal, prices, indicators, interval, onTrades }) {
-  const [showFullTable, setShowFullTable] = useState(false)
+export default function SignalRulesPanel({ signal, prices, indicators, interval, onTrades, part = 'all', params, onParamsChange }) {
+  const [showWhy, setShowWhy] = useState(false)   // 計分明細（規則＋即時得分合併表；預設收起）
   const [labOn, setLabOn]   = useState(false)
   const [rules, setRules]   = useState(DEFAULT_RULES)
+  // part：'rules'=只渲染進出場規則、'lab'=只渲染自訂實驗室、'all'=兩者（獨立使用時）。
+  // 只有含實驗室的實例(lab/all)才負責把自訂交易疊到 K 線圖，避免兩個實例搶著寫 onTrades。
+  const isLab = part !== 'rules'
 
   // ── 實驗室模擬（純前端、即時；區間 = 目前圖表載入的資料）────────────
   const result = useMemo(
@@ -52,11 +58,15 @@ export default function SignalRulesPanel({ signal, prices, indicators, interval,
   const onTradesRef = useRef(onTrades)
   useEffect(() => { onTradesRef.current = onTrades }, [onTrades])
   useEffect(() => {
+    if (!isLab) return   // 純規則實例不碰圖上標記
     // 開啟：有結果給結果、沒交易給 []（圖上清空=讓使用者看見「這組規則沒訊號」）
     // 關閉：給 null → 圖表還原成正式回測的買賣標記
-    onTradesRef.current(labOn && interval === '1d' ? (result?.trades ?? []) : null)
-  }, [result, labOn, interval])
-  useEffect(() => () => onTradesRef.current(null), [])   // 卸載（收合/切頁）時還原
+    onTradesRef.current?.(labOn && interval === '1d' ? (result?.trades ?? []) : null)
+  }, [result, labOn, interval, isLab])
+  useEffect(() => {
+    if (!isLab) return undefined
+    return () => onTradesRef.current?.(null)   // 卸載（收合/切頁）時還原
+  }, [isLab])
 
   const patch = (key, sub) => setRules(r => ({ ...r, [key]: { ...r[key], ...sub } }))
 
@@ -74,7 +84,8 @@ export default function SignalRulesPanel({ signal, prices, indicators, interval,
   return (
     <section className="rules-panel">
 
-      {/* ═══ A. 系統訊號的買賣依據 ═══════════════════════════════════ */}
+      {/* ═══ A. 進出場規則（part='rules'/'all'）══════════════════════ */}
+      {part !== 'lab' && (
       <div className="rules-block">
         <div className="rules-block-title">系統訊號怎麼判斷買進賣出（回測與圖上箭頭的依據）</div>
 
@@ -91,9 +102,21 @@ export default function SignalRulesPanel({ signal, prices, indicators, interval,
           </div>
           <div className="rules-step">
             <span className="rules-step-num">3</span>
-            <div><b>賣出點</b>（三擇一、先到先出）：① 觸及<b>停損</b>價（預設 −6%）
-            ② 觸及<b>停利</b>價（預設 +20%）③ 分數<b style={{ color: '#ef4444' }}> ≤35 轉「偏空」</b>的隔天開盤。
-            停損停利可在下方「策略回測」面板調整，圖上箭頭會同步變。</div>
+            <div>
+              <b>賣出點</b>（三擇一、先到先出）：① 觸及<b>停損</b>價 ② 觸及<b>停利</b>價
+              ③ 分數<b style={{ color: '#ef4444' }}> ≤35 轉「偏空」</b>的隔天開盤。
+              {onParamsChange && params && (
+                <span className="rules-stoptake">
+                  <span className="rules-stoptake-lbl">停損</span>
+                  <PctInput value={Math.round(Math.abs(params.stopLoss) * 100)} sign="-" min={1} max={30}
+                            onCommit={pct => onParamsChange({ stopLoss: -pct / 100 })} />
+                  <span className="rules-stoptake-lbl">停利</span>
+                  <PctInput value={Math.round(params.takeProfit * 100)} sign="+" min={5} max={100}
+                            onCommit={pct => onParamsChange({ takeProfit: pct / 100 })} />
+                  <span className="rules-stoptake-note">← 自己設；改這裡，下方回測與圖上箭頭同步變</span>
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -129,59 +152,55 @@ export default function SignalRulesPanel({ signal, prices, indicators, interval,
               {50 + factorSum !== score && <span className="rules-live-clip">超界夾回 0~100</span>}
             </div>
 
-            <table className="mini-table rules-factor-table">
-              <thead><tr>
-                <th>指標</th>
-                <th title="權重＝這個因子最多能加或減幾分（詳見下方完整計分規則表）">權重</th>
-                <th>這根的實際情況（觸發哪條規則）</th><th>得分</th>
-                <th title="從 50 開始逐列累加後的分數">累計</th>
-              </tr></thead>
-              <tbody>
-                <tr className="rules-factor-base">
-                  <td>起始基準</td><td>—</td><td>中立起點（多空分界）</td><td>50</td><td>50</td>
-                </tr>
-                {shownFactors.map(k => (
-                  <tr key={k}>
-                    <td>{factors[k].label}</td>
-                    <td className="rules-factor-w">{FACTOR_WEIGHT[k] ?? '—'}</td>
-                    <td>{factors[k].note}</td>
-                    <td style={{ color: scoreColor(factors[k].score), fontWeight: 600 }}>
-                      {fmtSigned(factors[k].score)}
-                    </td>
-                    <td className="rules-factor-run">{runningOf[k]}</td>
+            {/* 一張合併表：完整計分規則 ＋ 這顆幣現在踩到哪條、得幾分、累計（原本上下兩張表合而為一）*/}
+            <button className="rules-why-toggle" onClick={() => setShowWhy(v => !v)}>
+              {showWhy ? '▲ 收起計分明細' : '▼ 展開計分明細（完整規則 ＋ 這顆幣現在的得分）'}
+            </button>
+            {showWhy && (
+            <div className="rules-table-scroll">
+              <table className="mini-table rules-merged-table two-row">
+                <thead><tr>
+                  <th>指標</th>
+                  <th title="這個因子最多能加或減幾分">權重</th>
+                  <th>這根觸發</th>
+                  <th>得分</th>
+                  <th title="從 50 逐列累加後的分數">累計</th>
+                </tr></thead>
+                <tbody>
+                  <tr className="rules-factor-base">
+                    <td>起始基準</td><td>—</td><td>中立起點（多空分界）</td><td>50</td><td>50</td>
                   </tr>
-                ))}
-                <tr className="rules-factor-total">
-                  <td>合計</td>
-                  <td>0~100</td>
-                  <td>{stanceZh}（分數 ≥65 偏多、≤35 偏空）</td>
-                  <td colSpan={2}><b style={{ color: totalColor }}>＝ {score} 分</b></td>
-                </tr>
-              </tbody>
-            </table>
+                  {shownFactors.map(k => ([
+                    <tr key={`m-${k}`} className="rmt-main">
+                      <td>{factors[k].label}</td>
+                      <td className="rules-factor-w">{FACTOR_WEIGHT[k] ?? '—'}</td>
+                      <td>{factors[k].note}</td>
+                      <td style={{ color: scoreColor(factors[k].score), fontWeight: 600 }}>
+                        {fmtSigned(factors[k].score)}
+                      </td>
+                      <td className="rules-factor-run">{runningOf[k]}</td>
+                    </tr>,
+                    <tr key={`r-${k}`} className="rmt-rule">
+                      <td colSpan={5}><span className="rmt-rule-lbl">計分規則：</span>{RULE_BY_KEY[k] ?? '—'}</td>
+                    </tr>,
+                  ]))}
+                  <tr className="rules-factor-total">
+                    <td>合計</td>
+                    <td>0~100</td>
+                    <td>{stanceZh}（≥65 偏多、≤35 偏空）</td>
+                    <td colSpan={2}><b style={{ color: totalColor }}>＝ {score} 分</b></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            )}
           </div>
         )}
-
-        <button className="rules-table-toggle" onClick={() => setShowFullTable(v => !v)}>
-          {showFullTable ? '▲ 收起完整計分規則表' : '▼ 展開完整計分規則表（6 因子加減分明細）'}
-        </button>
-        {showFullTable && (
-          <table className="mini-table rules-scoring-table">
-            <thead><tr><th>因子</th><th>權重</th><th>計分規則（滿足哪條加減幾分）</th></tr></thead>
-            <tbody>
-              {SCORING_TABLE.map(r => (
-                <tr key={r.factor}>
-                  <td>{r.factor}</td>
-                  <td>{r.weight}</td>
-                  <td className="rules-scoring-detail">{r.rules}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
       </div>
+      )}
 
-      {/* ═══ B. 自訂買賣點實驗室 ════════════════════════════════════ */}
+      {/* ═══ B. 自訂買賣點實驗室（part='lab'/'all'）════════════════ */}
+      {part !== 'rules' && (
       <div className="rules-block">
         <div className="rules-block-title lab-title-row">
           <span>自訂買賣點實驗室——選指標、填數值，馬上看買賣點與歷史績效</span>
@@ -331,6 +350,7 @@ export default function SignalRulesPanel({ signal, prices, indicators, interval,
           </>
         )}
       </div>
+      )}
     </section>
   )
 }

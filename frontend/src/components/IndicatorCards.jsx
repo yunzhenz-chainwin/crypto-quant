@@ -68,3 +68,32 @@ export default function IndicatorCards({ factors, rsi }) {
     </div>
   )
 }
+
+// 指標詳解（點右欄「指標即時解讀」→ 每個指標的讀數、對信心分數的加減、怎麼看）
+export function IndicatorDetail({ factors }) {
+  if (!factors || Object.keys(factors).length === 0) return <div className="chart-empty">尚無指標資料</div>
+  const keys = FACTOR_ORDER.filter(k => factors[k])
+  return (
+    <div className="ind-detail">
+      <div className="ind-detail-hd">每個指標現在的讀數、對「信心分數」的加減、以及怎麼看</div>
+      {keys.map(k => {
+        const f = factors[k]
+        const meta = FACTOR_META[k] ?? { name: f.label, tip: '' }
+        const color = f.score > 0 ? '#22c55e' : f.score < 0 ? '#ef4444' : '#64748b'
+        const dir = f.score > 0 ? '偏多加分' : f.score < 0 ? '偏空扣分' : '中性（不加不減）'
+        return (
+          <div className="ind-detail-row" key={k}>
+            <div className="ind-detail-top">
+              <span className="ind-detail-name">{meta.name}</span>
+              <span className="ind-detail-score" style={{ color }}>
+                {f.score > 0 ? '+' : ''}{f.score} 分 · {dir}
+              </span>
+            </div>
+            <div className="ind-detail-note" style={{ color }}>{f.note}</div>
+            {meta.tip && <div className="ind-detail-tip">怎麼看：{meta.tip}</div>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}

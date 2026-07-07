@@ -61,6 +61,9 @@ export const fetchBacktest = (
 ) =>
   get(`/backtest/${symbol}?stop_loss=${stopLoss}&take_profit=${takeProfit}&fee_rate=${feeRate}&slippage_rate=${slippageRate}`)
 
+// 所有幣種『已入庫』的回測績效摘要（依總報酬排序），供市場總覽當第二評估標準
+export const fetchBacktestSummary = () => get('/backtest/db/summary')
+
 // 取得恐懼貪婪指數（最近 N 天）
 export const fetchFearGreed = (limit = 30) =>
   get(`/sentiment/fear_greed?limit=${limit}`)

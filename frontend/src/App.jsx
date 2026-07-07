@@ -12,14 +12,15 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import {
   fetchSymbols, fetchAllSignals, fetchOHLC, fetchStatus, fetchIntervals,
-  fetchIndicators, fetchBacktest, fetchFearGreed,   // fetchCorrelation 暫停（幣種相關性分析）
+  fetchIndicators, fetchBacktest, fetchBacktestSummary, fetchFearGreed,   // fetchCorrelation 暫停（幣種相關性分析）
 } from './api/client'
 import StatusBar        from './components/StatusBar'
 import CandlestickChart from './components/CandlestickChart'
-import HeroSignal       from './components/HeroSignal'
+import HeroSignal        from './components/HeroSignal'
+import IndicatorCards   from './components/IndicatorCards'
+import RecommendationCard from './components/RecommendationCard'
 import MarketOverview   from './components/MarketOverview'
 import MarketSummary    from './components/MarketSummary'
-import SignalRulesPanel from './components/SignalRulesPanel'
 // import BotWidget     from './components/BotWidget'   // 2026-07-06 暫時下架：使用者確定為主管/老闆，聊天小幫手先隱藏（要恢復連同底部掛載一起取消註解）
 // import OnboardingTour   from './components/OnboardingTour' // 2026-07-06 暫停新手導覽
 import GlossaryModal    from './components/GlossaryModal'
@@ -28,8 +29,8 @@ import { coinName }     from './constants/coins'
 // 折疊面板動態載入（code splitting #29）：首屏不下載 recharts 等重依賴，
 // 進入詳細頁/展開面板時才抓對應 chunk（Suspense 顯示輕量載入字樣）。
 // const CorrelationHeatmap = lazy(() => import('./components/CorrelationHeatmap'))  // 2026-07-06 暫停幣種相關性分析
-const BacktestPanel      = lazy(() => import('./components/BacktestPanel'))
 const SentimentPanel     = lazy(() => import('./components/SentimentPanel'))
+const StrategyPanel      = lazy(() => import('./components/StrategyPanel'))   // 詳細資訊彈窗用（計分明細＋回測表格＋實驗室）
 // const AIAnalystPanel     = lazy(() => import('./components/AIAnalystPanel')) // 2026-07-06 暫停 AI 智能分析
 const panelFallback = <div className="chart-empty">面板載入中…</div>
 
@@ -53,9 +54,7 @@ const POLL_INTERVAL = 60 * 1000  // 資料版本輪詢：每 60 秒
 
 // 詳細頁可自由開關的區塊（預設全開；偏好存 localStorage，取代固定塞滿的版面）
 const PANELS = [
-  { key: 'rules',     label: '買賣判斷依據' },
-  { key: 'backtest',  label: '策略回測' },
-  { key: 'sentiment', label: '市場情緒/新聞' },   // 新聞移到最後
+  { key: 'sentiment', label: '市場情緒/新聞' },
   // { key: 'correlation', label: '幣種相關性' },  // 2026-07-06 暫停幣種相關性分析
 ]
 
@@ -79,21 +78,23 @@ export default function App() {
   const [pendingStart, setPendingStart] = useState('')
   const [pendingEnd,   setPendingEnd]   = useState(TODAY)
   const [signals,     setSignals]     = useState([])
+  const [btSummary,   setBtSummary]   = useState([])       // 各幣回測績效摘要（市場總覽第二評估標準）
   const [fearGreed,   setFearGreed]   = useState(null)
   const [lastUpdated, setLastUpdated] = useState(0)
   const [refreshing,  setRefreshing]  = useState(false)
   const [ohlc,        setOhlc]        = useState([])
   const [indicators,  setIndicators]  = useState([])
   const [backtest,    setBacktest]    = useState(null)
-  const [btParams,    setBtParams]    = useState({ stopLoss: -0.06, takeProfit: 0.20, feeRate: 0.001, slippage: 0.0005 })
+  // 停損/停利參數（可在「詳細資訊」彈窗調整；供回測、右欄綜合建議、圖上箭頭用）
+  const [btParams, setBtParams] = useState({ stopLoss: -0.06, takeProfit: 0.20, feeRate: 0.001, slippage: 0.0005 })
   const [btLoading,   setBtLoading]   = useState(false)
   // const [correlation, setCorrelation] = useState(null)                  // 2026-07-06 暫停幣種相關性分析
   const [dataVersion, setDataVersion] = useState('')        // 後端資料版本（變了=有新資料）
   // const [showCorrelation, setShowCorrelation] = useState(false)         // 2026-07-06 暫停幣種相關性分析
-  const [showSentiment,   setShowSentiment]   = useState(false)
-  const [showBacktest,    setShowBacktest]    = useState(false)
+  const [showSentiment,   setShowSentiment]   = useState(true)   // 市場情緒/新聞（預設展開，讓它一眼可見）
+  const [chartZoom,       setChartZoom]       = useState(false)  // 蠟燭圖「放大」全螢幕彈窗
+  const [detailView,      setDetailView]      = useState(null)   // 「詳細資訊」彈窗內容：null / 'score' / 'indicators' / 'backtest'
   // const [showAI,          setShowAI]          = useState(true) // 2026-07-06 暫停 AI 智能分析
-  const [showRules,       setShowRules]       = useState(true)   // 買賣判斷依據面板（預設展開）
   // 詳細頁「顯示哪些區塊」偏好（預設全開，使用者可關掉不看的；存 localStorage）
   const [panelPrefs,      setPanelPrefs]      = useState(() => {
     try { return JSON.parse(localStorage.getItem('cq_panels') || '{}') } catch { return {} }
@@ -113,12 +114,14 @@ export default function App() {
   const refreshMarket = useCallback(async (showSpinner = true) => {
     if (showSpinner) setRefreshing(true)
     try {
-      const [sigs, fg] = await Promise.all([
+      const [sigs, fg, bts] = await Promise.all([
         fetchAllSignals(),
         fetchFearGreed(1),
+        fetchBacktestSummary().catch(() => []),   // 回測摘要失敗不該擋住訊號載入 → 降級空陣列
       ])
       setSignals(sigs)
       setFearGreed(fg?.[0] ?? null)
+      setBtSummary(Array.isArray(bts) ? bts : [])
       setLastUpdated(Date.now())
       setApiError(false)
     } catch {
@@ -212,6 +215,14 @@ export default function App() {
     return () => { alive = false }
   }, [active, btParams, view])
 
+  // 任一彈窗（放大圖 / 詳細資訊）開啟時：Esc 關閉
+  useEffect(() => {
+    if (!chartZoom && !detailView) return
+    const onKey = (e) => { if (e.key === 'Escape') { setChartZoom(false); setDetailView(null) } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [chartZoom, detailView])
+
   const handleSelectCoin = (symbol) => {
     setActive(symbol)
     setView('detail')
@@ -292,7 +303,7 @@ export default function App() {
       {/* ── 市場總覽模式 ────────────────────────────────────────────────── */}
       {view === 'overview' && (
         <div className="overview-layout">
-          <MarketOverview signals={signals} onSelect={handleSelectCoin} />
+          <MarketOverview signals={signals} backtests={btSummary} onSelect={handleSelectCoin} />
         </div>
       )}
 
@@ -320,11 +331,14 @@ export default function App() {
               </div>
             </div>
 
-            <HeroSignal signal={activeSignal} symbol={active} />
+            <HeroSignal signal={activeSignal} symbol={active} slim />
 
-            <section className="chart-section">
+            {/* 儀表板主區：左＝蠟燭圖（縮小、點🔍放大看大圖），右＝分數＋指標即時解讀 */}
+            <div className="detail-main">
+            <section className="chart-section detail-chart-col">
               <div className="chart-section-header">
                 <span className="chart-section-title">{coinName(active)} 蠟燭圖</span>
+                <button className="chart-zoom-btn" onClick={() => setChartZoom(true)} title="放大看大圖">🔍 放大</button>
 
                 <div className="range-controls">
                   {/* 週期切換（有時線資料的幣才顯示；目前 BTC/ETH） */}
@@ -416,27 +430,35 @@ export default function App() {
                 indicators={indicators}
                 trades={interval === '1d' ? (labTrades ?? backtest?.recent_trades ?? []) : []}
                 interval={interval}
+                compact
               />
             </section>
 
-            {/* 買賣判斷依據：系統訊號規則透明化 + 自訂指標/門檻值實驗室 */}
-            {panelOn('rules') && (
-            <section className="collapsible-section">
-              <button className="collapse-toggle" onClick={() => setShowRules(v => !v)}>
-                <span>買賣判斷依據（進出場規則 + 自訂訊號實驗室）</span>
-                <span className="collapse-arrow">{showRules ? '▲' : '▼'}</span>
-              </button>
-              {showRules && (
-                <SignalRulesPanel
-                  signal={activeSignal}
-                  prices={ohlc}
-                  indicators={indicators}
-                  interval={interval}
-                  onTrades={setLabTrades}
-                />
+            {/* 右欄：買賣策略結論 + 信心分數 + 指標即時解讀（並排在圖旁，第一眼就看到決策）。
+                每一塊都可「點下去看詳細」→ 開啟計分明細表、回測表格與建議的彈窗。 */}
+            <aside className="detail-side-col">
+              {/* 綜合建議（已併入信心分數量表；卡內兩個連結各開「計分明細」/「回測驗證」）*/}
+              <RecommendationCard
+                signal={activeSignal}
+                backtest={backtest}
+                params={btParams}
+                onDetail={setDetailView}
+              />
+
+              {/* 指標即時解讀 → 點看「每個指標的詳解」 */}
+              {activeSignal?.factors && (
+                <div className="side-block side-clickable" role="button" tabIndex={0}
+                     onClick={() => setDetailView('indicators')}
+                     onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && setDetailView('indicators')}
+                     title="點看每個指標的讀數、對分數的加減與怎麼看">
+                  <div className="side-block-title">指標即時解讀<span className="side-more-inline">指標詳解 →</span></div>
+                  <IndicatorCards factors={activeSignal.factors} rsi={activeSignal.rsi} />
+                </div>
               )}
-            </section>
-            )}
+            </aside>
+            </div>
+
+            {/* 策略明細面板已依需求移除（買賣策略結論已放上方右欄；停損停利固定用預設值） */}
 
             {/* 2026-07-06 暫停 AI 智能分析
             <section className="collapsible-section">
@@ -447,26 +469,6 @@ export default function App() {
               {showAI && <Suspense fallback={panelFallback}><AIAnalystPanel symbol={active} refreshKey={dataVersion} /></Suspense>}
             </section>
             */}
-
-            {panelOn('backtest') && (
-            <section className="collapsible-section">
-              <button className="collapse-toggle" onClick={() => setShowBacktest(v => !v)}>
-                <span>策略回測</span>
-                <span className="collapse-arrow">{showBacktest ? '▲' : '▼'}</span>
-              </button>
-              {showBacktest && (
-                <Suspense fallback={panelFallback}>
-                  <BacktestPanel
-                    signal={activeSignal}
-                    data={backtest}
-                    loading={btLoading}
-                    params={btParams}
-                    onParamsChange={patch => setBtParams(p => ({ ...p, ...patch }))}
-                  />
-                </Suspense>
-              )}
-            </section>
-            )}
 
             {/* 市場情緒 / 新聞：依需求移到最後面 */}
             {panelOn('sentiment') && (
@@ -494,6 +496,48 @@ export default function App() {
             </section>
             )}
             */}
+
+            {/* 蠟燭圖「放大」全螢幕彈窗（點背景 / ✕ / Esc 關閉；用完整尺寸非 compact） */}
+            {chartZoom && (
+              <div className="chart-modal-backdrop" onClick={() => setChartZoom(false)}>
+                <div className="chart-modal" onClick={e => e.stopPropagation()}>
+                  <div className="chart-modal-bar">
+                    <span className="chart-modal-title">{coinName(active)} 蠟燭圖</span>
+                    <button className="chart-modal-close" onClick={() => setChartZoom(false)} aria-label="關閉放大">✕</button>
+                  </div>
+                  <CandlestickChart
+                    prices={ohlc}
+                    indicators={indicators}
+                    trades={interval === '1d' ? (labTrades ?? backtest?.recent_trades ?? []) : []}
+                    interval={interval}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* 「詳細資訊」彈窗：點右欄哪一塊就顯示對應詳細（計分明細 / 指標詳解 / 回測驗證）*/}
+            {detailView && (
+              <div className="chart-modal-backdrop" onClick={() => setDetailView(null)}>
+                <div className="detail-modal" onClick={e => e.stopPropagation()}>
+                  <div className="chart-modal-bar">
+                    <span className="chart-modal-title">
+                      {coinName(active)}｜{{ all: '計分明細 · 回測驗證', score: '計分明細與進出場規則', indicators: '指標詳解', backtest: '回測驗證明細' }[detailView]}
+                    </span>
+                    <button className="chart-modal-close" onClick={() => setDetailView(null)} aria-label="關閉詳細">✕</button>
+                  </div>
+                  <Suspense fallback={panelFallback}>
+                    <StrategyPanel
+                      view={detailView}
+                      signal={activeSignal}
+                      backtest={backtest}
+                      btLoading={btLoading}
+                      params={btParams}
+                      onParamsChange={patch => setBtParams(p => ({ ...p, ...patch }))}
+                    />
+                  </Suspense>
+                </div>
+              </div>
+            )}
           </main>
         </div>
       )}
