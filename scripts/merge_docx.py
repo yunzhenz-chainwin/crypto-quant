@@ -9,12 +9,14 @@ merge_docx.py — 把 docs/ 下的 5 份 .docx 合併成「一份合集」給主
   .venv\\Scripts\\python.exe scripts\\merge_docx.py
 輸出：
   docs/crypto-quant_文件合集.docx
-※ 任一來源 .docx 更新後，重跑本腳本即可同步合集。
-  (crypto-quant_專案說明.docx 來自 README → export_readme_docx.py；
-   AI機器人固定問答範本.docx 來自 canned_qa → export_qa_docs.py)
+本腳本會**先自動重生 4 份可生成的來源 docx**（md2docx.py 產 專案說明/增準/ML、
+  export_qa_docs.py 產 問答範本），再與「情緒詞庫範本.docx」(手工來源、無生成腳本) 合併。
+  → 一鍵重生合集：改 README / 各 .md / canned_qa.py 後，直接跑本腳本即可。
+  那 4 份 docx 是中繼產物（已 gitignore，不入版）；只有合集與情緒詞庫範本.docx 進版控。
 """
 import io
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -52,10 +54,20 @@ def _ea(run, size=None, bold=False, color=None):
     rf.set(qn("w:eastAsia"), ZH)
 
 
+def _regen_sources():
+    """用子行程重生 4 份可生成來源（md2docx ×3 + export_qa ×1）。
+    情緒詞庫範本.docx 無生成腳本（手工來源），不在此列，需自身存在。"""
+    here = Path(__file__).resolve().parent
+    for script in ("md2docx.py", "export_qa_docs.py"):
+        print(f"  重生來源：{script} …")
+        subprocess.run([sys.executable, str(here / script)], check=True)
+
+
 def main():
+    _regen_sources()
     missing = [fn for fn, _ in SECTIONS if not (DOCS / fn).exists()]
     if missing:
-        raise SystemExit(f"缺少來源檔：{missing}")
+        raise SystemExit(f"缺少來源檔（情緒詞庫範本.docx 需手動存在）：{missing}")
 
     # 封面（空白 master + 中文字型）
     master = Document()

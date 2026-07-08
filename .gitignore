@@ -38,3 +38,10 @@ memory/
 
 # 本機密鑰載入檔（後台帳密，勿提交）
 *.local.cmd
+
+# 由腳本重生的 docx 中繼產物（md2docx.py / export_qa_docs.py 隨時可重生）；
+# 只提交合併後的 crypto-quant_文件合集.docx 與手工來源 情緒詞庫範本.docx
+docs/crypto-quant_專案說明.docx
+docs/訊號增準計畫.docx
+docs/ML訊號研究計畫.docx
+docs/AI機器人固定問答範本.docx
