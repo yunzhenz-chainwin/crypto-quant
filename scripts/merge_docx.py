@@ -97,6 +97,15 @@ def main():
     composer.save(str(OUT))
     print(f"寫出: {OUT}  ({os.path.getsize(OUT) / 1024:.0f} KB)")
 
+    # 清掉可重生的中繼 docx，讓 docs/ 只留「合集 + 情緒詞庫範本.docx」
+    for fn, _ in SECTIONS:
+        if fn != "情緒詞庫範本.docx":
+            try:
+                (DOCS / fn).unlink()
+            except FileNotFoundError:
+                pass
+    print("  已清理中繼 docx（docs/ 只留 合集 + 情緒詞庫範本.docx）")
+
 
 if __name__ == "__main__":
     main()
