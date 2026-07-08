@@ -6,8 +6,8 @@ export_qa_docs.py — 一鍵重新生成小Q固定問答的審核文件（txt + 
   .venv\\Scripts\\python.exe scripts\\export_qa_docs.py
 
 輸出：
-  docs/AI機器人固定問答庫.txt      主管審閱用純文字版（UTF-8 BOM，記事本可開）
   docs/AI機器人固定問答範本.docx   Word 版（微軟正黑體）
+  （純文字 .txt 版依使用者需求已停產；要恢復見檔尾 __main__ 註解）
 
 內容直接讀系統實裝模組（backend/services/canned_qa.py、coin_facts.py），
 與線上版本永遠一致。**改了問答庫或知識庫後，跑一次本腳本即可更新審核文件。**
@@ -210,6 +210,7 @@ def export_docx(out_path: Path):
 
 if __name__ == "__main__":
     docs = ROOT / "docs"
-    export_txt(docs / "AI機器人固定問答庫.txt")
+    # 純文字 .txt 版依使用者需求不再產生（只留 Word 版）；要恢復取消下一行註解即可。
+    # export_txt(docs / "AI機器人固定問答庫.txt")
     export_docx(docs / "AI機器人固定問答範本.docx")
-    print("完成。修訂問答庫（canned_qa.py / coin_facts.py）後重跑本腳本即可同步審核文件。")
+    print("完成。修訂問答庫（canned_qa.py / coin_facts.py）後重跑本腳本即可同步審核文件（Word 版）。")
