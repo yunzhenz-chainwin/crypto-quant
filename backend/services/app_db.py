@@ -808,7 +808,7 @@ DEFAULT_TASKS = [
     {"phase": "P1", "status": "planned", "title": "前台簡易 / 專業切換 + 三大畫面白話版",
      "detail": "紅綠燈、preset、進階摺疊", "planned_date": None,
      "notes": "目標:Header 加 簡易/專業 切換(localStorage),簡易模式把專業數字換成白話(紅綠燈、溫度計、preset),"
-              "老手可切回專業看完整數字。詞庫規劃見 docs/PROJECT_PLAN.md §1.1。"},
+              "老手可切回專業看完整數字。詞庫規劃見 docs/archive/PROJECT_PLAN.md §1.1。"},
     {"phase": "P3", "status": "planned", "title": "後台內容管理（幣種 / 權重 / 新聞）",
      "detail": "增刪幣種、調參數、新聞 CRUD", "planned_date": None,
      "notes": "幣種改 app_config 的 coins;訊號權重需把 scoring 參數抽到設定;新聞 CRUD 操作 news.db。"},

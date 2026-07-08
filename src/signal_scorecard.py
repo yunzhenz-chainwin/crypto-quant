@@ -12,7 +12,7 @@ signal_scorecard.py — 訊號「成績單」分析(唯讀,不改任何資料)
 
 重跑:  python src/signal_scorecard.py
 
-※ 結論與當時數據見 docs/訊號成績單分析.md。改了訊號邏輯後重跑此檔,即可對照 edge 變化。
+※ 結論與當時數據見 docs/訊號研究記錄.md（原 訊號成績單分析 已併入）。改了訊號邏輯後重跑此檔,即可對照 edge 變化。
 """
 import sys
 from pathlib import Path

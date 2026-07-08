@@ -132,7 +132,7 @@ src/
   verify_indicators.py   指標交叉驗證（前台信任徽章；後台即時）
   correlation.py         相關性矩陣（手動分析；排程已不再呼叫）
   verify_backtest.py     回測驗證器（改訊號/回測後必跑）
-  cross_sectional*.py …  跨幣動量研究血脈（收斂成 momentum_signal.py，見 docs/訊號改良實驗.md）
+  cross_sectional*.py …  跨幣動量研究血脈（收斂成 momentum_signal.py，見 docs/訊號研究記錄.md）
 frontend/src/
   App.jsx                根元件：總覽/詳細切換、60 秒輪詢自動更新、時線切換
   api/client.js          公開 API client；api/admin.js 後台 client
@@ -192,7 +192,7 @@ CryptoSlate、Blockworks、BitcoinMagazine、動區、鏈新聞 + Google News �
 ## 9. 訊號現況（誠實聲明）與路線圖
 
 - 目前前台 6 因子「信心分數」經成績單檢驗**無預測力**（5 日勝率 45.2% vs 隨機 47.4%），屬教學性質。
-- 已驗證有效的是後台**防禦型跨幣動量策略**（動量選幣+BTC>100MA regime+波動目標）；研究血脈見 `src/cross_sectional*`、`docs/訊號改良實驗.md`。
+- 已驗證有效的是後台**防禦型跨幣動量策略**（動量選幣+BTC>100MA regime+波動目標）；研究血脈見 `src/cross_sectional*`、`docs/訊號研究記錄.md`。
 - 宏觀環境面板（`MacroPanel` + `/api/macro`）已完成但**前台先隱藏**（價值待議，程式與 API 保留）。
 - 修復路線見 `docs/訊號增準計畫.md`（等確認）→ 之後才評估 `docs/ML訊號研究計畫.md`。
 
