@@ -123,22 +123,37 @@ def add_code(doc, lines):
         r.font.color.rgb = RGBColor(0x33, 0x33, 0x33)
 
 
+def add_diagram_note(doc):
+    """Mermaid 圖在 Word 無法渲染 → 放乾淨的引導註記（圖說已由前一段粗體標題呈現）。"""
+    p = doc.add_paragraph()
+    p.paragraph_format.left_indent = Cm(0.3)
+    r = p.add_run("〔流程圖：請於 GitHub 線上版 README 檢視渲染後的圖表〕")
+    _set_ea(r)
+    r.italic = True
+    r.font.size = Pt(9.5)
+    r.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+
+
 def main():
     md = SRC.read_text(encoding="utf-8").splitlines()
     doc = _new_doc()
 
     i, n = 0, len(md)
-    in_code, code_buf = False, []
+    in_code, code_buf, code_lang = False, [], ""
     while i < n:
         line = md[i]
 
-        # 程式碼區塊
+        # 程式碼區塊（```mermaid 特別處理：Word 不渲染 → 放引導註記）
         if line.strip().startswith("```"):
             if in_code:
-                add_code(doc, code_buf)
-                code_buf, in_code = [], False
+                if code_lang == "mermaid":
+                    add_diagram_note(doc)
+                else:
+                    add_code(doc, code_buf)
+                code_buf, in_code, code_lang = [], False, ""
             else:
                 in_code = True
+                code_lang = line.strip()[3:].strip().lower()
             i += 1
             continue
         if in_code:

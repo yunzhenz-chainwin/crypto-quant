@@ -66,20 +66,24 @@ cd frontend && npm run build
 
 ## 3. 系統架構與資料流
 
-```
-Binance API ──每日09:00──▶ src/fetch_binance.py ──▶ data/clean/*_1d.csv ─┐
-            ──每小時:06──▶（--interval 1h,增量,只存已收盤K棒）*_1h.csv ─┤
-                                                                         ▼
-                          src/indicators.py ──▶ reports/indicators_*.csv ─▶ app_db.ingest_market_data()
-                                                                         ▼
-RSS×9 + Google News ──每30分──▶ sentiment._fetch_and_save() ──▶ data/news.db（情緒詞庫標註+幣種標記+去重）
-alternative.me（恐懼貪婪）──▶ fear_greed 表                              │
-                                                                         ▼
-                                    SQLite: data/app.db（單一資料來源）+ data/news.db
-                                                                         ▼
-                                    FastAPI backend/（/api/*）＋排程 scheduler.py
-                                                                         ▼
-                                    React frontend/（vite build 後由 FastAPI 服務）
+**▸ 圖：系統架構與資料流**（線上 README 可見渲染圖）
+
+```mermaid
+flowchart TD
+    BN["Binance API"] -->|"每日09:00 / 每小時:06"| FE["fetch_binance.py<br/>抓K線·只存已收盤"]
+    FE --> CSV["data/clean/*.csv"]
+    CSV --> IND["indicators.py<br/>算指標"]
+    IND --> RPT["reports/indicators_*.csv"]
+    RPT --> ING["ingest_market_data"]
+    RSS["RSS×9 + Google News"] -->|"每30分"| NEWS["情緒詞庫標註+去重"]
+    NEWS --> NDB[("news.db")]
+    AM["alternative.me<br/>恐懼貪婪"] --> ING
+    ING --> ADB[("app.db<br/>SQLite·WAL")]
+    ADB --> API["FastAPI backend<br/>/api/*"]
+    NDB --> API
+    API --> FRO["React frontend<br/>build 後由 FastAPI 服務"]
+    BNWS["Binance WebSocket"] -.->|"旁路·即時報價"| FRO
+    YH["Yahoo + CoinGecko"] -.->|"/api/macro·快取15分"| API
 ```
 
 原則：**CSV 是中繼/備援，前後台一律讀 SQLite**；所有排程都記錄到 `job_runs` 表（後台監控頁可看成功/失敗）。
@@ -173,6 +177,16 @@ reports/ indicators_*.csv backtest_*（json/csv；圖 png 不追蹤）
 | 每小時 :06 | hourly_pipeline | BTC/ETH 1h 增量抓取→指標→入庫（幣種清單在 `app_config.hourly_symbols`） |
 | 每 30 分 | news_fetch | 9 家 RSS + Google News 中文 → 詞庫標註 → 去重入庫 → 滾動更新今日情緒彙總 |
 
+**▸ 圖：每日 pipeline 步驟與失敗防線**（線上 README 可見渲染圖）
+
+```mermaid
+flowchart LR
+    S["09:00 觸發"] --> F["抓日線"] --> I["算指標"] --> IN["入庫"]
+    IN --> DS["重算訊號"] --> BT["重產回測+入庫"] --> FR{"資料夠新?"}
+    FR -->|"是"| FG["恐懼貪婪"] --> NW["幣種新聞+情緒"] --> CL["清理AI/raw"] --> OK["job=success"]
+    FR -->|"否/任一步失敗"| FAIL["job=failed<br/>不假性成功"]
+```
+
 > 每步都經結束碼檢查 + 收尾「資料新鮮度」防線，任一步失敗整個 job 標 `failed`，不再假性成功。
 > （舊版有的「算相關性」步驟已移除：只產 PNG 熱圖無人用，`/api/correlation` 由 `reader` 直接讀 DB 計算。）
 
@@ -183,6 +197,22 @@ reports/ indicators_*.csv backtest_*（json/csv；圖 png 不追蹤）
 3. **交叉檢核**：兩邊立場不一致 → 前台標「⚠ 觀點分歧」。
 4. 成本控制：每小時 80 次上限、15 分鐘快取（入庫持久化）、token 用量後台可視。
 5. 提問走 `/api/ai/ask`，自動帶最近 3 輪對話；無金鑰時降級回規則引擎摘要。
+
+**▸ 圖：AI 雙引擎決策流**（線上 README 可見渲染圖）
+
+```mermaid
+flowchart TD
+    Q["使用者提問 / 看分析"] --> CTX["build_context<br/>6因子+指標+情緒+恐懼貪婪"]
+    CTX --> RULE["🧮 規則引擎<br/>白話分析·免費永遠可用"]
+    CTX --> G{"有 GPT 金鑰?"}
+    G -->|"有"| GPTA["🤖 GPT 深度解讀<br/>固定提示詞·被數據錨定"]
+    G -->|"無"| SKIP["降級：只用規則引擎"]
+    RULE --> X{"兩邊立場?"}
+    GPTA --> X
+    X -->|"一致"| OUT["輸出分析"]
+    X -->|"分歧"| WARN["標『⚠ 觀點分歧』"] --> OUT
+    SKIP --> OUT
+```
 
 ## 8. 新聞情緒管線
 
@@ -197,6 +227,20 @@ CryptoSlate、Blockworks、BitcoinMagazine、動區、鏈新聞 + Google News �
 - 已驗證有效的是後台**防禦型跨幣動量策略**（動量選幣+BTC>100MA regime+波動目標）；研究血脈見 `src/cross_sectional*`、`docs/archive/訊號研究記錄.md`。
 - 宏觀環境面板（`MacroPanel` + `/api/macro`）已完成但**前台先隱藏**（價值待議，程式與 API 保留）。
 - 修復路線見 `docs/archive/訊號增準計畫.md`（等確認）→ 之後才評估 `docs/archive/ML訊號研究計畫.md`。
+
+**▸ 圖：訊號研究軌跡（為何 6 因子降教學、動量策略上位）**（線上 README 可見渲染圖）
+
+```mermaid
+flowchart TD
+    A["6 因子技術訊號"] -->|"forward 檢驗"| B{"有 edge?"}
+    B -->|"無：勝率45% < 隨機47%"| C["6 個改良變體"]
+    B -.->|"降級"| T["6因子→教學用分數"]
+    C -->|"同一把尺檢驗"| D{"有 edge?"}
+    D -->|"全數失敗"| E["換維度：跨幣動量<br/>15幣排名·強者恆強"]
+    E --> F["加 regime + 風控 + 樣本外驗證"]
+    F --> G["✅ 防禦型動量策略<br/>樣本外 +27% vs 大盤 -19%"]
+    G --> H["收斂成 momentum_signal.py<br/>後台『現況』頁"]
+```
 
 ## 10. 開發慣例與注意事項
 
@@ -220,3 +264,52 @@ python src\verify_indicators.py 1d                    # 指標交叉驗證
 python src\correlation.py                             # 相關性（手動分析）
 # 手動觸發排程等價動作：後台監控頁「重新匯入行情」或 python -c 呼叫 scheduler 函式
 ```
+
+## 12. 未來規劃與可發展方向
+
+> 進度真相在後台「工作項目」（`tasks` 表）；完整分層路線圖（T0 立即動手 → T4 未來參考）見 [`docs/archive/專案路線圖.md`](docs/archive/專案路線圖.md)。下列為六大發展方向的鳥瞰。
+
+**▸ 圖：六大發展方向**（線上 README 可見渲染圖）
+
+```mermaid
+flowchart LR
+    R["未來方向"] --> A["訊號準度<br/>核心價值"]
+    R --> B["產品閉環"]
+    R --> C["基礎設施/營運"]
+    R --> D["AI·內容深化"]
+    R --> E["前台體驗"]
+    R --> F["宏觀面板"]
+    A --> A1["訊號增準 PhaseA-D"] & A2["ML 研究 LightGBM"]
+    B --> B1["到價/訊號通知"] & B2["AI 每日晨報"] & B3["投資組合+健檢"]
+    C --> C1["named tunnel 固定網址"] & C2["安全強化"] & C3["使用分析"]
+    D --> D1["GPT 新聞情緒標註"] & D2["詞庫/問答庫管理化"] & D3["小Q 評分+動畫"]
+    E --> E1["簡易/專業模式"] & E2["新手導覽+辭典"] & E3["圖表/時線擴充"]
+    F --> F1["改『BTC 相關性溫度計』版再上架"]
+```
+
+**A. 訊號準度（核心價值、最該先做）**
+- **訊號增準計畫（規則式）**：Phase A 先把已驗證的防禦型動量策略搬上前台當正式建議、6 因子降級為教學分數；Phase B–D 做因子手術、regime 開關、walk-forward 校準。驗收門檻寫死：樣本外 5 日勝率 ≥ 基準 +0.5pp（見 `docs/archive/訊號增準計畫.md`）。
+- **ML 訊號研究**：LightGBM + purged walk-forward，通過六道 Go/No-Go 關卡後成為「第三個 AI 引擎」（規則/GPT/ML 三票制）。需規則式先完成當地基（見 `docs/archive/ML訊號研究計畫.md`）。
+
+**B. 產品閉環（從被動查詢 → 主動推播）**
+- 到價 / 訊號變化通知（站內鈴鐺 + Telegram Bot，時線資料已就緒）。
+- AI 每日晨報（每日 pipeline 後自動生成「今日市場 3 分鐘」，與通知串成閉環）。
+- 投資組合追蹤 + AI 健檢（手動輸入持倉 → 損益/配置；AI 用相關性矩陣做組合風險健檢）。
+
+**C. 基礎設施與營運**
+- named tunnel 固定對外網址（根治「tunnel 重啟就換網址」）+ 服務化收尾。
+- 安全強化：登入失敗鎖定、per-IP 限流、寫入端點驗證、夜間 DB 備份、Cloudflare Access 保護 `/admin`。
+- 使用分析：加 `access_log` middleware → 造訪量 / 熱門幣 / API 狀況。
+
+**D. AI / 內容深化**
+- GPT 新聞批次情緒標註（治詞庫版 neutral 佔比偏高，成本 <$0.01/天）。
+- 詞庫 / 問答庫後台管理化（主管核可流程確立後，線上即改即生效）。
+- 小Q 回答評分 👍👎（微調資料集地基）、情境動畫擴充。
+
+**E. 前台體驗**
+- 簡易 / 專業模式切換 + 三大畫面白話版（紅綠燈、preset、進階摺疊）。
+- 新手導覽 + 名詞辭典、API 失敗錯誤橫幅、載入骨架。
+- 圖表指標與時線擴充（4h / 更多幣，架構已參數化）。
+
+**F. 宏觀面板重新定位**
+- `MacroPanel` 現隱藏保留；未來或改為「**以 BTC 為主的相關性溫度計**」版本再上架（價值待議，程式與 `/api/macro` 已備）。

@@ -1,6 +1,6 @@
 # API 規格
 
-> 後端所有 HTTP 端點的參考。共 **48 端點 / 10 個 router**。搭配 [README](../README.md)、[開發指南](開發指南.md)。
+> 後端所有 HTTP 端點的參考。共 **48 端點 / 10 個 router**。搭配 [README](../../README.md)、[開發指南](開發指南.md)。
 > 最後更新：2026-07-08（掃 `backend/routers/*` 產生）
 
 ---
