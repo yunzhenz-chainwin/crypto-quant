@@ -19,7 +19,7 @@
 | **呼叫 API（前台/後台端點規格）** | [`docs/archive/API規格.md`](docs/archive/API規格.md) |
 | **本地開發、開發鐵律、測試怎麼跑** | [`docs/archive/開發指南.md`](docs/archive/開發指南.md) |
 | **資料庫每張表結構與資料流** | [`docs/archive/資料庫說明.md`](docs/archive/資料庫說明.md) |
-| **給主管的成果匯報 / 驗證數據** | [`docs/archive/匯報.md`](docs/archive/匯報.md)、[`docs/archive/驗證成果表.md`](docs/archive/驗證成果表.md) |
+| **給主管的成果匯報 / 驗證數據** | [`docs/archive/成果匯報.md`](docs/archive/成果匯報.md) |
 | **未來路線圖 / 訊號改良與 ML 計畫** | [`docs/archive/專案路線圖.md`](docs/archive/專案路線圖.md)、[`docs/archive/訊號增準計畫.md`](docs/archive/訊號增準計畫.md)、[`docs/archive/ML訊號研究計畫.md`](docs/archive/ML訊號研究計畫.md) |
 
 > 進度的**單一真相來源**是後台「工作項目」（`app.db` 的 `tasks` 表），本檔與路線圖是規劃視角的快照。
