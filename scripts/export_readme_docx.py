@@ -3,8 +3,13 @@
 export_readme_docx.py — 把 README.md 轉成 Word (.docx) 給主管看。
 
 本機無 pandoc，改用 python-docx 自行轉換；支援：標題、表格、程式碼區塊、
-引用、清單、**粗體**、`行內碼`、分隔線。中文用微軟正黑體。
+引用、清單、**粗體**、`行內碼`、分隔線，以及 **```mermaid 流程圖/架構圖**。
 
+Mermaid 圖會用本機 mermaid-cli（透過 npx 自動安裝）渲染成 PNG 嵌進 Word，
+所以主管開 Word 直接看得到圖。若渲染失敗（無 node/npx 或離線），自動退回
+「〔見線上版〕」文字註記，docx 仍能正常產生。
+
+需求：node + npx（渲染 mermaid 用；首次會自動下載 @mermaid-js/mermaid-cli）。
 用法（專案根目錄執行）：
   .venv\\Scripts\\python.exe scripts\\export_readme_docx.py
 輸出：
@@ -14,7 +19,10 @@ export_readme_docx.py — 把 README.md 轉成 Word (.docx) 給主管看。
 import io
 import os
 import re
+import struct
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -25,13 +33,13 @@ OUT  = ROOT / "docs" / "crypto-quant_專案說明.docx"
 from docx import Document
 from docx.shared import Pt, RGBColor, Cm
 from docx.oxml.ns import qn
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 ZH_FONT = "微軟正黑體"
 MONO    = "Consolas"
 
 
 def _set_ea(run, latin=None):
-    """設定 run 的中英字型（east-asia 用正黑體）。"""
     if latin:
         run.font.name = latin
     rPr = run._element.get_or_add_rPr()
@@ -62,7 +70,6 @@ def _new_doc():
 
 
 def add_inline(p, text):
-    """行內：先切 `code`，再對非 code 段切 **bold**。"""
     for seg in re.split(r"(`[^`]*`)", text):
         if not seg:
             continue
@@ -81,7 +88,6 @@ def add_inline(p, text):
 
 
 def _cells(line):
-    """'| a | b |' → ['a','b']（去頭尾空欄）。"""
     parts = line.strip().split("|")
     if parts and parts[0].strip() == "":
         parts = parts[1:]
@@ -91,7 +97,6 @@ def _cells(line):
 
 
 def _is_sep(line):
-    """表格分隔列 |---|:--:|。"""
     return bool(re.match(r"^\s*\|?\s*:?-{2,}.*$", line)) and set(line.strip()) <= set("|-: ")
 
 
@@ -124,7 +129,7 @@ def add_code(doc, lines):
 
 
 def add_diagram_note(doc):
-    """Mermaid 圖在 Word 無法渲染 → 放乾淨的引導註記（圖說已由前一段粗體標題呈現）。"""
+    """Mermaid 渲染失敗時的退路：放乾淨的引導註記。"""
     p = doc.add_paragraph()
     p.paragraph_format.left_indent = Cm(0.3)
     r = p.add_run("〔流程圖：請於 GitHub 線上版 README 檢視渲染後的圖表〕")
@@ -134,89 +139,155 @@ def add_diagram_note(doc):
     r.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
 
 
+# ── Mermaid → PNG（本機 mermaid-cli via npx；失敗回 None）─────────────────────
+_PCONF = None      # puppeteer no-sandbox 設定檔（一次性）
+_MMDC_DEAD = False  # 一旦確認 npx/mmdc 不可用就不再重試
+
+
+def _png_size(path):
+    try:
+        with open(path, "rb") as f:
+            head = f.read(24)
+        if head[:8] == b"\x89PNG\r\n\x1a\n":
+            return struct.unpack(">II", head[16:24])
+    except Exception:
+        pass
+    return None
+
+
+def _render_mermaid(src, idx, tmp: Path):
+    global _PCONF, _MMDC_DEAD
+    if _MMDC_DEAD:
+        return None
+    mmd = tmp / f"d{idx}.mmd"
+    png = tmp / f"d{idx}.png"
+    mmd.write_text(src, encoding="utf-8")
+    if _PCONF is None:
+        _PCONF = tmp / "pconf.json"
+        _PCONF.write_text('{"args":["--no-sandbox"]}', encoding="utf-8")
+    cmd = (f'npx -y @mermaid-js/mermaid-cli -i "{mmd}" -o "{png}" '
+           f'-b white -s 2 -p "{_PCONF}"')
+    try:
+        subprocess.run(cmd, shell=True, capture_output=True, timeout=180)
+    except Exception:
+        _MMDC_DEAD = True
+        return None
+    if not png.exists():
+        if idx == 1:            # 第一張就失敗＝環境不支援，之後別再試
+            _MMDC_DEAD = True
+        return None
+    return png
+
+
+def add_diagram(doc, src, idx, tmp):
+    """優先渲染成圖片嵌入；失敗才放文字註記。"""
+    png = _render_mermaid(src, idx, tmp)
+    if not png:
+        add_diagram_note(doc)
+        return False
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run()
+    sz = _png_size(png)
+    if sz and sz[1] > sz[0] * 1.35:      # 偏高的圖：限高，避免超出頁面
+        run.add_picture(str(png), height=Cm(17))
+    else:                                # 一般/偏寬：限寬
+        run.add_picture(str(png), width=Cm(14))
+    return True
+
+
 def main():
     md = SRC.read_text(encoding="utf-8").splitlines()
     doc = _new_doc()
+    tmp = Path(tempfile.mkdtemp(prefix="mmd_"))
+    mermaid_n = 0
+    rendered = 0
 
     i, n = 0, len(md)
     in_code, code_buf, code_lang = False, [], ""
-    while i < n:
-        line = md[i]
+    try:
+        while i < n:
+            line = md[i]
 
-        # 程式碼區塊（```mermaid 特別處理：Word 不渲染 → 放引導註記）
-        if line.strip().startswith("```"):
-            if in_code:
-                if code_lang == "mermaid":
-                    add_diagram_note(doc)
+            # 程式碼區塊（```mermaid → 渲染成圖）
+            if line.strip().startswith("```"):
+                if in_code:
+                    if code_lang == "mermaid":
+                        mermaid_n += 1
+                        if add_diagram(doc, "\n".join(code_buf), mermaid_n, tmp):
+                            rendered += 1
+                    else:
+                        add_code(doc, code_buf)
+                    code_buf, in_code, code_lang = [], False, ""
                 else:
-                    add_code(doc, code_buf)
-                code_buf, in_code, code_lang = [], False, ""
-            else:
-                in_code = True
-                code_lang = line.strip()[3:].strip().lower()
-            i += 1
-            continue
-        if in_code:
-            code_buf.append(line)
-            i += 1
-            continue
-
-        # 表格（連續的 | 行）
-        if line.strip().startswith("|") and "|" in line.strip()[1:]:
-            block = []
-            while i < n and md[i].strip().startswith("|"):
-                if not _is_sep(md[i]):
-                    block.append(_cells(md[i]))
+                    in_code = True
+                    code_lang = line.strip()[3:].strip().lower()
                 i += 1
-            if block:
-                add_table(doc, block)
-            continue
+                continue
+            if in_code:
+                code_buf.append(line)
+                i += 1
+                continue
 
-        # 標題
-        m = re.match(r"^(#{1,6})\s+(.*)$", line)
-        if m:
-            lvl = min(len(m.group(1)), 3)
-            h = doc.add_heading(level=lvl)
-            add_inline(h, m.group(2))
+            # 表格
+            if line.strip().startswith("|") and "|" in line.strip()[1:]:
+                block = []
+                while i < n and md[i].strip().startswith("|"):
+                    if not _is_sep(md[i]):
+                        block.append(_cells(md[i]))
+                    i += 1
+                if block:
+                    add_table(doc, block)
+                continue
+
+            # 標題
+            m = re.match(r"^(#{1,6})\s+(.*)$", line)
+            if m:
+                lvl = min(len(m.group(1)), 3)
+                add_inline(doc.add_heading(level=lvl), m.group(2))
+                i += 1
+                continue
+
+            # 分隔線
+            if line.strip() == "---":
+                doc.add_paragraph().add_run("─" * 30).font.color.rgb = RGBColor(0xCC, 0xCC, 0xCC)
+                i += 1
+                continue
+
+            # 引用
+            if line.startswith(">"):
+                p = doc.add_paragraph()
+                p.paragraph_format.left_indent = Cm(0.6)
+                p.add_run("▍ ").font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+                add_inline(p, line.lstrip(">").strip())
+                i += 1
+                continue
+
+            # 清單
+            mb = re.match(r"^\s*[-*]\s+(.*)$", line)
+            if mb:
+                add_inline(doc.add_paragraph(style="List Bullet"), mb.group(1))
+                i += 1
+                continue
+
+            # 空行
+            if not line.strip():
+                i += 1
+                continue
+
+            # 一般段落
+            add_inline(doc.add_paragraph(), line)
             i += 1
-            continue
 
-        # 分隔線
-        if line.strip() == "---":
-            doc.add_paragraph().add_run("─" * 30).font.color.rgb = RGBColor(0xCC, 0xCC, 0xCC)
-            i += 1
-            continue
+        doc.save(str(OUT))
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
 
-        # 引用
-        if line.startswith(">"):
-            p = doc.add_paragraph()
-            p.paragraph_format.left_indent = Cm(0.6)
-            r0 = p.add_run("▍ ")
-            r0.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
-            add_inline(p, line.lstrip(">").strip())
-            i += 1
-            continue
-
-        # 清單
-        mb = re.match(r"^\s*[-*]\s+(.*)$", line)
-        if mb:
-            p = doc.add_paragraph(style="List Bullet")
-            add_inline(p, mb.group(1))
-            i += 1
-            continue
-
-        # 空行
-        if not line.strip():
-            i += 1
-            continue
-
-        # 一般段落
-        p = doc.add_paragraph()
-        add_inline(p, line)
-        i += 1
-
-    doc.save(str(OUT))
-    print(f"寫出: {OUT}  ({os.path.getsize(OUT)/1024:.0f} KB)")
+    note = f"（{rendered}/{mermaid_n} 張 mermaid 圖已渲染嵌入）" if mermaid_n else ""
+    if mermaid_n and rendered == 0:
+        note += "  ⚠️ 渲染失敗，已退回文字註記（檢查 node/npx 是否可用）"
+    print(f"寫出: {OUT}  ({os.path.getsize(OUT)/1024:.0f} KB) {note}")
 
 
 if __name__ == "__main__":
