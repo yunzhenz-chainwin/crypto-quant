@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from backend.routers import meta, prices, indicators, correlation, signals, backtest, sentiment, admin, ai
+from backend.routers import meta, prices, indicators, correlation, signals, backtest, sentiment, admin, ai, macro
 from backend.scheduler import start_scheduler
 from backend.services import app_db
 
@@ -82,6 +82,7 @@ app.include_router(backtest.router,    prefix="/api")  # /api/backtest/{symbol}
 app.include_router(sentiment.router,   prefix="/api")  # /api/sentiment/...
 app.include_router(admin.router,       prefix="/api")  # /api/admin/... (後台,需登入)
 app.include_router(ai.router,          prefix="/api")  # /api/ai/... (AI 分析機器人)
+app.include_router(macro.router,       prefix="/api")  # /api/macro (宏觀環境,規則式)
 
 # ── 正式環境：FastAPI 直接提供 React build 的靜態檔 ─────────────────────────
 # 只在 frontend/dist/ 存在時掛載（本地開發時不存在，不影響開發流程）

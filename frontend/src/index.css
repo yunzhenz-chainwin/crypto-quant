@@ -16,7 +16,7 @@
   color: var(--text);
   background: var(--bg);
 }
-body { background: var(--bg); }
+body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素超寬都不讓整頁水平溢出/縮放(手機詳細頁 .app 為 overflow:visible) */
 
 /* ── App 框架 ──────────────────────────────────────── */
 .app { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -222,6 +222,33 @@ body { background: var(--bg); }
 }
 @keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+/* ── 宏觀環境面板（規則式市場背景：DXY/VIX/美債/標普/黃金/BTC主導/總市值）── */
+.macro-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 18px; }
+.macro-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.macro-head-l { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.macro-title { font-size: 16px; font-weight: 700; color: var(--text); margin: 0; }
+.macro-sub { font-size: 11.5px; color: var(--muted); }
+.macro-verdict { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; padding: 5px 13px; border-radius: 999px; white-space: nowrap; }
+.macro-verdict-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.macro-verdict.macro-good { color: #22c55e; background: rgba(34,197,94,.1); }
+.macro-verdict.macro-warn { color: #eab308; background: rgba(234,179,8,.1); }
+.macro-verdict.macro-bad  { color: #ef4444; background: rgba(239,68,68,.1); }
+.macro-summary { font-size: 13px; color: var(--text); opacity: .8; margin-bottom: 14px; }
+.macro-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; }
+.macro-cell { background: rgba(148,163,184,.05); border: 1px solid var(--border); border-left: 3px solid #475569; border-radius: 8px; padding: 8px 11px; }
+.macro-cell[data-impact="TAILWIND"] { border-left-color: #22c55e; }
+.macro-cell[data-impact="HEADWIND"] { border-left-color: #ef4444; }
+.macro-cell-lbl { font-size: 11px; color: var(--muted); margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.macro-cell-val { font-size: 17px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.15; }
+.macro-cell-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 5px; }
+.macro-cell-tag { font-size: 11px; font-weight: 700; }
+.macro-cell-tag[data-impact="TAILWIND"] { color: #22c55e; }
+.macro-cell-tag[data-impact="HEADWIND"] { color: #ef4444; }
+.macro-cell-tag[data-impact="NEUTRAL"]  { color: var(--muted); }
+.macro-cell-chg { font-size: 11px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.macro-foot { font-size: 11px; color: var(--muted); margin-top: 13px; }
+@media (max-width: 560px) { .macro-grid { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); } }
 .hero-signal-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .hero-bull  .hero-icon  { color: var(--bull); font-size: 18px; }
 .hero-bear  .hero-icon  { color: var(--bear); font-size: 18px; }
@@ -1291,6 +1318,8 @@ body { background: var(--bg); }
   .chart-section-header, .backtest-header { flex-direction: column; align-items: stretch; }
   .range-controls { align-items: flex-start; }
   .param-row { justify-content: flex-start; }
+  /* 手機行內圖表：收起那排擠成多行的指標按鈕（只隱藏行內、放大彈窗仍保留），畫面才乾淨 */
+  .detail-chart-col .chart-toolbar { display: none; }
 
   /* 後台:頂列換行、內距縮小 */
   .admin-header { height: auto; padding: 8px 12px; }

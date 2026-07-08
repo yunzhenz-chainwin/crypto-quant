@@ -45,6 +45,9 @@ export const fetchIntervals = () => get('/intervals')
 // 取得所有幣種的相關性矩陣與年化波動度
 export const fetchCorrelation = () => get('/correlation')
 
+// 宏觀環境（規則式）：DXY/VIX/美債/標普/黃金/BTC主導率/總市值 → 對加密順風/逆風
+export const fetchMacro = () => get('/macro')
+
 // 取得所有幣種的當前訊號（BULL / BEAR / NEUTRAL）
 export const fetchAllSignals = () => get('/signals')
 

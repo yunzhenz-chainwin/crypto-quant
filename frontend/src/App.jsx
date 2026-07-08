@@ -20,6 +20,7 @@ import HeroSignal        from './components/HeroSignal'
 import IndicatorCards   from './components/IndicatorCards'
 import RecommendationCard from './components/RecommendationCard'
 import MarketOverview   from './components/MarketOverview'
+// import MacroPanel    from './components/MacroPanel'   // 2026-07-07 先隱藏（價值待議；程式碼＋/api/macro 保留，未來或改「以 BTC 為主的相關性溫度計」版）
 import MarketSummary    from './components/MarketSummary'
 // import BotWidget     from './components/BotWidget'   // 2026-07-06 暫時下架：使用者確定為主管/老闆，聊天小幫手先隱藏（要恢復連同底部掛載一起取消註解）
 // import OnboardingTour   from './components/OnboardingTour' // 2026-07-06 暫停新手導覽
@@ -314,6 +315,7 @@ export default function App() {
       {/* ── 市場總覽模式 ────────────────────────────────────────────────── */}
       {view === 'overview' && (
         <div className="overview-layout">
+          {/* <MacroPanel /> 先隱藏——見上方 import 註解，程式碼保留 */}
           <MarketOverview signals={signals} backtests={btSummary} livePrices={livePrices} onSelect={handleSelectCoin} />
         </div>
       )}
