@@ -8,17 +8,19 @@
 
 ---
 
-## 📑 文件地圖（要找什麼看哪份）
+## 📑 延伸文件（已封存於 `docs/archive/`）
+
+> **README 是主文件**。下列較細的技術與歷史文件封存在 [`docs/archive/`](docs/archive/)，接手同仁需要深入時查閱；主管看 README（另有 Word 版 `docs/`）即可。
 
 | 想做的事 | 看這份 |
 |---|---|
 | **快速了解 / 接手** | 本檔 README（你在這） |
-| **部署、重啟、改前端、輪密鑰、排錯** | [`docs/部署與運維.md`](docs/部署與運維.md) |
-| **呼叫 API（前台/後台端點規格）** | [`docs/API規格.md`](docs/API規格.md) |
-| **本地開發、開發鐵律、測試怎麼跑** | [`docs/開發指南.md`](docs/開發指南.md) |
-| **資料庫每張表結構與資料流** | [`docs/資料庫說明.md`](docs/資料庫說明.md) |
-| **給主管的成果匯報 / 驗證數據** | [`docs/匯報.md`](docs/匯報.md)、[`docs/驗證成果表.md`](docs/驗證成果表.md) |
-| **未來路線圖 / 訊號改良與 ML 計畫** | [`docs/專案路線圖.md`](docs/專案路線圖.md)、[`docs/訊號增準計畫.md`](docs/訊號增準計畫.md)、[`docs/ML訊號研究計畫.md`](docs/ML訊號研究計畫.md) |
+| **部署、重啟、改前端、輪密鑰、排錯** | [`docs/archive/部署與運維.md`](docs/archive/部署與運維.md) |
+| **呼叫 API（前台/後台端點規格）** | [`docs/archive/API規格.md`](docs/archive/API規格.md) |
+| **本地開發、開發鐵律、測試怎麼跑** | [`docs/archive/開發指南.md`](docs/archive/開發指南.md) |
+| **資料庫每張表結構與資料流** | [`docs/archive/資料庫說明.md`](docs/archive/資料庫說明.md) |
+| **給主管的成果匯報 / 驗證數據** | [`docs/archive/匯報.md`](docs/archive/匯報.md)、[`docs/archive/驗證成果表.md`](docs/archive/驗證成果表.md) |
+| **未來路線圖 / 訊號改良與 ML 計畫** | [`docs/archive/專案路線圖.md`](docs/archive/專案路線圖.md)、[`docs/archive/訊號增準計畫.md`](docs/archive/訊號增準計畫.md)、[`docs/archive/ML訊號研究計畫.md`](docs/archive/ML訊號研究計畫.md) |
 
 > 進度的**單一真相來源**是後台「工作項目」（`app.db` 的 `tasks` 表），本檔與路線圖是規劃視角的快照。
 
@@ -57,7 +59,7 @@ cd frontend && npm run build
 - 後台：`/admin`，帳密來自環境變數 `ADMIN_USER` / `ADMIN_PASS`（由 `secrets.local.cmd` 注入強密碼與 `ADMIN_SECRET`，2026-07-06 已改掉預設值；該檔已 gitignore）
 - GPT 金鑰：後台「AI 設定」頁填入，或環境變數 `OPENAI_API_KEY`（優先）；不填則 AI 只用規則引擎
 - 對外公開：Cloudflare Quick Tunnel 指向 8000（每次重啟 tunnel 網址會變；根治方案見待辦 #64）
-- **正式部署（開機自啟/看門狗/服務化）詳見 [`docs/部署與運維.md`](docs/部署與運維.md)。**
+- **正式部署（開機自啟/看門狗/服務化）詳見 [`docs/archive/部署與運維.md`](docs/archive/部署與運維.md)。**
 
 > ⚠️ Windows 上 `.venv\Scripts\python.exe` 是啟動器殼，工作管理員會看到
 > 「venv + 系統 Python **成對**的 uvicorn」— 那是**一台**伺服器，不是重複執行；殺掉子進程=殺掉整台。
@@ -88,7 +90,7 @@ alternative.me（恐懼貪婪）──▶ fear_greed 表                        
 
 ### 設計決策（為什麼這樣做）
 
-- **雙 SQLite（`app.db` / `news.db`）**：零設定、ACID、開 WAL（耐當機、讀寫不互鎖）；資料量萬~百萬列綽綽有餘；`prices`/`indicators`/`daily_signal` 全可由 CSV 或 Binance 重建，遺失≠永久遺失。詳見 [`docs/資料庫說明.md`](docs/資料庫說明.md)。
+- **雙 SQLite（`app.db` / `news.db`）**：零設定、ACID、開 WAL（耐當機、讀寫不互鎖）；資料量萬~百萬列綽綽有餘；`prices`/`indicators`/`daily_signal` 全可由 CSV 或 Binance 重建，遺失≠永久遺失。詳見 [`docs/archive/資料庫說明.md`](docs/archive/資料庫說明.md)。
 - **CSV 中繼 + DB 中央**：抓取/計算落 CSV（可備援、可肉眼查），再 ingest 進 DB 當查閱與分析中心。
 - **6 因子計分單一真相（`src/scoring.py`）**：前台訊號與回測**共用同一把尺**，回測才能佐證畫面建議（否則兩套邏輯各說各話）。
 - **雙 AI 引擎互輔**：GPT 吃規則引擎整理好的結構化事實 + 固定提示詞，被本地數據錨定防幻覺；立場不一致標「觀點分歧」。
@@ -101,7 +103,7 @@ alternative.me（恐懼貪婪）──▶ fear_greed 表                        
 backend/
   main.py                FastAPI 入口（掛路由、服務 frontend/dist）
   scheduler.py           排程：每日 pipeline(09:00,UTC日棒收盤後)、每小時 1h 線(:06)、新聞(每30分)
-  routers/               （10 個 router，共 48 端點；規格見 docs/API規格.md）
+  routers/               （10 個 router，共 48 端點；規格見 docs/archive/API規格.md）
     meta.py              /symbols /intervals /status(data_version=自動更新的心跳) /verify
     prices.py            /prices/{sym}?interval=1d|1h
     indicators.py        /indicators/{sym}?interval=
@@ -132,7 +134,7 @@ src/
   verify_indicators.py   指標交叉驗證（前台信任徽章；後台即時）
   correlation.py         相關性矩陣（手動分析；排程已不再呼叫）
   verify_backtest.py     回測驗證器（改訊號/回測後必跑）
-  cross_sectional*.py …  跨幣動量研究血脈（收斂成 momentum_signal.py，見 docs/訊號研究記錄.md）
+  cross_sectional*.py …  跨幣動量研究血脈（收斂成 momentum_signal.py，見 docs/archive/訊號研究記錄.md）
 frontend/src/
   App.jsx                根元件：總覽/詳細切換、60 秒輪詢自動更新、時線切換
   api/client.js          公開 API client；api/admin.js 後台 client
@@ -153,7 +155,7 @@ reports/ indicators_*.csv backtest_*（json/csv；圖 png 不追蹤）
 
 ## 5. 資料庫（SQLite×2，皆 WAL）
 
-> 完整表結構、資料流、容量評估見 **[`docs/資料庫說明.md`](docs/資料庫說明.md)**。
+> 完整表結構、資料流、容量評估見 **[`docs/archive/資料庫說明.md`](docs/archive/資料庫說明.md)**。
 
 **data/app.db**：`prices`/`indicators`（多週期 K 線與指標，PK=symbol+interval+ts）、
 `daily_signal`（每日訊號歷史）、`fear_greed`、`app_config`（幣種清單/hourly_symbols/AI 設定 — 集中設定，後台可改）、
@@ -192,13 +194,13 @@ CryptoSlate、Blockworks、BitcoinMagazine、動區、鏈新聞 + Google News �
 ## 9. 訊號現況（誠實聲明）與路線圖
 
 - 目前前台 6 因子「信心分數」經成績單檢驗**無預測力**（5 日勝率 45.2% vs 隨機 47.4%），屬教學性質。
-- 已驗證有效的是後台**防禦型跨幣動量策略**（動量選幣+BTC>100MA regime+波動目標）；研究血脈見 `src/cross_sectional*`、`docs/訊號研究記錄.md`。
+- 已驗證有效的是後台**防禦型跨幣動量策略**（動量選幣+BTC>100MA regime+波動目標）；研究血脈見 `src/cross_sectional*`、`docs/archive/訊號研究記錄.md`。
 - 宏觀環境面板（`MacroPanel` + `/api/macro`）已完成但**前台先隱藏**（價值待議，程式與 API 保留）。
-- 修復路線見 `docs/訊號增準計畫.md`（等確認）→ 之後才評估 `docs/ML訊號研究計畫.md`。
+- 修復路線見 `docs/archive/訊號增準計畫.md`（等確認）→ 之後才評估 `docs/archive/ML訊號研究計畫.md`。
 
 ## 10. 開發慣例與注意事項
 
-> 完整版（環境設定、開發鐵律、測試怎麼跑）見 **[`docs/開發指南.md`](docs/開發指南.md)**。
+> 完整版（環境設定、開發鐵律、測試怎麼跑）見 **[`docs/archive/開發指南.md`](docs/archive/開發指南.md)**。
 
 - **進度追蹤**：後台「工作項目」（app.db `tasks` 表）是唯一真相來源 — 做完標 done、新待辦即時補上，notes 欄寫交接說明。
 - 設定集中：幣種清單、時線幣種、AI 金鑰等都在 `app_config`，別寫死在程式裡。
