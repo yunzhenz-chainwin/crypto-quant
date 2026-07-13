@@ -30,19 +30,20 @@ function fgConfig(value) {
   return              { color: '#22c55e', label: '極度貪婪', tip: '市場過於樂觀，歷史上常是短期高點' }
 }
 
-// 半圓錶盤：指針角度 = -90° + (value/100) * 180°，再用 cos/sin 算指針尖端座標
+// 半圓錶盤：0 在左、50 在上、100 在右。SVG 的 y 軸向下，所以 y 座標要反向計算。
 function FearGreedGauge({ value }) {
-  const v   = Number(value)
+  const v   = Math.max(0, Math.min(100, Number(value) || 0))
   const cfg = fgConfig(v)
-  const angle = -90 + (v / 100) * 180   // 0 → 指向左邊，100 → 指向右邊
+  const angle = 180 - (v / 100) * 180
   const rad   = (angle * Math.PI) / 180
-  const cx = 80, cy = 72, r = 54        // SVG 圓心 (80,72)，半徑 54
+  const cx = 80, cy = 76, r = 54, arcR = 62
+  const arc = `M ${cx - arcR} ${cy} A ${arcR} ${arcR} 0 0 1 ${cx + arcR} ${cy}`
   const nx = cx + r * Math.cos(rad)     // 指針尖端 x
-  const ny = cy + r * Math.sin(rad)     // 指針尖端 y
+  const ny = cy - r * Math.sin(rad)     // 指針尖端 y
   return (
     <div className="fg-gauge-wrap">
-      <svg viewBox="0 0 160 90" className="fg-gauge-svg">
-        <path d="M 18 72 A 62 62 0 0 1 142 72" fill="none" stroke="#334155" strokeWidth="10" strokeLinecap="round" />
+      <svg viewBox="0 0 160 102" className="fg-gauge-svg">
+        <path d={arc} fill="none" stroke="#334155" strokeWidth="10" strokeLinecap="round" />
         <defs>
           <linearGradient id="fgGrad" x1="0%" y1="0%" x2="100%" y2="0%">
             <stop offset="0%"   stopColor="#ef4444" />
@@ -52,10 +53,12 @@ function FearGreedGauge({ value }) {
             <stop offset="100%" stopColor="#22c55e" />
           </linearGradient>
         </defs>
-        <path d="M 18 72 A 62 62 0 0 1 142 72" fill="none" stroke="url(#fgGrad)" strokeWidth="10" strokeLinecap="round" opacity="0.35" />
+        <path d={arc} fill="none" stroke="url(#fgGrad)" strokeWidth="10" strokeLinecap="round" opacity="0.35" />
         <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={cfg.color} strokeWidth="3" strokeLinecap="round" />
         <circle cx={cx} cy={cy} r="4" fill={cfg.color} />
         <text x={cx} y={cy + 18} textAnchor="middle" fill={cfg.color} fontSize="20" fontWeight="bold">{v}</text>
+        <text x={cx - arcR} y={cy + 16} textAnchor="middle" fill="#64748b" fontSize="9">0</text>
+        <text x={cx + arcR} y={cy + 16} textAnchor="middle" fill="#64748b" fontSize="9">100</text>
       </svg>
       <div className="fg-label" style={{ color: cfg.color }}>{cfg.label}</div>
       <div className="fg-tip">{cfg.tip}</div>
