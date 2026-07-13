@@ -22,17 +22,17 @@
   - ✅ 工作項目 / 進度追蹤頁:`tasks` 表 + CRUD(新增 / 改狀態 / 標記完成 / 刪除),預設灌入專案進度。
   - ✅ 點項目開詳細視窗,可編輯「備註 / 交接說明」(`notes` 欄位,多行);現有項目已填入交接資訊,清單以 📝 標示有備註者。
   - ✅ 資料庫檢視頁:選表瀏覽資料列(prices/indicators/daily_signal/fear_greed/news/tasks…),可依幣種篩選、分頁;唯讀 + 白名單保護。
-  - ⬜ 操作頁(手動觸發抓取 / 重算 / 回補) ⬜ 管理頁(P3) ⬜ 使用分析(P3)。
+  - ✅ 操作觸發 API 已有 `/admin/ops/run/{daily|hourly|news}`；⬜ 管理頁(P3) ⬜ 使用分析圖表(P3)。
 - **🟢 資料庫完整化(大致完成)**
-  - ✅ 加密數值入庫:`prices` / `indicators` 改為**多週期 schema**(`interval` + `ts`,1d/1h 可並存),1d 各 26,730 筆。
-  - ✅ 每日訊號歷史 `daily_signal` 26,730 筆、恐懼貪婪歷史 `fear_greed` 3,067 筆(2018 至今),排程自動維護。
+  - ✅ 加密數值入庫:`prices` / `indicators` 改為**多週期 schema**(`interval` + `ts`,1d/1h 可並存),目前各 63,119 筆。
+  - ✅ 每日訊號歷史 `daily_signal` 27,539 筆、恐懼貪婪歷史 `fear_greed` 3,081 筆(2018 至今),排程自動維護。
   - ✅ 兩個 DB 開啟 **WAL**(耐當機、讀寫不互鎖);加密數值可由 CSV 重建,不怕遺失。
-  - ✅ 加入 **1h 資料**(BTC/ETH 各 17,520 根、每小時 :06 排程增量更新;API/前端 `interval=1h`);⬜（選用）前台改讀 DB / 畫歷史走勢。
-- **🤖 AI 分析機器人(2026-07-02 完成)**:`backend/services/ai_analyst.py` 雙引擎(本地 6 因子規則引擎 + GPT API 深度解讀,固定提示詞、立場交叉檢核);前台詳細頁 AI 面板 + 提問框;後台「AI 設定」頁管理金鑰。
+  - ✅ 加入 **1h 資料**(BTC/ETH 各 17,520 根、每小時 :06 排程增量更新;API/前端 `interval=1h`);前後台查閱 API 已讀 DB。
+- **🤖 AI 分析機器人(2026-07-02 完成,前台暫停顯示)**:`backend/services/ai_analyst.py` 雙引擎(本地 6 因子規則引擎 + GPT API 深度解讀,固定提示詞、立場交叉檢核);API 與後台「AI 設定」頁保留,前台 `AIAnalystPanel` 目前註解暫停。
 - **🔄 前台自動更新(2026-07-02 完成)**:`/api/status` 提供 `data_version`,前端每 60 秒輪詢、有新資料才重拉,不用手動重整。
 - ⬜ P1 前台人性化 ⬜ P4 打磨
 
-> 存取:跑起來後開 `/admin`(帳號 `admin`;密碼於 `backend/routers/admin.py` 或環境變數 `ADMIN_PASS` 設定,`ADMIN_SECRET` 建議對外時一併覆蓋)。
+> 存取:跑起來後開 `/admin`。帳密來自 `ADMIN_USER` / `ADMIN_PASS`;正式與排程啟動應由 `secrets.local.cmd` 注入 `ADMIN_PASS` 與 `ADMIN_SECRET`,否則程式會回到預設值並印安全警告。
 
 ---
 
@@ -52,7 +52,7 @@
 
 ### 0.2 後台:同專案、`/admin` 路由、簡單帳密
 - 不另開專案。沿用 FastAPI + React,後台走 `/admin/*`,共用同一套資料層。
-- 認證:環境變數 `ADMIN_USER` / `ADMIN_PASS` → `/api/admin/login` 簽發 token(itsdangerous 簽章)→ 前端存 `localStorage` → 所有 `/api/admin/*` 需帶 `Authorization`。簡單但不是明碼塞網址。
+- 認證:環境變數 `ADMIN_USER` / `ADMIN_PASS` → `/api/admin/login` 簽發 HMAC token → 前端存 `localStorage` → 所有 `/api/admin/*` 需帶 `Authorization`。簡單但不是明碼塞網址。
 
 ---
 
@@ -132,14 +132,14 @@
 - 顯示「最近操作紀錄」(來自 `job_runs` 表)。
 
 ### 2.4 頁面三:管理 Manage(內容/參數)
-- **幣種清單**:目前 15 幣寫死在 4 個檔(`scheduler.py`、`fetch_binance.py`、`correlation.py`、`coins.js`)。集中成單一設定來源 → 後台可增/刪幣、編中文名;新增幣自動觸發抓資料。
+- **幣種清單**:已集中到 `app_config.coins` 並可由後台增/刪/停用;新增幣會觸發抓資料。仍待補的是時線幣種/更多週期的後台 UI。
 - **訊號因子權重**:目前寫死在 `_compute_score`。抽到設定 → 後台可調權重/門檻(進階)。
 - **回測預設**:`-0.06 / 0.20` 等抽到設定。
 - **新聞管理**:列表/搜尋/刪除不當或重複新聞、手動改分類或情緒。
 
 ### 2.5 頁面四:分析 Analytics(使用數據)
-- 先「記錄」才有得分析:加輕量 middleware 記錄 API 請求(路徑、幣種、時間、回應碼、耗時)存 `access_log`(僅路徑與幣種,不記個資)。
-- 呈現:每日造訪數、最熱門幣種、各 API 呼叫量、平均回應時間、錯誤率。
+- 已有輕量 middleware 記錄 API 請求(路徑、幣種、時間、回應碼、耗時)存 `access_log`(僅路徑與幣種,不記個資)。
+- 待呈現:每日造訪數、最熱門幣種、各 API 呼叫量、平均回應時間、錯誤率。
 
 ---
 
@@ -199,8 +199,8 @@ GET  /api/admin/analytics             使用數據
 
 ## 5. 技術選型摘要
 - 前端:沿用 React 19 + Vite;新增 `glossary.js` 詞庫、`useViewMode` hook(簡易/專業)、`/admin` 路由(可加 react-router 或簡單條件渲染)。
-- 後端:沿用 FastAPI;認證用 itsdangerous 簽 token;背景任務先用現有 subprocess + `job_runs` 記錄(量大再換 APScheduler/RQ)。
-- 資料:news 既有 SQLite + 新增 `data/app.db`;市場資料維持 CSV。
+- 後端:沿用 FastAPI;認證用 HMAC token;背景任務用 APScheduler + subprocess + `job_runs` 記錄。
+- 資料:news 既有 SQLite + `data/app.db`;市場資料以 CSV 作抓取/計算中繼,查閱與分析以 DB 為中心。
 
 ## 6. 待你決定的細節(動工前)
 1. 後台要不要跟前台同網址(`/admin`)還是獨立子網域?(預設同網址)

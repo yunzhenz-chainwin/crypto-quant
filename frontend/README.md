@@ -1,16 +1,63 @@
-# React + Vite
+# crypto-quant frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite 前端，包含前台市場分析介面與 `/admin` 後台。正式環境由 FastAPI 直接服務 `frontend/dist/`。
 
-Currently, two official plugins are available:
+## 開發
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```powershell
+cd frontend
+npm install
+npm run start   # 同時啟動 uvicorn :8000 與 Vite :5173
+```
 
-## React Compiler
+也可以分開跑：
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```powershell
+cd ..
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --port 8000 --reload
+cd frontend
+npm run ui
+```
 
-## Expanding the ESLint configuration
+Vite dev server 會把 `/api` proxy 到 `http://localhost:8000`，設定在 `vite.config.js`。
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Build
+
+```powershell
+cd frontend
+npm run build
+```
+
+產物在 `frontend/dist/`。正式站不是跑 Vite，而是由 `backend/main.py` 的 FastAPI 靜態服務讀取這個目錄；改前端後要重新 build。
+
+## 主要結構
+
+- `src/App.jsx`：前台總覽/詳細頁、60 秒輪詢、日線/時線切換。
+- `src/main.jsx`：依 URL 掛載前台或 `/admin` 後台。
+- `src/api/client.js`：公開 API client。
+- `src/api/admin.js`：後台 API client 與 token storage。
+- `src/admin/AdminApp.jsx`：後台監控、幣種、工作項目、DB、AI 設定。
+- `src/components/`：圖表、訊號、回測、情緒、AI 面板等 UI。
+- `src/lib/useLivePrices.js`：前端直連 Binance WebSocket 的即時報價。
+
+## 目前暫停掛載但保留
+
+以下元件程式仍在，`App.jsx` 內註解保留恢復方式：
+
+- `AIAnalystPanel`
+- `BotWidget`
+- `OnboardingTour`
+- `MacroPanel`
+- `CorrelationHeatmap`
+
+## 檢查
+
+```powershell
+npm run build
+```
+
+後端 API smoke test 在專案根目錄執行：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests -q
+```

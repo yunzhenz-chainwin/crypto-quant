@@ -1,10 +1,10 @@
 # crypto-quant — 加密貨幣量化分析平台
 
 > **這份文件是專案的入口**：接手開發、回顧架構、或讓 AI 助手了解專案之前，先讀這一份。
-> 最後更新：2026-07-08
+> 最後更新：2026-07-13
 
 一句話介紹：一個自架的加密貨幣分析網站 — 自動抓行情與新聞、算技術指標與訊號、
-用「規則引擎 + GPT」雙 AI 解讀盤勢，附**即時報價**與**宏觀環境**背景，配有管理後台，前台資料自動更新。
+保留「規則引擎 + GPT」雙 AI 解讀能力，附**即時報價**，配有管理後台，前台資料自動更新。
 
 ---
 
@@ -31,13 +31,13 @@
 | 區塊 | 內容 |
 |---|---|
 | 市場總覽 | 15 幣訊號卡片牆、**即時報價**（前端直連 Binance WebSocket、秒級跳動）、恐懼貪婪指數、市場摘要列 |
-| 幣種詳細頁 | 蠟燭圖（**日線 / 時線** 切換，MA/布林/成交量/RSI/MACD/KDJ/DMI/BIAS/**ATR/OBV**）、回測面板、相關性熱圖 |
-| AI 智能分析 | **雙引擎**：🧮 規則引擎（6 因子白話分析，免費永遠可用）+ 🤖 GPT 深度解讀（需金鑰）；立場不一致會標「觀點分歧」；可提問（多輪對話） |
+| 幣種詳細頁 | 蠟燭圖（**日線 / 時線** 切換，MA/布林/成交量/RSI/MACD/KDJ/DMI/BIAS/**ATR/OBV**）、回測面板、情緒面板 |
+| AI 智能分析 | 後端與後台設定已保留：🧮 規則引擎（6 因子白話分析）+ 🤖 GPT 深度解讀（需金鑰）；前台 `AIAnalystPanel` 目前暫停顯示 |
 | 市場情緒 | 恐懼貪婪錶盤+歷史、**新聞情緒溫度**（每日 -100~+100，全市場+單幣）、新聞牆（10 個來源、中英文） |
 | 自動更新 | 前端每 60 秒輪詢資料版本，有新資料才重拉 — 不用手動重整 |
 | 管理後台 `/admin` | 監控儀表板、幣種管理、工作項目追蹤、資料庫檢視、訊號成績單、策略現況、AI 設定（金鑰/用量） |
 
-> **暫時下架但程式保留**（取消 `App.jsx` 對應註解即可恢復）：吉祥物小Q 漂浮聊天小幫手 `BotWidget`（2026-07-06，使用者為主管/老闆）、新手導覽 `OnboardingTour`、宏觀面板 `MacroPanel`（2026-07-07，價值待議）。
+> **暫時下架但程式保留**（取消 `App.jsx` 對應註解即可恢復）：`AIAnalystPanel`、相關性熱圖 `CorrelationHeatmap`、吉祥物小Q 漂浮聊天小幫手 `BotWidget`（2026-07-06，使用者為主管/老闆）、新手導覽 `OnboardingTour`、宏觀面板 `MacroPanel`（2026-07-07，價值待議）。
 
 ## 2. 快速啟動
 
@@ -47,6 +47,7 @@ cd frontend
 npm run start          # = uvicorn(8000, --reload) + vite(5173)
 
 # 或分開跑
+cd ..
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 cd frontend && npm run ui
 
@@ -55,7 +56,7 @@ cd frontend && npm run build
 ```
 
 - 前台：`http://localhost:8000`（或 vite 開發埠 5173）
-- 後台：`/admin`，帳密來自環境變數 `ADMIN_USER` / `ADMIN_PASS`（由 `secrets.local.cmd` 注入強密碼與 `ADMIN_SECRET`，2026-07-06 已改掉預設值；該檔已 gitignore）
+- 後台：`/admin`，帳密來自環境變數 `ADMIN_USER` / `ADMIN_PASS`；正式/排程啟動應由 `secrets.local.cmd` 注入 `ADMIN_PASS` 與 `ADMIN_SECRET`（該檔已 gitignore）。若未載入，程式會回到預設值並印安全警告。
 - GPT 金鑰：後台「AI 設定」頁填入，或環境變數 `OPENAI_API_KEY`（優先）；不填則 AI 只用規則引擎
 - 對外公開：Cloudflare Quick Tunnel 指向 8000（每次重啟 tunnel 網址會變；根治方案見待辦 #64）
 - **正式部署（開機自啟/看門狗/服務化）詳見 [`docs/archive/部署與運維.md`](docs/archive/部署與運維.md)。**
@@ -144,12 +145,12 @@ frontend/src/
   lib/useLivePrices.js   ★Binance WebSocket 即時報價 hook
   components/
     CandlestickChart.jsx 主圖（lightweight-charts，多週期時間軸）
-    AIAnalystPanel.jsx   AI 分析面板（雙引擎+提問）
+    AIAnalystPanel.jsx   AI 分析面板（雙引擎+提問；現暫停掛載）
     MarketOverview.jsx   總覽卡片牆；MarketSummary.jsx 市場摘要列
     MacroPanel.jsx       宏觀環境面板（現隱藏保留，見 §9）
     SentimentPanel.jsx   情緒面板（恐懼貪婪+新聞情緒溫度+新聞牆）
     BotMascot.jsx / BotWidget.jsx  小Q吉祥物（暫時下架，保留可恢復）
-    HeroSignal / BacktestPanel / CorrelationHeatmap / IndicatorCards ...
+    HeroSignal / BacktestPanel / CorrelationHeatmap（現暫停掛載） / IndicatorCards ...
   admin/AdminApp.jsx     整個後台（分頁：監控/幣種/工作項目/資料庫/現況/AI 設定）
 docs/                    見上方「文件地圖」
 data/  clean/*.csv（K線）raw/（原始JSON,gitignore）app.db news.db（gitignore）
@@ -167,6 +168,8 @@ reports/ indicators_*.csv backtest_*（json/csv；圖 png 不追蹤）
 
 **data/news.db**：`news`（url 唯一、標題、來源、情緒、分類、`coins` 幣種標記）、
 `news_sentiment_daily`（每日×每幣情緒分數 -100~+100）。
+
+> 目前啟用清單為 15 幣且包含 `POLUSDT`；`MATICUSDT` 相關 `data/clean` / `reports` 檔案是歷史殘留，不屬目前前台啟用清單。
 
 ## 6. 排程一覽（scheduler.py，隨 FastAPI 啟動）
 
@@ -299,7 +302,7 @@ flowchart LR
 **C. 基礎設施與營運**
 - named tunnel 固定對外網址（根治「tunnel 重啟就換網址」）+ 服務化收尾。
 - 安全強化：登入失敗鎖定、per-IP 限流、寫入端點驗證、夜間 DB 備份、Cloudflare Access 保護 `/admin`。
-- 使用分析：加 `access_log` middleware → 造訪量 / 熱門幣 / API 狀況。
+- 使用分析：`access_log` middleware 已記錄 API 路徑/幣種/耗時；待補後台圖表化（造訪量 / 熱門幣 / API 狀況）。
 
 **D. AI / 內容深化**
 - GPT 新聞批次情緒標註（治詞庫版 neutral 佔比偏高，成本 <$0.01/天）。
