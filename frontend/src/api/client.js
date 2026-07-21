@@ -2,8 +2,8 @@ import { getToken } from './admin'
 
 const BASE = '/api'
 
-async function get(path) {
-  const res = await fetch(BASE + path)
+async function get(path, options = {}) {
+  const res = await fetch(BASE + path, options)
   if (!res.ok) throw new Error(`API ${path} 回應 ${res.status}`)
   return res.json()
 }
@@ -54,6 +54,10 @@ export const fetchAllSignals = () => get('/signals')
 // 取得單一幣種的詳細訊號
 export const fetchSignal = (symbol) => get(`/signals/${symbol}`)
 
+// 研究用機率預測。signal 讓畫面切換幣種／期限時可取消舊請求，避免舊結果覆蓋新選擇。
+export const fetchForecast = (symbol, horizon = 5, { signal } = {}) =>
+  get(`/forecast/${encodeURIComponent(symbol)}?horizon=${horizon}`, { signal })
+
 // 取得回測結果（stop_loss 例如 -0.06，take_profit 例如 0.20）
 export const fetchBacktest = (
   symbol,
@@ -61,8 +65,9 @@ export const fetchBacktest = (
   takeProfit = 0.20,
   feeRate = 0.001,
   slippageRate = 0.0005,
+  { signal } = {},
 ) =>
-  get(`/backtest/${symbol}?stop_loss=${stopLoss}&take_profit=${takeProfit}&fee_rate=${feeRate}&slippage_rate=${slippageRate}`)
+  get(`/backtest/${symbol}?stop_loss=${stopLoss}&take_profit=${takeProfit}&fee_rate=${feeRate}&slippage_rate=${slippageRate}`, { signal })
 
 // 所有幣種『已入庫』的回測績效摘要（依總報酬排序），供市場總覽當第二評估標準
 export const fetchBacktestSummary = () => get('/backtest/db/summary')

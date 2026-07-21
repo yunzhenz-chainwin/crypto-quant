@@ -41,6 +41,7 @@ INTERVAL = "1d"
 SKIP = 200          # 暖身（與其他實驗一致）
 QUANTILE = 1 / 3    # 前/後 1/3 做多/放空
 MIN_COINS = 6       # 當天有效幣數不足就跳過
+DELISTING_RETURN = -1.0
 
 
 def load_panels():
@@ -64,19 +65,52 @@ def fwd_ret(O, H):
     return exit_ / enter - 1.0
 
 
+def realized_holding_returns(enter, exit_, delisting_return=DELISTING_RETURN):
+    """Compute outcomes without using future exit availability for selection.
+
+    A symbol is executable only when its entry quote exists and is positive.
+    After entry, a missing/non-positive exit quote is conservatively treated as
+    a total loss. This retains delisted assets instead of removing them with
+    hindsight.
+    """
+    enter = pd.to_numeric(enter, errors="coerce")
+    exit_ = pd.to_numeric(exit_, errors="coerce")
+    executable = enter.notna() & np.isfinite(enter) & (enter > 0)
+    quoted_exit = exit_.notna() & np.isfinite(exit_) & (exit_ > 0)
+    out = pd.Series(np.nan, index=enter.index, dtype=float)
+    normal = executable & quoted_exit
+    out.loc[normal] = exit_.loc[normal] / enter.loc[normal] - 1.0
+    out.loc[executable & ~quoted_exit] = float(delisting_return)
+    return out
+
+
+def max_drawdown_from_returns(returns):
+    """Return percentage drawdown with initial capital included as the peak."""
+    values = np.asarray(returns, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return 0.0
+    equity = np.concatenate(([1.0], np.cumprod(1.0 + values)))
+    peaks = np.maximum.accumulate(equity)
+    return float(np.min((equity - peaks) / peaks) * 100.0)
+
+
 def evaluate(signal, fwd, q=QUANTILE):
     """回傳 (long_short series, long_excess series, market series)。"""
-    valid = signal.notna() & fwd.notna()
-    sig = signal.where(valid)
-    fw = fwd.where(valid)
-    ncoins = valid.sum(axis=1)
+    # Eligibility must be known at signal time. Never remove a symbol because
+    # its future return is missing: that is survivorship/look-ahead bias.
+    eligible = signal.notna() & np.isfinite(signal)
+    horizon_elapsed = fwd.notna().any(axis=1)
+    sig = signal.where(eligible)
+    fw = fwd.where(eligible).fillna(DELISTING_RETURN)
+    ncoins = eligible.sum(axis=1)
     ranks = sig.rank(axis=1, pct=True)
     longm = ranks >= (1 - q)
     shortm = ranks <= q
     long_ret = fw.where(longm).mean(axis=1)
     short_ret = fw.where(shortm).mean(axis=1)
-    market = fw.where(valid).mean(axis=1)
-    ok = ncoins >= MIN_COINS
+    market = fw.where(eligible).mean(axis=1)
+    ok = (ncoins >= MIN_COINS) & horizon_elapsed
     ls = (long_ret - short_ret)[ok].iloc[SKIP:].dropna()
     lo = (long_ret - market)[ok].iloc[SKIP:].dropna()
     mkt = market[ok].iloc[SKIP:].dropna()

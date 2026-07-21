@@ -9,9 +9,9 @@
 import { coinName, coinCat, coinWhy, catInfo } from '../constants/coins'
 
 const SIGNAL_CONFIG = {
-  BULL:    { cls: 'hero-bull',    label: '多頭', desc: '指標顯示上漲動能較強，可考慮觀察買入機會', icon: '▲' },
-  BEAR:    { cls: 'hero-bear',    label: '空頭', desc: '指標顯示下跌壓力較大，建議謹慎或等待',     icon: '▼' },
-  NEUTRAL: { cls: 'hero-neutral', label: '中立', desc: '多空訊號互相抵消，方向不明，建議觀望',     icon: '—' },
+  BULL:    { cls: 'hero-bull',    label: '技術偏多', desc: '六項技術因子目前偏多，僅代表市場狀態，不等同未來報酬預測', icon: '▲' },
+  BEAR:    { cls: 'hero-bear',    label: '技術偏空', desc: '六項技術因子目前偏空，僅代表市場狀態，不等同未來報酬預測', icon: '▼' },
+  NEUTRAL: { cls: 'hero-neutral', label: '技術中性', desc: '多空技術因子互相抵消，目前沒有明確方向', icon: '—' },
   UNKNOWN: { cls: 'hero-neutral', label: '—',    desc: '資料載入中',                              icon: '…' },
 }
 
@@ -66,13 +66,13 @@ export function ScoreGauge({ score }) {
         {/* 分數文字 */}
         <text x={cx} y={cy - 5} textAnchor="middle" fill={color}
               fontSize="22" fontWeight="700">{score}</text>
-        <text x={cx} y={cy + 14} textAnchor="middle" fill="#64748b" fontSize="10">信心分數</text>
+        <text x={cx} y={cy + 14} textAnchor="middle" fill="#64748b" fontSize="10">技術狀態</text>
       </svg>
       {/* 刻度說明 */}
       <div className="score-gauge-axis">
-        <span style={{ color: '#ef4444' }}>空頭 0</span>
-        <span style={{ color: '#f59e0b' }}>中立 50</span>
-        <span style={{ color: '#22c55e' }}>多頭 100</span>
+        <span style={{ color: '#ef4444' }}>偏空 0</span>
+        <span style={{ color: '#f59e0b' }}>中性 50</span>
+        <span style={{ color: '#22c55e' }}>偏多 100</span>
       </div>
     </div>
   )
@@ -117,7 +117,7 @@ export default function HeroSignal({ signal, symbol, live, slim = false }) {
       {/* 右：信心分數量表（slim 時隱藏——分數量表改放右側欄位，避免重複） */}
       {!slim && (
         <div className="hero-gauge-col"
-             title="信心分數＝6 個技術因子的加權合成（RSI、MACD、均線排列、MA200、成交量、布林位置），基準 50、範圍 0~100。≥65 判偏多、≤35 判偏空。完整計分規則見下方「買賣判斷依據」面板。">
+             title="技術狀態分數＝6 個技術因子的加權合成（RSI、MACD、均線排列、MA200、成交量、布林位置），基準 50、範圍 0~100。≥65 判偏多、≤35 判偏空；它不是未來漲跌機率。">
           <ScoreGauge score={signal?.score} />
           <span className="hero-gauge-info">ⓘ 6 因子合成，計分規則見「買賣判斷依據」</span>
         </div>

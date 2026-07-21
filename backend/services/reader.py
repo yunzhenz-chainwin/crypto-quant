@@ -60,7 +60,8 @@ def _range_clause(days: int | None, start: str | None, end: str | None,
         if start:
             tail += f" AND date({tscol}) >= date(?)"; params.append(start)
         if end:
-            tail += f" AND date({tscol}) <= date(?, '+1 day')"; params.append(end)
+            # Inclusive end date without leaking rows from the following day.
+            tail += f" AND date({tscol}) < date(?, '+1 day')"; params.append(end)
         return tail + f" ORDER BY {tscol}", params, False
     if days:
         bars = days * _BARS_PER_DAY.get(interval, 1)

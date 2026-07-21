@@ -23,6 +23,8 @@ sys.path.insert(0, str(ROOT))
 import numpy as np
 import pandas as pd
 
+from src.cross_sectional import realized_holding_returns, max_drawdown_from_returns
+
 CLEAN = ROOT / "data" / "clean"
 INTERVAL = "1d"
 SKIP = 200
@@ -57,20 +59,19 @@ def backtest(C, O, L, K, R, cost=COST):
         # 進出場價：open[t+1] → open[t+1+R]
         enter = O.iloc[t + 1]
         exit_ = O.iloc[t + 1 + R]
-        valid = enter.notna() & exit_.notna() & (enter > 0)
-        m = m[m.index.isin(valid[valid].index)]
         if len(m) < 6:
             t += R
             continue
         topk = m.sort_values(ascending=False).head(K).index
         w_new = pd.Series(0.0, index=coins)
-        w_new[topk] = 1.0 / len(topk)
+        ret_coins = realized_holding_returns(enter, exit_)
+        filled = [coin for coin in topk if pd.notna(ret_coins.get(coin))]
+        w_new[filled] = 1.0 / len(topk)
         turnover = (w_new - w_prev).abs().sum()
-        ret_coins = (exit_ / enter - 1.0)
-        port = float((w_new * ret_coins).sum()) - cost * turnover
+        gross_port = float((w_new * ret_coins.reindex(coins).fillna(0.0)).sum())
+        port = max(-1.0, gross_port - cost * turnover)
         # 基準：全體等權
-        vmask = valid[valid].index
-        bench_ret = float(ret_coins[vmask].mean())
+        bench_ret = float(ret_coins.dropna().mean()) if ret_coins.notna().any() else 0.0
         strat.append(port); bench.append(bench_ret)
         periods.append(dates[t])
         w_prev = w_new
@@ -86,7 +87,7 @@ def metrics(returns, R):
     years = len(returns) * R / 365.0
     cagr = (float(eq.iloc[-1]) ** (1 / years) - 1) * 100 if years > 0.3 else 0.0
     sharpe = float(returns.mean() / returns.std() * np.sqrt(365.0 / R)) if returns.std() > 0 else 0.0
-    peak = eq.cummax(); mdd = float(((eq - peak) / peak).min()) * 100
+    mdd = max_drawdown_from_returns(returns)
     hit = float((returns > 0).mean()) * 100
     return dict(n=len(returns), total=total, cagr=cagr, sharpe=sharpe, mdd=mdd, hit=hit)
 

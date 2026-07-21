@@ -1,7 +1,7 @@
 # API 規格
 
-> 後端所有 HTTP 端點的參考。共 **48 端點 / 10 個 router**。搭配 [README](../../README.md)、[開發指南](開發指南.md)。
-> 最後更新：2026-07-08（掃 `backend/routers/*` 產生）
+> 後端所有 HTTP 端點的參考。搭配 [README](../../README.md)、[開發指南](開發指南.md)。
+> 最後更新：2026-07-21
 
 ---
 
@@ -19,6 +19,7 @@
 | 401 | 未登入 / 逾時 | 🔒 端點沒帶 token 或 token 過期 |
 | 404 | 找不到 | 幣種無資料、未知資料表 / job |
 | 409 | 衝突 | 同型排程任務還在跑（`ops/run`） |
+| 429 | 請求過多 | 登入每 client 5 次/60 秒；單幣詳細回測 12 次/60 秒（含 `Retry-After`） |
 | 502 | 上游失敗 | 新聞回補時 HackerNews 全數失敗 |
 
 - **快取**：部分端點有記憶體快取（恐懼貪婪 1h、新聞 30 分、macro 15 分、AI 分析 15 分），減少外部請求。
@@ -60,12 +61,22 @@
 
 | 端點 | 參數 | 回應摘要 |
 |---|---|---|
-| `GET /backtest` | — | 所有幣的預設參數回測（陣列） |
-| `GET /backtest/{symbol}` | `stop_loss`(-0.30~-0.01, 預設-0.06)、`take_profit`(0.05~1.0, 預設0.20)、`fee_rate`(0~0.01, 預設0.001)、`slippage_rate`(0~0.02, 預設0.0005) | 即時回測：`{trades, win_rate, total_return, max_drawdown, sharpe, vs_buy_hold, equity_curve...}` |
+| `GET /backtest` | — | 所有幣**已入庫績效摘要**（`/backtest/db/summary` 的有界別名） |
+| `GET /backtest/{symbol}` | `stop_loss`(-0.30~-0.01，每次0.01)、`take_profit`(0.05~1.0，每次0.01)、`fee_rate`(0~0.01，每次0.0001)、`slippage_rate`(0~0.02，每次0.0001) | 單幣即時詳細回測：`{metrics, recent_trades, equity_curve, validation, parameter_sweep...}` |
 | `GET /backtest/db/summary` | — | 所有幣**已入庫**績效摘要（依總報酬排序），供跨幣比較 |
 | `GET /backtest/db/{symbol}/trades` | `limit`(0–2000, 預設0=全部) | 已入庫逐筆進出場明細 |
 
 > 回測**不前視**：依訊號動作延到隔根開盤成交（見 [開發指南](開發指南.md)）。
+
+> **2026-07-21 相容性註記：** `/backtest` 舊版會同步冷算所有幣的完整物件，已因公開端點資源耗盡風險停止。需要完整資料的 client 請逐幣呼叫 `/backtest/{symbol}`；跨幣列表請使用摘要 shape。單幣結果採 64 組 LRU，圖表最多傳 600 個等距點加極值，但所有績效與風險指標仍使用完整每日曲線計算。
+
+### 5.1 `forecast` — 研究預測（🌐）
+
+| 端點 | 參數 | 回應摘要 |
+|---|---|---|
+| `GET /forecast/{symbol}` | `horizon`（1、5、10，預設5） | 不可變研究快照：漲跌機率、q10/q50/q90、下行風險、regime、confidence、證據、拒答原因、`input_hash`、`data_version`、`reference_close` |
+
+> 預測只使用已完成 UTC 日線；低信心、資料過期或樣本不足時回傳 `status=abstain`。同一 `as_of` 若歷史資料被修訂，會依 SHA-256 輸入雜湊另存新快照，不覆寫舊預測。此功能為研究基準，不是投資建議或報酬承諾。
 
 ## 6. `correlation` — 相關性（🌐）
 
@@ -108,7 +119,7 @@
 ### 登入
 | 端點 | 權限 | body | 回應 |
 |---|---|---|---|
-| `POST /admin/login` | 🌐 | `{username, password}` | `{ok, token, user}`；401=帳密錯 |
+| `POST /admin/login` | 🌐 | `{username, password}` | `{ok, token, user}`；401=帳密錯；每 client 5 次/60 秒，超限 429 |
 
 ### 監控
 | 端點 | 用途 | 回應摘要 |

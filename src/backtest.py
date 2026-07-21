@@ -206,7 +206,101 @@ def run_backtest(df: pd.DataFrame,
 
 
 # ── 績效指標計算 ──────────────────────────────────────────────────────
-def compute_metrics(trades: list[dict], df: pd.DataFrame) -> dict:
+def _date_key(value) -> str:
+    stamp = pd.Timestamp(value)
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert(None)
+    return str(stamp.date())
+
+
+def _daily_mark_to_market(trades: list[dict], df: pd.DataFrame, include_curve=True):
+    """Build a full-period daily strategy/cash equity curve.
+
+    While a trade is open, capital is marked to the completed daily close. On
+    the exit date the stored net trade return is applied exactly, preserving the
+    fees/slippage already calculated by ``run_backtest``. Before entry and after
+    exit the portfolio stays in cash.
+    """
+    ordered_df = df.sort_values("date").reset_index(drop=True).copy()
+    if ordered_df.empty:
+        return pd.Series(dtype=float), []
+
+    dates = pd.to_datetime(ordered_df["date"])
+    date_keys = dates.dt.strftime("%Y-%m-%d").to_numpy()
+    date_to_index = {date: index for index, date in enumerate(date_keys)}
+    closes_series = pd.to_numeric(ordered_df["close"], errors="coerce").ffill().bfill()
+    closes = closes_series.to_numpy(dtype=float)
+    if not np.isfinite(closes).any():
+        closes = np.ones(len(ordered_df), dtype=float)
+
+    equity_values = np.ones(len(ordered_df), dtype=float)
+    in_position = np.zeros(len(ordered_df), dtype=bool)
+    completion_events = np.zeros(len(ordered_df), dtype=int)
+    cash = 1.0
+    cursor = 0
+    ordered_trades = sorted(
+        trades,
+        key=lambda trade: (_date_key(trade["entry_date"]), _date_key(trade["exit_date"])),
+    )
+
+    for trade in ordered_trades:
+        entry_index = date_to_index.get(_date_key(trade["entry_date"]))
+        exit_index = date_to_index.get(_date_key(trade["exit_date"]))
+        if entry_index is None or exit_index is None:
+            raise ValueError("trade date is outside the metric dataframe")
+        if exit_index < entry_index or entry_index < cursor:
+            raise ValueError("trades must be chronological and non-overlapping")
+
+        equity_values[cursor:entry_index] = cash
+        entry_price = float(trade["entry_price"])
+        exit_price = float(trade.get("exit_price", 0.0) or 0.0)
+        net_factor = max(0.0, 1.0 + float(trade["return_pct"]) / 100.0)
+        inferred_fee = 0.0
+        if entry_price > 0 and exit_price > 0:
+            fee_ratio = net_factor * entry_price / exit_price
+            if fee_ratio > 0:
+                inferred_fee = float(
+                    np.clip((1.0 - fee_ratio) / (1.0 + fee_ratio), 0.0, 0.1)
+                )
+        entry_basis = entry_price * (1.0 + inferred_fee)
+
+        if exit_index > entry_index:
+            if entry_basis > 0:
+                equity_values[entry_index:exit_index] = (
+                    cash * closes[entry_index:exit_index] / entry_basis
+                )
+            else:
+                equity_values[entry_index:exit_index] = cash
+            in_position[entry_index:exit_index] = True
+
+        cash *= net_factor
+        equity_values[exit_index] = cash
+        completion_events[exit_index] += 1
+        cursor = exit_index + 1
+
+    equity_values[cursor:] = cash
+    daily_equity = pd.Series(equity_values, index=dates, dtype=float)
+    if not include_curve:
+        return daily_equity, []
+
+    first_close = float(closes[0]) if len(closes) and closes[0] > 0 else 1.0
+    buy_hold = closes / first_close
+    completed = np.cumsum(completion_events)
+    curve = [
+        {
+            "trade": int(index),
+            "equity": float(round(equity_values[index], 6)),
+            "bh": float(round(buy_hold[index], 6)) if np.isfinite(buy_hold[index]) else None,
+            "date": str(date_keys[index]),
+            "completed_trades": int(completed[index]),
+            "in_position": bool(in_position[index]),
+        }
+        for index in range(len(ordered_df))
+    ]
+    return daily_equity, curve
+
+
+def compute_metrics(trades: list[dict], df: pd.DataFrame, include_curve: bool = True) -> dict:
     if not trades:
         return {"error": "無交易記錄，可能訊號條件太嚴格"}
 
@@ -221,56 +315,46 @@ def compute_metrics(trades: list[dict], df: pd.DataFrame) -> dict:
     gross_loss   = abs(sum(losses))
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999.0
 
-    # 複利總報酬
-    equity = [1.0]
-    for r in rets:
-        equity.append(equity[-1] * (1 + r))
-    total_return = (equity[-1] - 1) * 100
+    # Full-period daily mark-to-market equity, including cash-only days.
+    daily_equity, equity_curve = _daily_mark_to_market(
+        trades, df, include_curve=include_curve,
+    )
+    total_return = (float(daily_equity.iloc[-1]) - 1.0) * 100
+    ordered_dates = pd.to_datetime(df["date"]).sort_values()
+    years = (ordered_dates.iloc[-1] - ordered_dates.iloc[0]).days / 365.25
+    if years <= 0:
+        cagr = 0.0
+    elif daily_equity.iloc[-1] <= 0:
+        cagr = -100.0
+    else:
+        cagr = (float(daily_equity.iloc[-1]) ** (1.0 / years) - 1.0) * 100
+    # Include the starting cash value so a first-day loss is not hidden merely
+    # because there is no earlier dataframe observation.
+    metric_equity = pd.Series(
+        np.concatenate(([1.0], daily_equity.to_numpy(dtype=float))),
+        dtype=float,
+    )
+    peaks = metric_equity.cummax()
+    drawdown = (metric_equity - peaks) / peaks
+    max_dd = float(drawdown.min() * 100)
 
-    # 年化報酬（CAGR）
-    years = (pd.Timestamp(trades[-1]["exit_date"]) -
-             pd.Timestamp(trades[0]["entry_date"])).days / 365.25
-    cagr = ((equity[-1]) ** (1 / years) - 1) * 100 if years > 0.1 else 0.0
-
-    # 最大回撤
-    arr = np.array(equity)
-    peak     = np.maximum.accumulate(arr)
-    drawdown = (arr - peak) / peak
-    max_dd   = float(np.min(drawdown) * 100)
-
-    # 夏普比率（以每日報酬近似）
+    # Sharpe is based on daily changes in the marked equity curve.
     hold_days = [t["hold_days"] for t in trades]
     avg_hold  = float(np.mean(hold_days))
-    # avg_hold 可能為 0（進場當根即停損/停利出場的極短單）→ 防止 365/avg_hold 除零
-    if len(rets) > 1 and float(np.std(rets)) > 0 and avg_hold > 0:
-        sharpe = (float(np.mean(rets)) / float(np.std(rets))) * math.sqrt(
-            max(365 / avg_hold, 1))
+    daily_returns = metric_equity.pct_change(fill_method=None).dropna()
+    daily_std = float(daily_returns.std(ddof=1)) if len(daily_returns) > 1 else 0.0
+    if len(daily_returns) > 1 and np.isfinite(daily_std) and daily_std > 0:
+        sharpe = float(daily_returns.mean()) / daily_std * math.sqrt(365.0)
     else:
         sharpe = 0.0
 
-    # 買入持有比較
-    bh_return = (float(df["close"].iloc[-1]) / float(df["close"].iloc[0]) - 1) * 100
-    bh_equity = df["close"].astype(float) / float(df["close"].iloc[0])
+    # Buy-and-hold uses the same complete dataframe period.
+    bh_close = pd.to_numeric(df.sort_values("date")["close"], errors="coerce").ffill().bfill()
+    bh_equity = bh_close / float(bh_close.iloc[0])
+    bh_return = (float(bh_equity.iloc[-1]) - 1.0) * 100
     bh_peak = bh_equity.cummax()
     bh_dd = (bh_equity - bh_peak) / bh_peak
     bh_max_dd = float(bh_dd.min() * 100)
-
-    # 權益曲線（供圖表用）：策略 vs 買入持有,以每筆交易的出場日對齊
-    first_close = float(df["close"].iloc[0])
-    close_by_date = {}
-    for _d, _c in zip(df["date"], df["close"]):
-        ds = str(_d.date()) if hasattr(_d, "date") else str(_d)[:10]
-        close_by_date[ds] = float(_c)
-    equity_curve = []
-    for i, e in enumerate(equity[1:]):
-        ed = trades[i]["exit_date"]
-        bh = close_by_date.get(ed, first_close) / first_close   # 同一天若有買入持有會在哪
-        equity_curve.append({
-            "trade": i + 1,
-            "equity": float(round(e, 4)),     # 策略資產倍數
-            "bh": float(round(bh, 4)),         # 買入持有資產倍數
-            "date": ed,
-        })
 
     # 全部轉成 Python 原生型別，避免 FastAPI 序列化 numpy 類型失敗
     def f(v): return float(round(float(v), 4))
@@ -298,6 +382,108 @@ def compute_metrics(trades: list[dict], df: pd.DataFrame) -> dict:
 
 
 # ── 隨機進場基準（蒙地卡羅）──────────────────────────────────────────
+def _build_non_overlapping_schedule_counts(durations, n_rows, opens, start_index=2):
+    """Count every feasible ordered, non-overlapping schedule exactly.
+
+    ``ways[k][cursor]`` is the number of schedules for trades ``k:`` when the
+    next trade may start at or after ``cursor``. Invalid entry opens contribute
+    zero schedules, so no rejection step can distort the target distribution.
+    """
+    durations = tuple(int(duration) for duration in durations)
+    if not durations or any(duration < 0 for duration in durations):
+        return None
+    if n_rows <= start_index:
+        return None
+
+    open_values = np.asarray(opens, dtype=float)
+    eligible = np.zeros(n_rows, dtype=bool)
+    available = min(n_rows, len(open_values))
+    eligible[:available] = np.isfinite(open_values[:available]) & (open_values[:available] > 0)
+
+    n_trades = len(durations)
+    ways = [[0] * (n_rows + 1) for _ in range(n_trades + 1)]
+    ways[n_trades] = [1] * (n_rows + 1)
+
+    for trade_index in range(n_trades - 1, -1, -1):
+        length = durations[trade_index] + 1
+        next_ways = ways[trade_index + 1]
+        current = ways[trade_index]
+        suffix_count = 0
+        for start in range(n_rows - 1, -1, -1):
+            if start + length <= n_rows and eligible[start]:
+                suffix_count += next_ways[start + length]
+            current[start] = suffix_count
+
+    if ways[0][start_index] == 0:
+        return None
+    return {
+        "durations": durations,
+        "n_rows": int(n_rows),
+        "start_index": int(start_index),
+        "eligible": eligible,
+        "ways": ways,
+    }
+
+
+def _rng_randbelow(rng, upper):
+    """Exact uniform integer in ``[0, upper)`` for arbitrary-size counts."""
+    upper = int(upper)
+    if upper <= 0:
+        raise ValueError("upper must be positive")
+    if upper <= np.iinfo(np.int64).max:
+        return int(rng.integers(0, upper))
+
+    bit_count = upper.bit_length()
+    word_count = (bit_count + 63) // 64
+    mask = (1 << bit_count) - 1
+    while True:
+        candidate = 0
+        for word_index in range(word_count):
+            candidate |= int(rng.bit_generator.random_raw()) << (64 * word_index)
+        candidate &= mask
+        if candidate < upper:
+            return candidate
+
+
+def _sample_non_overlapping_schedule(schedule_counts, rng):
+    """Sample one schedule uniformly from the exact DP counts."""
+    durations = schedule_counts["durations"]
+    n_rows = schedule_counts["n_rows"]
+    eligible = schedule_counts["eligible"]
+    ways = schedule_counts["ways"]
+    cursor = schedule_counts["start_index"]
+    starts = []
+
+    for trade_index, duration in enumerate(durations):
+        total = ways[trade_index][cursor]
+        draw = _rng_randbelow(rng, total)
+        length = duration + 1
+        chosen = None
+        for start in range(cursor, n_rows - length + 1):
+            if not eligible[start]:
+                continue
+            completions = ways[trade_index + 1][start + length]
+            if draw < completions:
+                chosen = start
+                break
+            draw -= completions
+        if chosen is None:
+            raise RuntimeError("schedule count/sample mismatch")
+        starts.append(chosen)
+        cursor = chosen + length
+    return starts
+
+
+def _random_non_overlapping_starts(durations, n_rows, rng, opens, start_index=2):
+    """Uniformly sample all feasible ordered, non-overlapping schedules."""
+    schedule_counts = _build_non_overlapping_schedule_counts(
+        durations, n_rows, opens, start_index=start_index,
+    )
+    if schedule_counts is None:
+        return None
+    return _sample_non_overlapping_schedule(schedule_counts, rng)
+
+
 def random_entry_baseline(df: pd.DataFrame, trades: list[dict],
                           strategy_return_pct: float,
                           stop_loss: float = -0.06,
@@ -313,7 +499,8 @@ def random_entry_baseline(df: pd.DataFrame, trades: list[dict],
       - 交易筆數 = 實際回測筆數；每筆持有上限 = 該筆實際持有的 K 棒數
       - 停損 / 停利觸價、手續費、滑價與 run_backtest 同一套數學
       - 進出場都以開盤價成交（進場含滑價、出場含滑價）
-      - 允許模擬交易期間重疊（每筆獨立抽樣；總報酬為複利乘積，順序不影響）
+      - 隨機交易彼此不重疊，避免同一時間重複投入全部資本
+      - 同日出場交易不丟棄；從進場棒起套用與正式策略相同的停損/停利順序
       - 固定亂數種子 → 結果可重現（公正性要求：任何人重跑數字相同）
 
     回傳 strategy_percentile = 策略總報酬在 n_sims 次隨機模擬中的百分位：
@@ -330,32 +517,40 @@ def random_entry_baseline(df: pd.DataFrame, trades: list[dict],
     n = len(df)
 
     # 每筆實際持有的 K 棒數（進場列 → 出場列）；對不上日期的交易略過
-    durations = []
+    trade_specs = []
     for t in trades:
         i = idx_of.get(str(t["entry_date"])[:10])
         j = idx_of.get(str(t["exit_date"])[:10])
-        if i is not None and j is not None and j > i:
-            durations.append(j - i)
-    if not durations:
+        if i is not None and j is not None and j >= i:
+            trade_specs.append((j - i, str(t.get("exit_reason", "signal_exit"))))
+    if len(trade_specs) != len(trades):
+        return None
+    durations = [duration for duration, _ in trade_specs]
+    schedule_counts = _build_non_overlapping_schedule_counts(durations, n, opens)
+    if schedule_counts is None:
         return None
 
     rng = np.random.default_rng(seed)
     totals = np.empty(n_sims)
     for s in range(n_sims):
         eq = 1.0
-        for d in durations:
-            hi_idx = n - 1 - d
-            if hi_idx < 1:
-                continue                       # 持有期比整段資料還長，略過
-            i = int(rng.integers(1, hi_idx + 1))
+        starts = _sample_non_overlapping_schedule(schedule_counts, rng)
+        for i, (d, exit_reason) in zip(starts, trade_specs):
             ep = opens[i]
-            if not (ep > 0):                   # NaN / 非正值 → 這筆略過
-                continue
             fill_entry = ep * (1 + slippage_rate)
             stop_price = ep * (1 + stop_loss)
             tp_price   = ep * (1 + take_profit)
             raw_exit = None
-            for k in range(i + 1, i + d + 1):  # 逐日檢查觸價（與 run_backtest 同：先停損後停利）
+            # Include the entry bar. For a scheduled exit, the final bar exits
+            # at its open before intraday stop/take-profit checks. A zero-day
+            # trade still checks its entry bar, matching ``run_backtest``.
+            if d == 0:
+                risk_bars = (i,)
+            elif exit_reason == "signal_exit":
+                risk_bars = range(i, i + d)
+            else:
+                risk_bars = range(i, i + d + 1)
+            for k in risk_bars:
                 lo = lows[k]  if lows[k]  == lows[k]  else ep
                 hg = highs[k] if highs[k] == highs[k] else ep
                 if lo <= stop_price:
@@ -365,7 +560,8 @@ def random_entry_baseline(df: pd.DataFrame, trades: list[dict],
                     raw_exit = tp_price
                     break
             if raw_exit is None:               # 未觸價 → 持有期滿以開盤價出場
-                raw_exit = opens[i + d] if opens[i + d] > 0 else ep
+                planned_exit = opens[i + d]
+                raw_exit = planned_exit if np.isfinite(planned_exit) and planned_exit > 0 else 0.0
             fill_exit = raw_exit * (1 - slippage_rate)
             eq *= (fill_exit * (1 - fee_rate)) / (fill_entry * (1 + fee_rate))
         totals[s] = (eq - 1) * 100
@@ -397,7 +593,8 @@ def run_backtest_report(df: pd.DataFrame,
                         take_profit: float = 0.20,
                         fee_rate: float = 0.001,
                         slippage_rate: float = 0.0005,
-                        signals: list[str] = None) -> dict:
+                        signals: list[str] = None,
+                        include_curve: bool = False) -> dict:
     trades = run_backtest(
         df,
         stop_loss=stop_loss,
@@ -406,7 +603,7 @@ def run_backtest_report(df: pd.DataFrame,
         slippage_rate=slippage_rate,
         signals=signals,
     )
-    metrics = compute_metrics(trades, df)
+    metrics = compute_metrics(trades, df, include_curve=include_curve)
     return {"trades": trades, "metrics": metrics}
 
 
@@ -424,6 +621,7 @@ def walk_forward_split_report(df: pd.DataFrame,
         fee_rate,
         slippage_rate,
         signals=compute_signals(train_df),
+        include_curve=False,
     )
     test = run_backtest_report(
         test_df,
@@ -432,6 +630,7 @@ def walk_forward_split_report(df: pd.DataFrame,
         fee_rate,
         slippage_rate,
         signals=compute_signals(test_df),
+        include_curve=False,
     )
 
     def compact(metrics: dict) -> dict:
@@ -476,6 +675,7 @@ def parameter_sweep(df: pd.DataFrame,
                 fee_rate=fee_rate,
                 slippage_rate=slippage_rate,
                 signals=signals,
+                include_curve=False,
             )
             metrics = report["metrics"]
             if "error" in metrics:
@@ -558,7 +758,7 @@ def regenerate_reports(symbols: list[str] = None) -> int:
         try:
             df = load_indicators(sym)
             trades = run_backtest(df)
-            metrics = compute_metrics(trades, df)
+            metrics = compute_metrics(trades, df, include_curve=False)
             pd.DataFrame(trades).to_csv(
                 REPORT_DIR / f"backtest_trades_{sym}_{INTERVAL}.csv", index=False)
             metrics_out = {k: v for k, v in metrics.items() if k != "equity_curve"}
@@ -582,7 +782,7 @@ def main():
 
     df     = load_indicators(symbol)
     trades = run_backtest(df, stop_loss=stop_loss, take_profit=take_profit)
-    metrics= compute_metrics(trades, df)
+    metrics= compute_metrics(trades, df, include_curve=False)
 
     print_report(symbol, metrics, trades, df)
 

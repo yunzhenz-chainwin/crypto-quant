@@ -41,28 +41,36 @@ function assessCredibility(m, rb, oos) {
   return { level, label, color, why: parts.join('、') }
 }
 
-export default function RecommendationCard({ signal, backtest, params, onDetail }) {
+export default function RecommendationCard({ signal, backtest, backtestStatus = 'idle', params, onDetail }) {
   const score = signal?.score
   if (score == null) return null
   const m = backtest?.metrics
   const cred = assessCredibility(m, backtest?.random_baseline, backtest?.validation?.out_of_sample?.metrics)
 
-  const stage = score >= 65 ? 'enter' : score <= 35 ? 'exit' : 'wait'
+  const stage = score >= 65 ? 'bullish' : score <= 35 ? 'bearish' : 'neutral'
   const stanceZh = score >= 65 ? '偏多' : score <= 35 ? '偏空' : '中立'
-  const stageNote = stage === 'enter' ? '已達進場門檻（≥65）'
-    : stage === 'exit' ? '已轉偏空（≤35）'
-    : `未達進場門檻（需 ≥65，還差 ${65 - score} 分）`
+  const stageNote = stage === 'bullish' ? '位於技術偏多區（≥65）'
+    : stage === 'bearish' ? '位於技術偏空區（≤35）'
+    : '位於技術中性區（36–64）'
 
   // 綜合結論：進場訊號 × 回測可信度
   let verdict
-  if (stage === 'enter') {
-    verdict = cred?.level === 'low'
-      ? { color: '#f59e0b', title: '訊號偏多，但這訊號在本幣依據薄弱 → 謹慎、暫不建議追進' }
-      : { color: '#22c55e', title: '可考慮進場（訊號偏多，且有回測依據）' }
-  } else if (stage === 'exit') {
-    verdict = { color: '#ef4444', title: '偏空 → 避開；持有中則留意出場' }
+  if (stage === 'bullish') {
+    if (backtestStatus === 'loading') {
+      verdict = { color: '#f59e0b', title: '技術狀態偏多；回測仍在計算，可靠度尚未確認' }
+    } else if (backtestStatus === 'error') {
+      verdict = { color: '#f59e0b', title: '技術狀態偏多；回測取得失敗，不能判定歷史可靠度' }
+    } else if (!cred) {
+      verdict = { color: '#f59e0b', title: '技術狀態偏多；缺少有效回測，不能判定歷史可靠度' }
+    } else if (cred.level === 'low') {
+      verdict = { color: '#f59e0b', title: '技術狀態偏多，但歷史回測依據薄弱' }
+    } else {
+      verdict = { color: '#22c55e', title: `技術狀態偏多；歷史回測${cred.label}` }
+    }
+  } else if (stage === 'bearish') {
+    verdict = { color: '#ef4444', title: '技術狀態偏空；請搭配風險預測與反對證據判讀' }
   } else {
-    verdict = { color: '#94a3b8', title: `觀望——未達進場點（分數需 ≥65，現在 ${score} 分）` }
+    verdict = { color: '#94a3b8', title: `技術狀態中性（目前 ${score} 分），方向尚不明確` }
   }
 
   const stopPct = params ? `-${Math.round(Math.abs(params.stopLoss) * 100)}%` : '—'
@@ -78,7 +86,7 @@ export default function RecommendationCard({ signal, backtest, params, onDetail 
       title="點看計分明細與回測驗證"
     >
       <div className="strat-reco-head">
-        <span className="strat-reco-eyebrow">買賣策略 · 綜合建議</span>
+        <span className="strat-reco-eyebrow">技術狀態 · 歷史驗證</span>
         {cred && (
           <span className="strat-reco-cred" style={{ color: cred.color, borderColor: `${cred.color}66` }}>
             回測可信度：{cred.label}
@@ -99,16 +107,20 @@ export default function RecommendationCard({ signal, backtest, params, onDetail 
           <div>
             <b>訊號</b>：分數 <b style={{ color: verdict.color }}>{score}</b> · {stanceZh}，{stageNote}
           </div>
-          {cred ? (
+          {backtestStatus === 'loading' ? (
+            <div className="strat-reco-muted"><b>回測</b>：計算中，尚未形成歷史依據</div>
+          ) : backtestStatus === 'error' ? (
+            <div className="strat-reco-muted"><b>回測</b>：取得失敗，未沿用舊結果</div>
+          ) : cred ? (
             <div>
               <b>回測</b>：{cred.why} → 這訊號在本幣<b style={{ color: cred.color }}>{cred.label}</b>
             </div>
           ) : (
-            <div className="strat-reco-muted"><b>回測</b>：計算中…</div>
+            <div className="strat-reco-muted"><b>回測</b>：目前沒有可用結果</div>
           )}
-          {stage === 'enter' && m && !m.error && (
+          {stage === 'bullish' && m && !m.error && (
             <div>
-              <b>若進場</b>（停損 {stopPct}／停利 {takePct}）：上檔平均賺
+              <b>歷史測試設定</b>（停損 {stopPct}／停利 {takePct}）：獲利樣本平均
               <b style={{ color: '#22c55e' }}> {fmtPct1(m.avg_win_pct)}</b>、下檔
               <b style={{ color: '#ef4444' }}> {fmtPct1(m.avg_loss_pct)}</b>、
               平均持有 {Math.round(m.avg_hold_days ?? 0)} 天、最壞回撤 {fmtPct1(m.max_drawdown_pct)}
@@ -119,7 +131,7 @@ export default function RecommendationCard({ signal, backtest, params, onDetail 
 
       <div className="strat-reco-more">點看計分明細＋回測驗證 →</div>
 
-      <div className="strat-reco-disc">※ 系統依規則＋歷史回測的建議，非投資建議；過去績效不代表未來。</div>
+      <div className="strat-reco-disc">※ 技術分數只描述目前狀態；歷史回測與研究預測均不代表未來績效。</div>
     </div>
   )
 }

@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from fastapi import APIRouter, HTTPException, Query
+
+from backend.services import app_db
+from backend.services.reader import available_symbols, load_prices
+from src.forecasting import (
+    MODEL_VERSION,
+    apply_freshness_guard,
+    generate_forecast,
+    latest_completed_daily_date,
+    model_metadata,
+)
+
+
+router = APIRouter()
+
+
+@router.get("/forecast/{symbol}")
+def get_forecast(
+    symbol: str,
+    horizon: int = Query(default=5, description="Research forecast horizon: 1, 5, or 10 days"),
+):
+    """Return an immutable, explicitly research-only forecast snapshot."""
+    symbol = symbol.upper()
+    if horizon not in (1, 5, 10):
+        raise HTTPException(status_code=422, detail="horizon 僅支援 1、5、10 日")
+    if symbol not in available_symbols("1d"):
+        raise HTTPException(status_code=404, detail=f"{symbol} 無日線資料")
+
+    now = datetime.now(timezone.utc)
+    completed_cutoff = latest_completed_daily_date(now)
+    all_rows = load_prices(symbol, interval="1d")
+    completed_rows = [
+        row for row in all_rows
+        if row.get("date") and str(row["date"])[:10] <= completed_cutoff.isoformat()
+    ]
+
+    # With no completed bar there is no valid as_of key to persist.  Still
+    # return the fixed abstention contract instead of fabricating a forecast.
+    if not completed_rows:
+        return generate_forecast(symbol, horizon, [], now=now)
+
+    as_of = max(str(row["date"])[:10] for row in completed_rows)
+    payload = generate_forecast(
+        symbol,
+        horizon,
+        completed_rows,
+        as_of=as_of,
+        now=now,
+    )
+    cached = app_db.load_forecast_snapshot(
+        symbol, horizon, as_of, MODEL_VERSION, payload["input_hash"]
+    )
+    if cached is not None:
+        return apply_freshness_guard(cached, now=now)
+
+    app_db.register_forecast_model(model_metadata())
+    try:
+        stored = app_db.save_forecast_snapshot(payload)
+    except app_db.AppendOnlyConflict:
+        # Two requests can race after the cache miss.  Whichever append won is
+        # authoritative; immutable storage ensures neither can overwrite it.
+        stored = app_db.load_forecast_snapshot(
+            symbol, horizon, as_of, MODEL_VERSION, payload["input_hash"]
+        )
+        if stored is None:
+            raise HTTPException(status_code=409, detail="預測快照寫入衝突")
+    return apply_freshness_guard(stored, now=now)

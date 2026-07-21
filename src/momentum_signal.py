@@ -1,27 +1,28 @@
 # -*- coding: utf-8 -*-
+"""Defensive cross-sectional momentum strategy.
+
+The live recommendation and historical backtest deliberately share the same
+rebalance calendar and target-weight function.  A recommendation therefore
+describes the strategy that produced the displayed performance, rather than a
+separate daily re-ranking rule.
 """
-momentum_signal.py — 防禦型跨幣動量「正式訊號服務」（供後台即時呼叫）
 
-把研究驗證過的成品策略，變成平台可以每天呼叫的服務：
-  策略 = 動量 mom30 + BTC>100日均 regime + top5 等權 + 波動度目標 30%
-
-提供：
-  today_signal()      今日該怎麼做（抱現金 / 持有哪幾幣、各幾 %）
-  strategy_metrics()  策略績效（全期 + 樣本外 + 對照市場）
-  cached_strategy()   兩者合一、加快取（鍵=資料 mtime）
-
-無偷看未來：訊號用「截至今天收盤」的資料算。
-※ 績效為回測、偏樂觀、未經實盤，僅供參考，非績效承諾。
-"""
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
+
+try:
+    from src.cross_sectional import realized_holding_returns, max_drawdown_from_returns
+except ImportError:
+    from cross_sectional import realized_holding_returns, max_drawdown_from_returns
+
 
 ROOT = Path(__file__).resolve().parent.parent
 CLEAN = ROOT / "data" / "clean"
 INTERVAL = "1d"
-L, K, R = 30, 5, 10           # 動量回看 / 持有幾幣 / 換倉天數
-REGIME_N, VOLWIN = 100, 20    # regime 均線 / 波動估計窗
+L, K, R = 30, 5, 10
+REGIME_N, VOLWIN = 100, 20
 TARGET_VOL, COST = 0.30, 0.0015
 ANN = np.sqrt(365.0)
 SKIP = 200
@@ -29,121 +30,306 @@ SKIP = 200
 
 def load_panels():
     closes, opens = {}, {}
-    for p in sorted(CLEAN.glob(f"*_{INTERVAL}.csv")):
-        sym = p.stem.replace(f"_{INTERVAL}", "")
-        df = pd.read_csv(p, parse_dates=["date"]).sort_values("date")
-        s = df.set_index("date")
-        closes[sym] = s["close"].astype(float); opens[sym] = s["open"].astype(float)
-    C = pd.DataFrame(closes).sort_index()
-    # 對齊尾端:某幣可能比別人多抓一天（例如剛換上、已抓到今天的 POL），會讓最後一列
-    # 只有它有值、其他幣含 BTC 為 NaN → regime 均線變 NaN。以 BTC 最後有效日截斷。
-    last = C["BTCUSDT"].last_valid_index() if "BTCUSDT" in C.columns else None
-    if last is not None:
-        C = C.loc[:last]
-    O = pd.DataFrame(opens).sort_index().reindex(C.index)
-    return C, O
+    for path in sorted(CLEAN.glob(f"*_{INTERVAL}.csv")):
+        symbol = path.stem.replace(f"_{INTERVAL}", "")
+        frame = pd.read_csv(path, parse_dates=["date"]).sort_values("date")
+        indexed = frame.set_index("date")
+        closes[symbol] = indexed["close"].astype(float)
+        opens[symbol] = indexed["open"].astype(float)
+
+    close_panel = pd.DataFrame(closes).sort_index()
+    # Do not let a longer, inactive series extend the strategy past BTC's data.
+    last_btc = close_panel["BTCUSDT"].last_valid_index() if "BTCUSDT" in close_panel else None
+    if last_btc is not None:
+        close_panel = close_panel.loc[:last_btc]
+    open_panel = pd.DataFrame(opens).sort_index().reindex(close_panel.index)
+    return close_panel, open_panel
 
 
-def today_signal(C, O):
-    """用截至最後一天收盤的資料，算出「今天該怎麼做」。"""
-    t = len(C) - 1
-    btc = C["BTCUSDT"]; ma = btc.rolling(REGIME_N).mean()
-    date = str(C.index[t])[:10]
-    btc_px, ma_px = float(btc.iloc[t]), float(ma.iloc[t]) if pd.notna(ma.iloc[t]) else None
-    on = (ma_px is not None) and (btc_px > ma_px)
-
-    if not on:
-        reason = (f"BTC {btc_px:,.0f} < 100日均 {ma_px:,.0f}（空頭）" if ma_px is not None
-                  else f"BTC {btc_px:,.0f}（100日均資料不足，保守抱現金）")
-        return {"date": date, "regime": "cash",
-                "regime_reason": reason,
-                "exposure_pct": 0, "cash_pct": 100, "picks": [],
-                "note": "空頭 → 建議抱現金、不進場"}
-
-    mom = (C.iloc[t] / C.iloc[t - L] - 1) * 100
-    ranked = mom.dropna().sort_values(ascending=False)
-    topk = list(ranked.head(K).index)
-    dret = C.pct_change()
-    win = dret[topk].iloc[max(0, t - VOLWIN + 1):t + 1]
-    bvol = float((win * (1.0 / K)).sum(axis=1).std() * ANN)
-    exposure = min(1.0, TARGET_VOL / bvol) if bvol > 0 else 0.0
-    picks = [{"symbol": s.replace("USDT", ""),
-              "momentum": round(float(ranked[s]), 1),
-              "weight": round(exposure / K * 100, 1)} for s in topk]
-    return {"date": date, "regime": "invested",
-            "regime_reason": f"BTC {btc_px:,.0f} > 100日均 {ma_px:,.0f}（多頭）",
-            "exposure_pct": round(exposure * 100), "cash_pct": round(100 - exposure * 100),
-            "picks": picks,
-            "note": f"多頭 → 投入約 {round(exposure*100)}%（其餘現金），持有以下 {K} 幣"}
+def _momentum_at(close_panel: pd.DataFrame, decision_index: int) -> pd.Series:
+    if decision_index < L or decision_index >= len(close_panel):
+        return pd.Series(dtype=float)
+    momentum = close_panel.iloc[decision_index] / close_panel.iloc[decision_index - L] - 1.0
+    return momentum.replace([np.inf, -np.inf], np.nan).dropna()
 
 
-def _backtest(C, O):
-    mom = C / C.shift(L) - 1.0
-    dret = C.pct_change()
-    btc = C["BTCUSDT"]; regime = btc > btc.rolling(REGIME_N).mean()
-    n = len(C); coins = list(C.columns)
-    w_prev = pd.Series(0.0, index=coins)
-    strat, bench, periods = [], [], []
-    t = SKIP
-    while t + 1 + R < n:
-        enter = O.iloc[t + 1]; exit_ = O.iloc[t + 1 + R]
-        valid = enter.notna() & exit_.notna() & (enter > 0)
-        ret_coins = exit_ / enter - 1.0
-        bench_ret = float(ret_coins[valid[valid].index].mean()) if valid.any() else 0.0
-        w_new = pd.Series(0.0, index=coins); exposure = 0.0
-        on = bool(regime.iloc[t]) if pd.notna(regime.iloc[t]) else False
-        m = mom.iloc[t].dropna(); m = m[m.index.isin(valid[valid].index)]
-        if on and len(m) >= 6:
-            topk = list(m.sort_values(ascending=False).head(K).index)
-            win = dret[topk].iloc[max(0, t - VOLWIN + 1):t + 1]
-            pv = float((win * (1.0 / K)).sum(axis=1).std() * ANN)
-            exposure = min(1.0, TARGET_VOL / pv) if pv > 0 else 0.0
-            for c in topk:
-                w_new[c] = exposure / K
-        turnover = (w_new - w_prev).abs().sum()
-        port = float((w_new * ret_coins.reindex(coins).fillna(0)).sum()) - COST * turnover
-        strat.append(port); bench.append(bench_ret); periods.append(C.index[t])
-        w_prev = w_new; t += R
-    return pd.Series(strat, index=periods), pd.Series(bench, index=periods)
+def _target_weights(close_panel: pd.DataFrame, decision_index: int):
+    """Return point-in-time target weights and auditable decision details."""
+    coins = list(close_panel.columns)
+    weights = pd.Series(0.0, index=coins, dtype=float)
+    details = {
+        "risk_on": False,
+        "reason": "insufficient_history",
+        "btc_price": None,
+        "btc_ma": None,
+        "momentum": pd.Series(dtype=float),
+        "topk": [],
+        "exposure": 0.0,
+    }
+    if "BTCUSDT" not in close_panel or decision_index < 0 or decision_index >= len(close_panel):
+        return weights, details
+
+    btc = close_panel["BTCUSDT"]
+    btc_ma = btc.rolling(REGIME_N).mean()
+    btc_price = btc.iloc[decision_index]
+    ma_price = btc_ma.iloc[decision_index]
+    details["btc_price"] = float(btc_price) if pd.notna(btc_price) else None
+    details["btc_ma"] = float(ma_price) if pd.notna(ma_price) else None
+    if pd.isna(btc_price) or pd.isna(ma_price) or not (btc_price > ma_price):
+        details["reason"] = "btc_below_regime_ma"
+        return weights, details
+
+    details["risk_on"] = True
+    momentum = _momentum_at(close_panel, decision_index)
+    details["momentum"] = momentum
+    if len(momentum) < 6:
+        details["reason"] = "insufficient_universe"
+        return weights, details
+
+    topk = list(momentum.sort_values(ascending=False).head(K).index)
+    daily_returns = close_panel.pct_change(fill_method=None)
+    window = daily_returns[topk].iloc[max(0, decision_index - VOLWIN + 1):decision_index + 1]
+    basket = window.mul(1.0 / len(topk)).sum(axis=1, min_count=1)
+    basket_vol = float(basket.std() * ANN)
+    exposure = min(1.0, TARGET_VOL / basket_vol) if np.isfinite(basket_vol) and basket_vol > 0 else 0.0
+    for coin in topk:
+        weights[coin] = exposure / len(topk)
+
+    details.update({
+        "reason": "risk_on" if exposure > 0 else "invalid_volatility",
+        "topk": topk,
+        "exposure": exposure,
+    })
+    return weights, details
 
 
-def _perf(r):
-    if len(r) == 0:
+def _latest_rebalance_index(n_rows: int):
+    latest = n_rows - 1
+    if latest < SKIP:
+        return None
+    return SKIP + ((latest - SKIP) // R) * R
+
+
+def today_signal(close_panel, open_panel):
+    """Describe holdings from the latest R-bar rebalance, not a daily re-rank."""
+    if close_panel.empty:
+        return {
+            "date": None,
+            "data_as_of": None,
+            "rebalance_date": None,
+            "effective_from": None,
+            "pending_rebalance": False,
+            "execution_status": "not_available",
+            "unfilled_symbols": [],
+            "regime": "cash",
+            "regime_reason": "沒有可用資料",
+            "target_exposure_pct": 0,
+            "exposure_pct": 0,
+            "cash_pct": 100,
+            "picks": [],
+            "note": "資料不足，維持現金",
+        }
+
+    latest_index = len(close_panel) - 1
+    decision_index = _latest_rebalance_index(len(close_panel))
+    data_as_of = str(close_panel.index[latest_index])[:10]
+    if decision_index is None:
+        return {
+            "date": data_as_of,
+            "data_as_of": data_as_of,
+            "rebalance_date": None,
+            "effective_from": None,
+            "pending_rebalance": False,
+            "execution_status": "not_available",
+            "unfilled_symbols": [],
+            "next_rebalance_in_bars": None,
+            "regime": "cash",
+            "regime_reason": f"至少需要 {SKIP + 1} 根完成 K 棒",
+            "target_exposure_pct": 0,
+            "exposure_pct": 0,
+            "cash_pct": 100,
+            "picks": [],
+            "note": "歷史資料不足，維持現金",
+        }
+
+    target_weights, details = _target_weights(close_panel, decision_index)
+    rebalance_date = str(close_panel.index[decision_index])[:10]
+    pending_rebalance = decision_index == latest_index
+    effective_from = (
+        "next_open" if pending_rebalance
+        else str(close_panel.index[decision_index + 1])[:10]
+    )
+    if pending_rebalance:
+        # The next open is not known yet: publish the intended order, without
+        # pretending that it has filled.
+        displayed_weights = target_weights.copy()
+        unfilled_symbols = []
+        execution_status = "pending_next_open"
+    else:
+        # Once the entry bar is known, mirror the backtest execution rule. A
+        # missing/non-positive entry open leaves that target weight in cash.
+        entry = pd.to_numeric(open_panel.iloc[decision_index + 1], errors="coerce")
+        executable = entry.notna() & np.isfinite(entry) & (entry > 0)
+        displayed_weights = target_weights.where(executable, 0.0)
+        unfilled_symbols = [
+            coin for coin in details["topk"]
+            if target_weights.get(coin, 0.0) > 0 and not bool(executable.get(coin, False))
+        ]
+        if unfilled_symbols:
+            execution_status = (
+                "unfilled" if float(displayed_weights.sum()) == 0.0 else "partially_filled"
+            )
+        else:
+            execution_status = "executed"
+
+    momentum = details["momentum"]
+    picks = []
+    for coin in details["topk"]:
+        weight = float(displayed_weights.get(coin, 0.0))
+        if weight <= 0:
+            continue
+        picks.append({
+            "symbol": coin.replace("USDT", ""),
+            "momentum": round(float(momentum[coin]) * 100, 1),
+            "weight": round(weight * 100, 1),
+        })
+
+    target_exposure = float(target_weights.sum())
+    exposure = float(displayed_weights.sum())
+    btc_price = details["btc_price"]
+    ma_price = details["btc_ma"]
+    if details["risk_on"]:
+        reason = (
+            f"BTC {btc_price:,.0f} > {REGIME_N} 日均線 {ma_price:,.0f}；"
+            f"依 {R} 日換倉節奏沿用 {rebalance_date} 的決策"
+        )
+    elif btc_price is not None and ma_price is not None:
+        reason = (
+            f"BTC {btc_price:,.0f} <= {REGIME_N} 日均線 {ma_price:,.0f}；"
+            f"依 {R} 日換倉節奏維持現金"
+        )
+    else:
+        reason = "均線或可投資標的資料不足"
+
+    return {
+        "date": rebalance_date,
+        "data_as_of": data_as_of,
+        "rebalance_date": rebalance_date,
+        "effective_from": effective_from,
+        "pending_rebalance": pending_rebalance,
+        "execution_status": execution_status,
+        "unfilled_symbols": [coin.replace("USDT", "") for coin in unfilled_symbols],
+        "next_rebalance_in_bars": R - (latest_index - decision_index),
+        "regime": "invested" if exposure > 0 else "cash",
+        "regime_reason": reason,
+        "target_exposure_pct": round(target_exposure * 100),
+        "exposure_pct": round(exposure * 100),
+        "cash_pct": round((1.0 - exposure) * 100),
+        "picks": picks,
+        "note": (
+            (
+                f"下一根開盤執行；目標投入 {round(exposure * 100)}%"
+                if pending_rebalance
+                else f"持有至下一個 {R} 日換倉點；目標投入 {round(exposure * 100)}%"
+            )
+            if exposure > 0
+            else (
+                "目標標的在換倉開盤缺價，未成交權重保留為現金"
+                if unfilled_symbols else "本換倉週期維持現金"
+            )
+        ),
+    }
+
+
+def _backtest(close_panel, open_panel):
+    coins = list(close_panel.columns)
+    previous_weights = pd.Series(0.0, index=coins, dtype=float)
+    strategy_returns, benchmark_returns, periods = [], [], []
+    decision_index = SKIP
+
+    while decision_index + 1 + R < len(close_panel):
+        target_weights, _ = _target_weights(close_panel, decision_index)
+        entry = open_panel.iloc[decision_index + 1]
+        exit_ = open_panel.iloc[decision_index + 1 + R]
+        coin_returns = realized_holding_returns(entry, exit_)
+
+        # Ranking was already completed with decision-date information.  An
+        # unavailable next-open quote simply leaves that intended weight in cash.
+        executed_weights = target_weights.where(coin_returns.notna(), 0.0)
+        turnover = float((executed_weights - previous_weights).abs().sum())
+        gross_portfolio_return = float(
+            (executed_weights * coin_returns.reindex(coins).fillna(0.0)).sum()
+        )
+        portfolio_return = max(-1.0, gross_portfolio_return - COST * turnover)
+        benchmark_return = (
+            float(coin_returns.dropna().mean()) if coin_returns.notna().any() else 0.0
+        )
+
+        strategy_returns.append(portfolio_return)
+        benchmark_returns.append(benchmark_return)
+        periods.append(close_panel.index[decision_index])
+        previous_weights = executed_weights
+        decision_index += R
+
+    return (
+        pd.Series(strategy_returns, index=periods, dtype=float),
+        pd.Series(benchmark_returns, index=periods, dtype=float),
+    )
+
+
+def _perf(returns):
+    if len(returns) == 0:
         return {"cagr": 0, "mdd": 0, "sharpe": 0}
-    eq = (1 + r).cumprod(); yrs = len(r) * R / 365.0
-    cagr = (float(eq.iloc[-1]) ** (1 / yrs) - 1) * 100 if yrs > 0.3 else 0.0
-    mdd = float(((eq - eq.cummax()) / eq.cummax()).min()) * 100
-    sharpe = float(r.mean() / r.std() * np.sqrt(365.0 / R)) if r.std() > 0 else 0.0
-    return {"cagr": cagr, "mdd": mdd, "sharpe": sharpe}
+    equity = (1 + returns).cumprod()
+    years = len(returns) * R / 365.0
+    cagr = (float(equity.iloc[-1]) ** (1 / years) - 1) * 100 if years > 0.3 else 0.0
+    max_drawdown = max_drawdown_from_returns(returns)
+    sharpe = (
+        float(returns.mean() / returns.std() * np.sqrt(365.0 / R))
+        if returns.std() > 0 else 0.0
+    )
+    return {"cagr": cagr, "mdd": max_drawdown, "sharpe": sharpe}
 
 
-def strategy_metrics(C, O):
-    strat, bench = _backtest(C, O)
-    k = int(len(strat) * 0.6)
-    full, oos, mkt = _perf(strat), _perf(strat.iloc[k:]), _perf(bench)
-    return {"as_of": str(C.index[-1])[:10],
-            "cagr": round(full["cagr"], 1), "mdd": round(full["mdd"], 1), "sharpe": round(full["sharpe"], 2),
-            "oos_cagr": round(oos["cagr"], 1), "oos_mdd": round(oos["mdd"], 1), "oos_sharpe": round(oos["sharpe"], 2),
-            "market_cagr": round(mkt["cagr"], 1)}
+def strategy_metrics(close_panel, open_panel):
+    strategy, benchmark = _backtest(close_panel, open_panel)
+    split = int(len(strategy) * 0.6)
+    full = _perf(strategy)
+    out_of_sample = _perf(strategy.iloc[split:])
+    market = _perf(benchmark)
+    return {
+        "as_of": str(close_panel.index[-1])[:10],
+        "cagr": round(full["cagr"], 1),
+        "mdd": round(full["mdd"], 1),
+        "sharpe": round(full["sharpe"], 2),
+        "oos_cagr": round(out_of_sample["cagr"], 1),
+        "oos_mdd": round(out_of_sample["mdd"], 1),
+        "oos_sharpe": round(out_of_sample["sharpe"], 2),
+        "market_cagr": round(market["cagr"], 1),
+    }
 
 
 _CACHE: dict = {}
 
 
 def _version():
-    return max((p.stat().st_mtime for p in CLEAN.glob(f"*_{INTERVAL}.csv")), default=0.0)
+    return max((path.stat().st_mtime for path in CLEAN.glob(f"*_{INTERVAL}.csv")), default=0.0)
 
 
 def cached_strategy():
-    v = _version()
-    if _CACHE.get("ver") != v:
-        C, O = load_panels()
-        _CACHE["ver"] = v
-        _CACHE["data"] = {"strategy": "防禦型跨幣動量（mom30 + BTC>100日均 + top5 + 波動目標30%）",
-                          "today": today_signal(C, O), "perf": strategy_metrics(C, O)}
+    version = _version()
+    if _CACHE.get("ver") != version:
+        close_panel, open_panel = load_panels()
+        _CACHE["ver"] = version
+        _CACHE["data"] = {
+            "strategy": "防守型動量：30 日動量 + BTC 100 日均線 + top5 + 30% 波動目標",
+            "today": today_signal(close_panel, open_panel),
+            "perf": strategy_metrics(close_panel, open_panel),
+        }
     return _CACHE["data"]
 
 
 if __name__ == "__main__":
     import json
+
     print(json.dumps(cached_strategy(), ensure_ascii=False, indent=2))

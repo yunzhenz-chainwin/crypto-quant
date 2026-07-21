@@ -47,11 +47,16 @@ DEFAULT_COINS = [
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+class AppendOnlyConflict(ValueError):
+    """Raised when code attempts to replace an immutable research record."""
 
 
 def _ensure_column(conn, table: str, column: str, decl: str):
@@ -227,6 +232,94 @@ def init_db():
                 PRIMARY KEY (symbol, interval)
             )
         """)
+        # 研究預測採不可變快照：同一模型、資料日、週期只可寫入一次。
+        # 預測到期後另寫 outcome，不回頭修改當時的預測內容。
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS model_registry (
+                model_version   TEXT PRIMARY KEY,
+                name            TEXT NOT NULL,
+                status          TEXT NOT NULL,
+                research        INTEGER NOT NULL CHECK (research = 1),
+                methodology_json TEXT NOT NULL,
+                created_at      TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS forecast_snapshot (
+                forecast_id  TEXT PRIMARY KEY,
+                symbol       TEXT NOT NULL,
+                horizon_days INTEGER NOT NULL CHECK (horizon_days IN (1, 5, 10)),
+                as_of         TEXT NOT NULL,
+                generated_at  TEXT NOT NULL,
+                model_version TEXT NOT NULL,
+                status        TEXT NOT NULL,
+                payload_json  TEXT NOT NULL,
+                created_at    TEXT NOT NULL,
+                UNIQUE (symbol, horizon_days, as_of, model_version),
+                FOREIGN KEY (model_version) REFERENCES model_registry(model_version)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS forecast_outcome (
+                forecast_id        TEXT PRIMARY KEY,
+                target_as_of       TEXT NOT NULL,
+                resolved_at        TEXT NOT NULL,
+                realized_return_pct REAL NOT NULL,
+                actual_direction   TEXT NOT NULL,
+                payload_json       TEXT NOT NULL,
+                created_at         TEXT NOT NULL,
+                FOREIGN KEY (forecast_id) REFERENCES forecast_snapshot(forecast_id)
+            )
+        """)
+        # v2 adds the canonical input hash to snapshot identity.  The legacy
+        # tables above are deliberately retained unchanged and immutable so a
+        # migration never rewrites historical research records.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS forecast_snapshot_v2 (
+                forecast_id    TEXT PRIMARY KEY,
+                symbol         TEXT NOT NULL,
+                horizon_days   INTEGER NOT NULL CHECK (horizon_days IN (1, 5, 10)),
+                as_of           TEXT NOT NULL,
+                generated_at    TEXT NOT NULL,
+                model_version   TEXT NOT NULL,
+                input_hash      TEXT NOT NULL,
+                data_version    TEXT NOT NULL,
+                reference_close REAL NOT NULL,
+                status          TEXT NOT NULL,
+                payload_json    TEXT NOT NULL,
+                created_at      TEXT NOT NULL,
+                UNIQUE (symbol, horizon_days, as_of, model_version, input_hash),
+                FOREIGN KEY (model_version) REFERENCES model_registry(model_version)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS forecast_outcome_v2 (
+                forecast_id         TEXT PRIMARY KEY,
+                target_as_of        TEXT NOT NULL,
+                resolved_at         TEXT NOT NULL,
+                realized_return_pct REAL NOT NULL,
+                actual_direction    TEXT NOT NULL,
+                payload_json        TEXT NOT NULL,
+                created_at          TEXT NOT NULL,
+                FOREIGN KEY (forecast_id) REFERENCES forecast_snapshot_v2(forecast_id)
+            )
+        """)
+        # Database-level guards make append-only a property of the store, not
+        # merely a convention of the Python helper functions.
+        for _table in (
+            "model_registry", "forecast_snapshot", "forecast_outcome",
+            "forecast_snapshot_v2", "forecast_outcome_v2",
+        ):
+            conn.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS {_table}_no_update
+                BEFORE UPDATE ON {_table}
+                BEGIN SELECT RAISE(ABORT, '{_table} is append-only'); END
+            """)
+            conn.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS {_table}_no_delete
+                BEFORE DELETE ON {_table}
+                BEGIN SELECT RAISE(ABORT, '{_table} is append-only'); END
+            """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_job_started ON job_runs(started_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_access_ts   ON access_log(ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
@@ -235,6 +328,14 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bt_trade    ON backtest_trade(symbol, interval, entry_date)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_chat_ts  ON ai_chat(ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_usage_ts ON ai_usage(ts)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_forecast_lookup "
+            "ON forecast_snapshot(symbol, horizon_days, as_of, model_version)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_forecast_v2_lookup "
+            "ON forecast_snapshot_v2(symbol, horizon_days, as_of, model_version, input_hash)"
+        )
         # 既有資料庫的欄位遷移：補上 tasks.notes（備註 / 交接說明）
         _ensure_column(conn, "tasks", "notes", "TEXT")
         conn.commit()
@@ -667,6 +768,299 @@ def load_backtest_trades(symbol: str, limit: int = 0) -> list[dict]:
             (symbol.upper(),)).fetchall()
     out = [dict(r) for r in rows]
     return out[-limit:] if (limit and limit > 0) else out
+
+
+# ── 研究預測：模型登錄 / 不可變快照 / 到期結果 ─────────────────────────────
+def _canonical_json(value: dict) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def register_forecast_model(metadata: dict) -> dict:
+    """Register one immutable model version; identical retries are idempotent."""
+    required = ("model_version", "name", "status", "research", "methodology")
+    missing = [key for key in required if key not in metadata]
+    if missing:
+        raise ValueError(f"model metadata missing: {', '.join(missing)}")
+    if metadata["research"] is not True:
+        raise ValueError("forecast models must be explicitly marked research")
+
+    version = str(metadata["model_version"])
+    methodology_json = _canonical_json(metadata["methodology"])
+    with _connect() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO model_registry "
+                "(model_version, name, status, research, methodology_json, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (version, str(metadata["name"]), str(metadata["status"]), 1,
+                 methodology_json, _now()),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            row = conn.execute(
+                "SELECT * FROM model_registry WHERE model_version=?", (version,)
+            ).fetchone()
+            if not row:
+                raise
+            same = (
+                row["name"] == str(metadata["name"])
+                and row["status"] == str(metadata["status"])
+                and row["research"] == 1
+                and row["methodology_json"] == methodology_json
+            )
+            if not same:
+                raise AppendOnlyConflict(f"model version {version} already has different metadata")
+    return load_forecast_model(version)
+
+
+def load_forecast_model(model_version: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM model_registry WHERE model_version=?", (model_version,)
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "model_version": row["model_version"],
+        "name": row["name"],
+        "status": row["status"],
+        "research": bool(row["research"]),
+        "methodology": json.loads(row["methodology_json"]),
+        "created_at": row["created_at"],
+    }
+
+
+def save_forecast_snapshot(payload: dict) -> dict:
+    """Append a content-addressed v2 forecast exactly once."""
+    required = (
+        "forecast_id", "symbol", "horizon_days", "as_of", "generated_at",
+        "model_version", "input_hash", "data_version", "reference_close",
+        "status", "research",
+    )
+    missing = [key for key in required if key not in payload]
+    if missing:
+        raise ValueError(f"forecast payload missing: {', '.join(missing)}")
+    if payload["research"] is not True:
+        raise ValueError("forecast snapshot must be explicitly marked research")
+    if int(payload["horizon_days"]) not in (1, 5, 10):
+        raise ValueError("forecast horizon must be 1, 5, or 10 days")
+    if not payload["as_of"]:
+        raise ValueError("a forecast without as_of cannot be persisted")
+    input_hash = str(payload["input_hash"])
+    if len(input_hash) != 64 or any(ch not in "0123456789abcdef" for ch in input_hash):
+        raise ValueError("forecast input_hash must be a lowercase SHA-256 digest")
+    reference_close = float(payload["reference_close"])
+    if reference_close <= 0:
+        raise ValueError("forecast reference_close must be positive")
+
+    encoded = _canonical_json(payload)
+    values = (
+        str(payload["forecast_id"]), str(payload["symbol"]).upper(),
+        int(payload["horizon_days"]), str(payload["as_of"]),
+        str(payload["generated_at"]), str(payload["model_version"]),
+        input_hash, str(payload["data_version"]), reference_close,
+        str(payload["status"]), encoded, _now(),
+    )
+    with _connect() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO forecast_snapshot_v2 "
+                "(forecast_id, symbol, horizon_days, as_of, generated_at, model_version, "
+                "input_hash, data_version, reference_close, status, payload_json, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                values,
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            existing = conn.execute(
+                "SELECT payload_json FROM forecast_snapshot_v2 WHERE forecast_id=? OR "
+                "(symbol=? AND horizon_days=? AND as_of=? AND model_version=? AND input_hash=?)",
+                (values[0], values[1], values[2], values[3], values[5], values[6]),
+            ).fetchone()
+            if existing and existing["payload_json"] == encoded:
+                return json.loads(existing["payload_json"])
+            raise AppendOnlyConflict(
+                "forecast snapshot already exists; immutable history cannot be overwritten"
+            )
+    return payload
+
+
+def load_forecast_snapshot(
+    symbol: str,
+    horizon_days: int,
+    as_of: str,
+    model_version: str,
+    input_hash: str | None = None,
+) -> dict | None:
+    with _connect() as conn:
+        if input_hash is not None:
+            row = conn.execute(
+                "SELECT payload_json FROM forecast_snapshot_v2 "
+                "WHERE symbol=? AND horizon_days=? AND as_of=? AND model_version=? "
+                "AND input_hash=?",
+                (symbol.upper(), int(horizon_days), as_of, model_version, input_hash),
+            ).fetchone()
+        else:
+            # Compatibility reads may omit the hash. Prefer the newest v2 row,
+            # then fall back to a legacy v1 snapshot. The API always supplies
+            # input_hash and therefore never uses this ambiguous cache path.
+            row = conn.execute(
+                "SELECT payload_json FROM forecast_snapshot_v2 "
+                "WHERE symbol=? AND horizon_days=? AND as_of=? AND model_version=? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (symbol.upper(), int(horizon_days), as_of, model_version),
+            ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    "SELECT payload_json FROM forecast_snapshot "
+                    "WHERE symbol=? AND horizon_days=? AND as_of=? AND model_version=?",
+                    (symbol.upper(), int(horizon_days), as_of, model_version),
+                ).fetchone()
+    return json.loads(row["payload_json"]) if row else None
+
+
+def load_forecast_by_id(forecast_id: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT payload_json FROM forecast_snapshot_v2 WHERE forecast_id=?", (forecast_id,)
+        ).fetchone()
+        if row is None:
+            row = conn.execute(
+                "SELECT payload_json FROM forecast_snapshot WHERE forecast_id=?", (forecast_id,)
+            ).fetchone()
+    return json.loads(row["payload_json"]) if row else None
+
+
+def pending_forecast_snapshots(
+    limit: int = 1000,
+    completed_through: str | None = None,
+) -> list[dict]:
+    """Forecasts that do not yet have a separately appended outcome."""
+    bounded_limit = max(1, min(int(limit), 100000))
+    maturity_v2 = ""
+    maturity_v1 = ""
+    params: list = []
+    if completed_through:
+        # Calendar maturity is only a prefilter. The resolver still requires
+        # the exact N-th completed observation, so data gaps cannot resolve a
+        # forecast prematurely.
+        maturity_v2 = (
+            "AND date(s.as_of, '+' || s.horizon_days || ' days') <= date(?) "
+        )
+        maturity_v1 = maturity_v2
+        params.append(completed_through)
+    with _connect() as conn:
+        v2_rows = conn.execute(
+            "SELECT s.payload_json FROM forecast_snapshot_v2 s "
+            "LEFT JOIN forecast_outcome_v2 o ON o.forecast_id=s.forecast_id "
+            "WHERE o.forecast_id IS NULL " + maturity_v2 +
+            "ORDER BY s.as_of, s.symbol, s.horizon_days LIMIT ?",
+            (*params, bounded_limit),
+        ).fetchall()
+        remaining = bounded_limit - len(v2_rows)
+        legacy_rows = conn.execute(
+            "SELECT s.payload_json FROM forecast_snapshot s "
+            "LEFT JOIN forecast_outcome o ON o.forecast_id=s.forecast_id "
+            "WHERE o.forecast_id IS NULL " + maturity_v1 +
+            "ORDER BY s.as_of, s.symbol, s.horizon_days LIMIT ?",
+            (*params, remaining),
+        ).fetchall() if remaining > 0 else []
+    return [json.loads(row["payload_json"]) for row in [*v2_rows, *legacy_rows]]
+
+
+def save_forecast_outcome(payload: dict) -> dict:
+    """Append one matured outcome without modifying its forecast snapshot."""
+    required = (
+        "forecast_id", "target_as_of", "resolved_at", "realized_return_pct",
+        "actual_direction",
+    )
+    missing = [key for key in required if key not in payload]
+    if missing:
+        raise ValueError(f"forecast outcome missing: {', '.join(missing)}")
+    encoded = _canonical_json(payload)
+    values = (
+        str(payload["forecast_id"]), str(payload["target_as_of"]),
+        str(payload["resolved_at"]), float(payload["realized_return_pct"]),
+        str(payload["actual_direction"]), encoded, _now(),
+    )
+    with _connect() as conn:
+        is_v2 = conn.execute(
+            "SELECT 1 FROM forecast_snapshot_v2 WHERE forecast_id=?", (values[0],)
+        ).fetchone() is not None
+        if not is_v2 and conn.execute(
+            "SELECT 1 FROM forecast_snapshot WHERE forecast_id=?", (values[0],)
+        ).fetchone() is None:
+            raise ValueError("forecast outcome references an unknown snapshot")
+        table = "forecast_outcome_v2" if is_v2 else "forecast_outcome"
+        try:
+            conn.execute(
+                f"INSERT INTO {table} "
+                "(forecast_id, target_as_of, resolved_at, realized_return_pct, "
+                "actual_direction, payload_json, created_at) VALUES (?,?,?,?,?,?,?)",
+                values,
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            row = conn.execute(
+                f"SELECT payload_json FROM {table} WHERE forecast_id=?", (values[0],)
+            ).fetchone()
+            if row and row["payload_json"] == encoded:
+                return json.loads(row["payload_json"])
+            raise AppendOnlyConflict(
+                "forecast outcome already exists; immutable history cannot be overwritten"
+            )
+    return payload
+
+
+def load_forecast_outcome(forecast_id: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT payload_json FROM forecast_outcome_v2 WHERE forecast_id=?", (forecast_id,)
+        ).fetchone()
+        if row is None:
+            row = conn.execute(
+                "SELECT payload_json FROM forecast_outcome WHERE forecast_id=?", (forecast_id,)
+            ).fetchone()
+    return json.loads(row["payload_json"]) if row else None
+
+
+def resolve_mature_forecast_outcomes(price_loader, limit: int = 1000, now=None) -> list[dict]:
+    """Resolve all mature pending forecasts with a caller-supplied price loader.
+
+    ``price_loader(symbol)`` must return chronological or unsorted dictionaries
+    containing ``date`` and ``close``.  The original snapshot remains untouched.
+    """
+    from src.forecasting import latest_completed_daily_date, resolve_forecast_outcome
+
+    resolved: list[dict] = []
+    rows_by_symbol: dict[str, list[dict]] = {}
+    result_limit = max(1, min(int(limit), 10000))
+    # Scan more candidates than the requested result count so one permanently
+    # incomplete symbol cannot starve mature forecasts behind it.
+    scan_limit = min(100000, max(10000, result_limit * 10))
+    completed_through = latest_completed_daily_date(now).isoformat()
+    for snapshot in pending_forecast_snapshots(
+        limit=scan_limit,
+        completed_through=completed_through,
+    ):
+        symbol = snapshot["symbol"]
+        if symbol not in rows_by_symbol:
+            rows_by_symbol[symbol] = list(price_loader(symbol))
+        outcome = resolve_forecast_outcome(snapshot, rows_by_symbol[symbol], now=now)
+        if outcome is not None:
+            try:
+                stored = save_forecast_outcome(outcome)
+            except AppendOnlyConflict:
+                # Cross-process race: the first committed immutable outcome is
+                # authoritative. Loading that winner makes retries idempotent
+                # even when resolved_at crossed a second boundary.
+                stored = load_forecast_outcome(snapshot["forecast_id"])
+                if stored is None:
+                    raise
+            resolved.append(stored)
+            if len(resolved) >= result_limit:
+                break
+    return resolved
 
 
 def fetch_fear_greed_history(limit: int = 0) -> int:

@@ -10,7 +10,7 @@
  *
  * 其他功能：
  *   - 可調整停損 / 停利參數（即時重新計算）
- *   - 資產變化曲線圖（每筆交易後的資產倍數）
+ *   - 每日資產變化曲線圖（依完成日線盯市）
  *   - 最近交易明細（預設收起，點擊展開）
  *
  * Props：
@@ -23,20 +23,25 @@ import {
 } from 'recharts'
 import PctInput from './PctInput'
 
-// 資產倍數曲線圖：X 軸是第幾筆交易，Y 軸是資產倍數（1.0 = 起始本金）
+// 每日資產倍數曲線圖：X 軸是日期，Y 軸是資產倍數（1.0 = 起始本金）
 function EquityCurve({ data }) {
   if (!data || data.length === 0) return null
   return (
     <ResponsiveContainer width="100%" height={200}>
       <LineChart data={data} margin={{ top: 4, right: 16, bottom: 0, left: 8 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-        <XAxis dataKey="trade" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+        <XAxis
+          dataKey="date"
+          minTickGap={28}
+          tick={{ fill: '#94a3b8', fontSize: 10 }}
+          tickFormatter={(value) => String(value).slice(0, 7)}
+        />
         <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} width={44}
                tickFormatter={(v) => `${v}x`} />
         <Tooltip
           contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6 }}
           formatter={(v, name) => [`${Number(v).toFixed(3)}x`, name]}
-          labelFormatter={(l) => `第 ${l} 筆交易`}
+          labelFormatter={(date) => `日期 ${date}`}
         />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <ReferenceLine y={1} stroke="#475569" strokeDasharray="4 2" />
@@ -481,7 +486,7 @@ export default function BacktestPanel({ data, loading, params, onParamsChange, h
           {/* 資產曲線 */}
           <div style={{ marginTop: 16 }}>
             <div className="key-chart-title">
-              資產變化曲線:策略 vs 買入持有(每筆交易後的倍數,1.0 = 本金)
+              每日權益曲線：策略 vs 買入持有（依完成日線盯市，1.0 = 本金）
             </div>
             <EquityCurve data={data.equity_curve} />
           </div>

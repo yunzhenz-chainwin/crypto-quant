@@ -22,11 +22,12 @@ from datetime import datetime, timezone, date, timedelta
 
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Depends
+from fastapi import APIRouter, Header, HTTPException, Depends, Request
 from pydantic import BaseModel
 
 from backend.services.reader import last_updated
 from backend.services import app_db, news_store
+from backend.services.rate_limiter import RATE_LIMITER, enforce_rate_limit
 
 router = APIRouter()
 
@@ -84,7 +85,14 @@ class LoginReq(BaseModel):
 
 
 @router.post("/admin/login")
-def login(body: LoginReq):
+def login(body: LoginReq, request: Request):
+    enforce_rate_limit(
+        request,
+        scope="admin_login",
+        limit=5,
+        window_seconds=60,
+        limiter=RATE_LIMITER,
+    )
     if body.username == ADMIN_USER and body.password == ADMIN_PASS:
         return {"ok": True, "token": _make_token(body.username), "user": body.username}
     raise HTTPException(status_code=401, detail="帳號或密碼錯誤")

@@ -259,6 +259,92 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .hero-neutral .hero-label{ color: var(--neutral); }
 .hero-desc  { font-size: 12px; color: var(--muted); max-width: 200px; line-height: 1.5; }
 
+/* ── 研究預測決策卡 ─────────────────────────────────── */
+.forecast-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 18px; min-width: 0;
+}
+.forecast-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 14px;
+  padding-bottom: 13px; border-bottom: 1px solid var(--border);
+}
+.forecast-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.forecast-title-row h2 { margin: 0; color: var(--text); font-size: 17px; }
+.forecast-research-badge {
+  display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px;
+  color: #c4b5fd; background: rgba(139,92,246,.12); border: 1px solid rgba(139,92,246,.4);
+  font-size: 10.5px; font-weight: 800; letter-spacing: .2px;
+}
+.forecast-head p { margin: 5px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.55; }
+.forecast-tabs { display: inline-flex; padding: 3px; background: var(--bg); border: 1px solid var(--border); border-radius: 9px; flex-shrink: 0; }
+.forecast-tabs button {
+  min-height: 32px; padding: 5px 12px; border: 0; border-radius: 6px; cursor: pointer;
+  background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 700;
+}
+.forecast-tabs button:hover { color: var(--text); }
+.forecast-tabs button.active { color: #dbeafe; background: rgba(59,130,246,.22); }
+.forecast-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.forecast-loading { min-height: 150px; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 13px; }
+.forecast-spinner { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: forecast-spin .8s linear infinite; }
+@keyframes forecast-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .forecast-spinner { animation: none; } }
+.forecast-error {
+  min-height: 110px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 14px; padding: 14px; border-radius: 9px; border: 1px solid rgba(239,68,68,.35); background: rgba(239,68,68,.07);
+}
+.forecast-error div { display: flex; flex-direction: column; gap: 4px; }
+.forecast-error strong { color: #fca5a5; font-size: 13px; }
+.forecast-error span { color: var(--muted); font-size: 11.5px; }
+.forecast-error button { padding: 7px 11px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); background: var(--bg); cursor: pointer; white-space: nowrap; }
+.forecast-content { padding-top: 13px; display: flex; flex-direction: column; gap: 12px; }
+.forecast-state { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 10px; padding: 9px 11px; border-radius: 8px; border-left: 3px solid; }
+.forecast-state strong { font-size: 13.5px; }
+.forecast-state span { font-size: 11.5px; color: var(--muted); }
+.forecast-state-ready { border-color: #38bdf8; background: rgba(56,189,248,.07); }
+.forecast-state-ready strong { color: #7dd3fc; }
+.forecast-state-abstain, .forecast-state-insufficient { border-color: #f59e0b; background: rgba(245,158,11,.07); }
+.forecast-state-abstain strong, .forecast-state-insufficient strong { color: #fbbf24; }
+.forecast-state-stale { border-color: #ef4444; background: rgba(239,68,68,.07); }
+.forecast-state-stale strong { color: #fca5a5; }
+.forecast-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.forecast-metric { padding: 10px 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.forecast-metric > span { color: var(--muted); font-size: 10.5px; }
+.forecast-metric strong { color: var(--text); font-size: 19px; font-variant-numeric: tabular-nums; }
+.forecast-metric small { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.forecast-metric-up strong { color: #4ade80; }
+.forecast-metric-down strong { color: #f87171; }
+.forecast-range { padding: 11px 12px; border: 1px solid var(--border); border-radius: 9px; }
+.forecast-range-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 9px; }
+.forecast-range-head h3 { margin: 0; font-size: 12.5px; color: var(--text); }
+.forecast-range-head span { color: #cbd5e1; font-size: 11px; }
+.forecast-range-values { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.forecast-range-values div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 7px 9px; background: var(--bg); border-radius: 6px; }
+.forecast-range-values span { color: var(--muted); font-size: 10.5px; }
+.forecast-range-values strong { color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; }
+.forecast-evidence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.forecast-evidence { border: 1px solid var(--border); border-radius: 8px; padding: 10px 11px; min-width: 0; }
+.forecast-evidence h4 { margin: 0 0 7px; font-size: 11.5px; }
+.forecast-evidence-for h4 { color: #4ade80; }
+.forecast-evidence-against h4 { color: #fca5a5; }
+.forecast-evidence ul { margin: 0; padding-left: 17px; display: flex; flex-direction: column; gap: 6px; }
+.forecast-evidence li { color: var(--text); font-size: 11.5px; line-height: 1.45; }
+.forecast-evidence li::marker { color: var(--muted); }
+.forecast-evidence li span, .forecast-evidence li small { display: block; overflow-wrap: anywhere; }
+.forecast-evidence li small { color: var(--muted); margin-top: 1px; font-size: 10.5px; }
+.forecast-evidence p { margin: 0; color: var(--muted); font-size: 11px; }
+.forecast-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; padding-top: 1px; color: var(--muted); font-size: 10.5px; }
+@media (max-width: 760px) {
+  .forecast-head { flex-direction: column; }
+  .forecast-tabs { width: 100%; }
+  .forecast-tabs button { flex: 1; }
+  .forecast-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .forecast-card { padding: 13px 12px; }
+  .forecast-evidence-grid, .forecast-range-values { grid-template-columns: 1fr; }
+  .forecast-error { align-items: flex-start; flex-direction: column; }
+}
+
 .hero-right { flex: 1; display: flex; flex-direction: column; gap: 12px; }
 
 /* RSI 進度條 */

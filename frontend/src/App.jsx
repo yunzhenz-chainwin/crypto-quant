@@ -19,6 +19,7 @@ import CandlestickChart from './components/CandlestickChart'
 import HeroSignal        from './components/HeroSignal'
 import IndicatorCards   from './components/IndicatorCards'
 import RecommendationCard from './components/RecommendationCard'
+import ForecastDecisionCard from './components/ForecastDecisionCard'
 import MarketOverview   from './components/MarketOverview'
 // import MacroPanel    from './components/MacroPanel'   // 2026-07-07 先隱藏（價值待議；程式碼＋/api/macro 保留，未來或改「以 BTC 為主的相關性溫度計」版）
 import MarketSummary    from './components/MarketSummary'
@@ -98,6 +99,7 @@ export default function App() {
   // 停損/停利參數（可在「詳細資訊」彈窗調整；供回測、右欄綜合建議、圖上箭頭用）
   const [btParams, setBtParams] = useState({ stopLoss: -0.06, takeProfit: 0.20, feeRate: 0.001, slippage: 0.0005 })
   const [btLoading,   setBtLoading]   = useState(false)
+  const [btError,     setBtError]     = useState(false)
   // const [correlation, setCorrelation] = useState(null)                  // 2026-07-06 暫停幣種相關性分析
   const [dataVersion, setDataVersion] = useState('')        // 後端資料版本（變了=有新資料）
   // const [showCorrelation, setShowCorrelation] = useState(false)         // 2026-07-06 暫停幣種相關性分析
@@ -116,6 +118,7 @@ export default function App() {
   const [showGlossary, setShowGlossary] = useState(false)
   const [apiError, setApiError] = useState(false)   // API 失敗橫幅（輕量版 #22）
   const versionRef = useRef('')
+  const backtestRequestRef = useRef(0)
 
   // 這顆幣有沒有時線資料（目前只開 BTC/ETH）
   const hasHourly = (intervals['1h'] ?? []).includes(active)
@@ -213,19 +216,38 @@ export default function App() {
     loadDetail(true)
   }, [view, loadDetail])
 
-  // 回測只與幣種 + 回測參數有關（與日期範圍無關），獨立抓一次；
-  // K 線買賣標記與回測面板共用這一份，改參數時箭頭跟著變（消除原本各抓一次的雙抓）
+  // 回測與幣種、參數及資料版本有關；K 線買賣標記與回測面板共用同一份結果。
+  // 每次請求都有 identity 並取消上一筆，避免快速切幣／資料更新時舊結果覆蓋新結果。
   useEffect(() => {
     if (view !== 'detail' || !active) return
+    const controller = new AbortController()
+    const requestId = ++backtestRequestRef.current
     let alive = true
+    const isCurrent = () => alive && backtestRequestRef.current === requestId
     setBtLoading(true)
+    setBtError(false)
     setBacktest(null)
-    fetchBacktest(active, btParams.stopLoss, btParams.takeProfit, btParams.feeRate, btParams.slippage)
-      .then(r => { if (alive) setBacktest(r) })
-      .catch(() => { if (alive) setBacktest(null) })
-      .finally(() => { if (alive) setBtLoading(false) })
-    return () => { alive = false }
-  }, [active, btParams, view])
+    fetchBacktest(
+      active,
+      btParams.stopLoss,
+      btParams.takeProfit,
+      btParams.feeRate,
+      btParams.slippage,
+      { signal: controller.signal },
+    )
+      .then(r => { if (isCurrent()) setBacktest(r) })
+      .catch(error => {
+        if (isCurrent() && error?.name !== 'AbortError') {
+          setBacktest(null)
+          setBtError(true)
+        }
+      })
+      .finally(() => { if (isCurrent()) setBtLoading(false) })
+    return () => {
+      alive = false
+      controller.abort()
+    }
+  }, [active, btParams, dataVersion, view])
 
   // 任一彈窗（放大圖 / 詳細資訊）開啟時：Esc 關閉
   useEffect(() => {
@@ -346,6 +368,8 @@ export default function App() {
 
             <HeroSignal signal={activeSignal} symbol={active} live={livePrices[active]} slim />
 
+            <ForecastDecisionCard symbol={active} refreshKey={dataVersion} />
+
             {/* 儀表板主區：左＝蠟燭圖（縮小、點🔍放大看大圖），右＝分數＋指標即時解讀 */}
             <div className="detail-main">
             <section className="chart-section detail-chart-col">
@@ -454,6 +478,7 @@ export default function App() {
               <RecommendationCard
                 signal={activeSignal}
                 backtest={backtest}
+                backtestStatus={btLoading ? 'loading' : btError ? 'error' : backtest ? 'ready' : 'idle'}
                 params={btParams}
                 onDetail={setDetailView}
               />

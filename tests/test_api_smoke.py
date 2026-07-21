@@ -35,6 +35,11 @@ def test_backtest_btc_shape():
     assert "metrics" in body
 
 
+def test_backtest_rejects_unbounded_float_parameter_variants():
+    response = client.get("/api/backtest/BTCUSDT?stop_loss=-0.055")
+    assert response.status_code == 422
+
+
 def test_unknown_symbol_404():
     r = client.get("/api/backtest/NOTACOIN")
     assert r.status_code == 404

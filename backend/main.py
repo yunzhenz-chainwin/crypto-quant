@@ -12,14 +12,14 @@ API 前綴一律為 /api，例如：
 """
 import time
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from backend.routers import meta, prices, indicators, correlation, signals, backtest, sentiment, admin, ai, macro
+from backend.routers import meta, prices, indicators, correlation, signals, backtest, sentiment, admin, ai, macro, forecast
 from backend.scheduler import start_scheduler
 from backend.services import app_db
 
@@ -83,6 +83,7 @@ app.include_router(sentiment.router,   prefix="/api")  # /api/sentiment/...
 app.include_router(admin.router,       prefix="/api")  # /api/admin/... (後台,需登入)
 app.include_router(ai.router,          prefix="/api")  # /api/ai/... (AI 分析機器人)
 app.include_router(macro.router,       prefix="/api")  # /api/macro (宏觀環境,規則式)
+app.include_router(forecast.router,    prefix="/api")  # /api/forecast/{symbol} (研究型預測)
 
 # ── 正式環境：FastAPI 直接提供 React build 的靜態檔 ─────────────────────────
 # 只在 frontend/dist/ 存在時掛載（本地開發時不存在，不影響開發流程）
@@ -102,7 +103,13 @@ if DIST.exists():
     @app.get("/{full_path:path}")
     def serve_spa(full_path: str):
         # 若請求的是真實存在的靜態檔（如 favicon.svg）就直接回傳
-        target = DIST / full_path
+        # resolve 後必須仍在 dist 內；同時防禦 ../、編碼斜線與 symlink 越界。
+        dist_root = DIST.resolve()
+        try:
+            target = (dist_root / full_path).resolve()
+            target.relative_to(dist_root)
+        except (OSError, RuntimeError, ValueError):
+            raise HTTPException(status_code=404, detail="Not found")
         if target.exists() and target.is_file():
             return FileResponse(str(target))
         return FileResponse(str(DIST / "index.html"), headers=_INDEX_HEADERS)

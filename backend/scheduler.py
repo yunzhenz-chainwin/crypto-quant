@@ -18,7 +18,13 @@ from backend.routers.sentiment import _fetch_and_save
 from backend.services.app_db import (
     get_enabled_symbols, get_hourly_symbols, start_job, finish_job,
     ingest_market_data, backfill_daily_signals, fetch_fear_greed_history,
-    market_stats,
+    market_stats, register_forecast_model, load_forecast_snapshot,
+    save_forecast_snapshot, resolve_mature_forecast_outcomes, AppendOnlyConflict,
+)
+from backend.services.reader import load_prices
+from src.forecasting import (
+    MODEL_VERSION, SUPPORTED_HORIZONS, generate_forecast,
+    latest_completed_daily_date, model_metadata,
 )
 
 # 專案根目錄（相對於本檔往上一層）
@@ -57,6 +63,104 @@ def _assert_data_fresh():
     if lag > MAX_DATA_LAG_DAYS:
         raise RuntimeError(f"資料未更新：最新只到 {date_max}（落後 {lag} 天），fetch 可能失敗")
     return date_max, lag
+
+
+def run_forecast_pipeline():
+    """Seal today's research forecasts and append any newly matured outcomes.
+
+    This runs after the daily market pipeline so forecasts exist even when no
+    user opens the site.  Existing snapshots are reused verbatim; a retry can
+    never replace the prediction that was originally recorded for that day.
+    """
+    job_id = start_job("forecast_pipeline")
+    try:
+        symbols = get_enabled_symbols()
+        now = datetime.now(timezone.utc)
+        cutoff = latest_completed_daily_date(now).isoformat()
+        register_forecast_model(model_metadata())
+
+        created = 0
+        cached = 0
+        abstained = 0
+        missing_symbols = []
+        rows_by_symbol = {}
+
+        for symbol in symbols:
+            rows = [
+                row for row in load_prices(symbol, interval="1d")
+                if row.get("date") and str(row["date"])[:10] <= cutoff
+            ]
+            rows_by_symbol[symbol] = rows
+            if not rows:
+                missing_symbols.append(symbol)
+                continue
+            as_of = max(str(row["date"])[:10] for row in rows)
+
+            for horizon in SUPPORTED_HORIZONS:
+                # Build the deterministic input identity before looking up a
+                # snapshot. The same as_of can legitimately have a new hash
+                # when an exchange corrects historical candles.
+                payload = generate_forecast(
+                    symbol,
+                    horizon,
+                    rows,
+                    as_of=as_of,
+                    now=now,
+                )
+                existing = load_forecast_snapshot(
+                    symbol, horizon, as_of, MODEL_VERSION, payload["input_hash"]
+                )
+                if existing is not None:
+                    cached += 1
+                    if existing.get("status") != "ready":
+                        abstained += 1
+                    continue
+
+                try:
+                    save_forecast_snapshot(payload)
+                    created += 1
+                    if payload.get("status") != "ready":
+                        abstained += 1
+                except AppendOnlyConflict:
+                    # An API request or another scheduler invocation may have
+                    # won the append race. The immutable stored row is final.
+                    stored = load_forecast_snapshot(
+                        symbol, horizon, as_of, MODEL_VERSION, payload["input_hash"]
+                    )
+                    if stored is None:
+                        raise
+                    cached += 1
+                    if stored.get("status") != "ready":
+                        abstained += 1
+
+        # Use all completed rows currently in the DB so older pending forecasts
+        # can resolve when their Nth future daily candle has arrived.
+        def _price_loader(symbol):
+            return rows_by_symbol.get(symbol) or load_prices(symbol, interval="1d")
+
+        outcomes = resolve_mature_forecast_outcomes(_price_loader)
+        summary = {
+            "status": "success",
+            "symbols": len(symbols),
+            "created": created,
+            "cached": cached,
+            "abstained": abstained,
+            "resolved": len(outcomes),
+            "missing_symbols": missing_symbols,
+        }
+        message = (
+            f"{len(symbols)} 幣 · 新增 {created} · 已存在 {cached} · "
+            f"拒答 {abstained} · 到期 {len(outcomes)}"
+        )
+        if missing_symbols:
+            message += f" · 缺資料 {','.join(missing_symbols)}"
+        finish_job(job_id, "success", message)
+        print(f"[scheduler] forecast pipeline done ({message})")
+        return summary
+    except Exception as exc:
+        finish_job(job_id, "failed", str(exc))
+        print(f"[scheduler] forecast pipeline failed: {exc}")
+        return {"status": "failed", "error": str(exc)}
 
 
 def run_pipeline():
@@ -122,13 +226,17 @@ def run_pipeline():
         # 5) 新鮮度防線：資料若沒更新到近期就視為失敗（抓出隱性失敗，避免假性成功）
         date_max, lag = _assert_data_fresh()
 
-        # 6) 更新恐懼貪婪歷史（非關鍵，失敗只略過不影響整體）
+        # 6) 先封存研究預測並解析成熟結果。此工作自行記錄成功/失敗，
+        #    不因研究功能異常而阻斷核心行情資料更新。
+        forecast_result = run_forecast_pipeline()
+
+        # 7) 更新恐懼貪婪歷史（非關鍵，失敗只略過不影響整體）
         try:
             fetch_fear_greed_history(0)
         except Exception as e:
             print(f"[scheduler] fear_greed history skip: {e}")
 
-        # 7) 幣種級新聞（Google News 逐幣查詢）+ 重算近 3 天每日情緒彙總（非關鍵）
+        # 8) 幣種級新聞（Google News 逐幣查詢）+ 重算近 3 天每日情緒彙總（非關鍵）
         try:
             from backend.routers.sentiment import fetch_coin_news_google
             from backend.services.news_store import aggregate_daily
@@ -140,14 +248,14 @@ def run_pipeline():
         except Exception as e:
             print(f"[scheduler] coin news skip: {e}")
 
-        # 8) AI 紀錄保留政策：清掉過期的分析快取與 90 天前的對話/用量紀錄（非關鍵）
+        # 9) AI 紀錄保留政策：清掉過期的分析快取與 90 天前的對話/用量紀錄（非關鍵）
         try:
             from backend.services.app_db import cleanup_ai
             cleanup_ai()
         except Exception as e:
             print(f"[scheduler] ai cleanup skip: {e}")
 
-        # 9) data/raw 原始 JSON 保留 7 天（時線每小時抓取會持續累積，非關鍵）
+        # 10) data/raw 原始 JSON 保留 7 天（時線每小時抓取會持續累積，非關鍵）
         try:
             import re as _re
             cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y%m%d")
@@ -162,8 +270,15 @@ def run_pipeline():
         except Exception as e:
             print(f"[scheduler] raw cleanup skip: {e}")
 
+        forecast_note = (
+            f"預測 +{forecast_result.get('created', 0)} / "
+            f"到期 +{forecast_result.get('resolved', 0)}"
+            if forecast_result.get("status") == "success"
+            else "預測失敗（詳見 forecast_pipeline）"
+        )
         finish_job(job_id, "success",
-                   f"{len(symbols)} 幣種 · 入庫 {ing['prices']} 筆 · 訊號 {sig} 筆 · 最新 {date_max}")
+                   f"{len(symbols)} 幣種 · 入庫 {ing['prices']} 筆 · 訊號 {sig} 筆 · "
+                   f"{forecast_note} · 最新 {date_max}")
         print(f"[scheduler] daily pipeline done (prices {ing['prices']}, signals {sig}, latest {date_max})")
     except Exception as e:
         finish_job(job_id, "failed", str(e))

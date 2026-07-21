@@ -24,6 +24,8 @@ sys.path.insert(0, str(ROOT))
 import numpy as np
 import pandas as pd
 
+from src.cross_sectional import realized_holding_returns, max_drawdown_from_returns
+
 CLEAN = ROOT / "data" / "clean"
 INTERVAL = "1d"
 SKIP = 200
@@ -56,12 +58,11 @@ def backtest(C, O, L=30, K=5, R=10, regimeN=100, target_vol=0.30, death_rate=0.0
     t = SKIP
     while t + 1 + R < n:
         enter = O.iloc[t + 1]; exit_ = O.iloc[t + 1 + R]
-        valid = enter.notna() & exit_.notna() & (enter > 0)
-        ret_coins = (exit_ / enter - 1.0)
-        bench_ret = float(ret_coins[valid[valid].index].mean()) if valid.any() else 0.0
+        ret_coins = realized_holding_returns(enter, exit_)
+        bench_ret = float(ret_coins.dropna().mean()) if ret_coins.notna().any() else 0.0
         w_new = pd.Series(0.0, index=coins); exposure = 0.0
         risk_on = bool(regime.iloc[t]) if pd.notna(regime.iloc[t]) else False
-        m = mom.iloc[t].dropna(); m = m[m.index.isin(valid[valid].index)]
+        m = mom.iloc[t].dropna()
         rc = ret_coins.copy()
         if risk_on and len(m) >= 6:
             topk = list(m.sort_values(ascending=False).head(K).index)
@@ -78,9 +79,11 @@ def backtest(C, O, L=30, K=5, R=10, regimeN=100, target_vol=0.30, death_rate=0.0
                     if rng.random() < death_rate:
                         rc[c] = -0.90
             for c in topk:
-                w_new[c] = exposure * float(w[c])
+                if pd.notna(ret_coins.get(c)):
+                    w_new[c] = exposure * float(w[c])
         turnover = (w_new - w_prev).abs().sum()
-        port = float((w_new * rc.reindex(coins).fillna(0)).sum()) - COST * turnover
+        gross_port = float((w_new * rc.reindex(coins).fillna(0)).sum())
+        port = max(-1.0, gross_port - COST * turnover)
         strat.append(port); bench.append(bench_ret); periods.append(dates[t])
         w_prev = w_new; t += R
     return pd.Series(strat, index=periods), pd.Series(bench, index=periods)
@@ -92,7 +95,7 @@ def perf(r, R=10):
     eq = (1 + r).cumprod()
     yrs = len(r) * R / 365.0
     cagr = (float(eq.iloc[-1]) ** (1 / yrs) - 1) * 100 if yrs > 0.3 else 0.0
-    mdd = float(((eq - eq.cummax()) / eq.cummax()).min()) * 100
+    mdd = max_drawdown_from_returns(r)
     total = float(eq.iloc[-1] - 1) * 100
     return dict(cagr=cagr, mdd=mdd, total=total)
 
