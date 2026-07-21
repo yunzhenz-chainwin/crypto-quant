@@ -171,6 +171,66 @@ AUC 低於 0.5，且 Brier、log loss、ECE 都是三者中最差。不能用 5 
 Ready 為 0 表示現有 policy 選擇全部 abstain；它不是「0% accuracy」。在至少有一筆
 ready 且 outcome 已成熟前，ready-only 的績效必須保持 `null`。
 
+### 4.5 現況判讀與「多少才有參考意義」
+
+先區分三件事：**有統計訊號**、**能輔助決策**、**可以上線**不是同一件事。以下數字是
+本專案的內部研究里程碑，不是跨市場通用的「及格線」，也不是獲利保證。正式判定必須
+針對每個 `model_version × horizon` 分開進行；跨 horizon pooled 數字只能用來描述現況，
+不能掩蓋某個 horizon 的退步。
+
+目前整體判定是 **尚無可依賴的方向預測優勢**：
+
+- BSS 為負，且 log loss 高於 forecast-time baseline；主要 proper scores 都沒有勝過基準；
+- ROC-AUC 僅 `0.504585`、MCC 僅 `0.007275`，實務上仍接近無排序／無判別能力；
+- AP `0.470341` 低於事件 prevalence `0.473139`，尚未產生 precision-recall lift；
+- Accuracy `0.510551` 低於永遠預測 non-up 的 majority baseline `0.526861`；
+- ECE `0.035678` 可粗略讀成 10 個固定機率區間內，預測與實際頻率的加權差約
+  `3.57` 個百分點；它比其他指標接近可改善範圍，但不能抵銷負 BSS；
+- 80% interval 的 empirical coverage 是 `82.6775%`，落在下表暫定的 `77%–83%`
+  容許帶內；但平均寬度達 `22.9604` 個百分點，且尚無同口徑 interval baseline，
+  所以只能說 coverage 尚可，不能說區間已經實用；
+- ready observations 是 `0`。因此目前結果只能作 all-forecast 研究診斷，不能宣稱為
+  使用者實際會收到的預測表現。
+
+#### 建議的最低證據與下一階段目標
+
+下表多數是尚未程式化的 **P1 研究門檻**，不是現行自動 promotion gate。現行
+calibration gate 對 AUC 的要求是 challenger 相對 identity 最多退步 `0.002`，對 log
+loss 則是 challenger 相對 identity non-inferior；下表要求 AUC 顯著高於隨機、log loss
+顯著優於 forecast-time baseline，是針對後續 source model 的較強目標。所有未來 CI 都應
+使用 issue-date clustered block bootstrap；重抽 AP lift 時也要在每次 resample 同步重算
+prevalence。
+
+| 指標／條件 | 現在 | 最低「有參考意義」條件 | 建議的下一階段內部目標 | 現況 |
+|---|---:|---|---|---|
+| 證據量與 provenance | pooled `N=73,881`；`vintage_exact=false`；ready `N=0` | 每個 model+horizon 至少 1,000 筆、180 個 issue dates、正負類各 100 筆；完整 universe、唯一 forecast ID、exact immutable vintage | 將前述條件設為 hard gate，另累積相同規模的 live/shadow matured outcomes | 樣本列數足夠，但 exact-vintage 與 live/ready 證據不合格 |
+| Brier / BSS | `0.252671` / `-0.4424%` | BSS `>0`，且日期 block-bootstrap 的「baseline − model」95% CI 下界 `>0` | 每個 horizon BSS 至少 `+1%`；依各自 baseline 換算，1／5／10 日 Brier 約需 `<=0.247876`／`<=0.248841`／`<=0.250418`。overall 的示意值是 `<=0.249042`，不可拿來取代各 horizon gate | 不合格 |
+| Log loss | `0.698954`；baseline `0.696363` | 低於同一批 forecast IDs 的 baseline，且 paired improvement 95% CI 下界 `>0` | 先以至少 `0.5%` relative improvement 作研究里程碑；依目前 baseline 約為 `<=0.692881` | 不合格 |
+| ECE | `0.035678` | 在相同 paired OOS rows 上，challenger 對 identity 的 equal-width 與 tie-preserving equal-mass ECE 都改善、各 bin support 足夠，且 Brier/AUC 不退步 | 兩種分箱 ECE 皆 `<=0.02`；`<=0.01` 可視為較強校準，但仍不可單獨升級模型 | 尚未達標；不可單看 |
+| ROC-AUC | `0.504585` | 95% 日期 block-bootstrap CI 下界 `>0.5`，並在各 horizon／regime 穩定 | point AUC `>=0.53` 作第一個弱訊號里程碑；`>=0.55` 作較強目標 | 接近隨機 |
+| AP | `0.470341`；prevalence `0.473139` | AP 高於同切片 prevalence，且 AP lift 的 95% CI 下界 `>0` | AP 至少比 prevalence 高 `5%` relative；依目前 prevalence 約為 `>=0.496796` | 無 lift |
+| Accuracy | `0.510551`；majority baseline `0.526861` | 高於同切片 majority baseline，且不能伴隨 Recall 或 Specificity 崩潰 | 至少 `>0.526861`，並同時通過 Balanced accuracy 與 MCC 目標；不設單獨 promotion gate | 低於簡單基準 |
+| Balanced accuracy | `0.503515` | 95% CI 下界 `>0.5` | point estimate `>=0.52`；較強目標 `>=0.55` | 接近隨機 |
+| MCC | `0.007275` | 95% CI 下界 `>0` | point estimate `>=0.05`；較強目標 `>=0.10` | 接近零 |
+| Precision / Recall / F1 @0.5 | `0.477891` / `0.372554` / `0.418699` | threshold 必須在 training/validation 事先固定，並與相同 coverage、成本政策的 baseline 比較 | 暫定聯合篩選：Precision `>= prevalence + 0.02`（目前約 `0.493139`）、Recall `>=0.50`、Specificity `>=0.50`、F1 `>=0.50`；仍須同時滿足 BSS、Balanced accuracy、MCC 與成本條件 | Recall/F1 偏低，且沒有決策優勢證據 |
+| Ready coverage | `0%` | 先預先登錄可接受的 coverage floor，再評分至少 1,000 筆／180 dates 的 matured ready outcomes | 若產品尚未定義頻率，可先用 `>=10%` 作 shadow 可用性里程碑；不得在測試結果後調低 | 不可評估 ready 績效 |
+| 80% prediction interval | coverage `82.6775%`；width `22.9604pp`；WIS `4.504830` | coverage 落在預先登錄的 `77%–83%` 產品容許帶，且 WIS／width 優於同口徑 forecast-time interval baseline | 保持 coverage 在暫定規劃帶內，同時讓 WIS 至少相對改善 `5%`；不設跨 horizon 的固定 width | pooled coverage 落在暫定規劃帶；尚無 baseline／cluster CI，sharpness 與 skill 未證明 |
+| SHAP | `N/A` | 先有固定 feature schema、model object、background dataset 與 frozen OOS set | 報告 feature direction、mean absolute SHAP、跨 chronological folds 的穩定性；SHAP 數值本身沒有「越高越好」門檻 | 現階段不適用 |
+
+表中的 `+1% BSS`、`AUC 0.53`、`ECE 0.02` 等是用來管理研發進度的**規劃值**；真正的
+最低證據仍是「優於正確的 forecast-time baseline，而且 paired confidence interval
+排除無改善」。若只達到 point target、CI 仍跨過基準，結論仍是「值得繼續研究」，不是
+「已經可靠」。同樣地，即使統計 gate 全部通過，也還要在未觸碰的 exact-vintage test、
+live shadow、交易成本／滑價與風險限制下通過，才有資格進入人工發布審查。
+
+#### 為什麼 F1、Recall 與 SHAP 不能單獨訂漂亮數字
+
+以目前 prevalence 計算，永遠預測 up 會得到 Precision `0.473139`、Recall `1.0`、F1
+`0.642355`，卻完全沒有辨別何時上漲的能力。這表示 F1 或 Recall 很高也可能只是退化成
+單一類別策略。因此本專案只接受預先固定 threshold 下的聯合條件，並同時查看
+Specificity、Balanced accuracy、MCC、coverage 與成本。SHAP 則是「模型為什麼這樣
+預測」的 attribution，不是「模型預測得多準」的分數，所以不應設定越大越好的 target。
+
 ## 5. Null 與邊界規則
 
 輸出契約使用 JSON `null`，不使用 NaN、Infinity 或偷偷補 0：
