@@ -4,6 +4,8 @@
 > 適用系統：crypto-quant 研究預測服務
 > 性質：外部可閱讀的功能、資料與驗收規格；不是投資建議，也不是報酬承諾。
 
+現行模型的完整實測數值、F1／Recall／ROC-AUC／Average Precision 定義與 SHAP 適用性，見 [預測模型指標基準報告](forecast-model-metrics.md)；Platt／Beta strict walk-forward 實驗與 `keep_identity` 結論見 [預測機率校準研究報告](forecast-calibration.md)。
+
 ## 1. 摘要
 
 Forecast Scorecard 的任務不是證明模型「會賺錢」，而是用不可回寫、可重播、完全樣本外的資料回答以下問題：
@@ -191,7 +193,7 @@ legacy `forecast_snapshot`／`forecast_outcome` 預設排除於正式 P0 閘門�
     "horizon": 5,
     "model_version": "historical-baseline-v2",
     "symbol": null,
-    "window": 365,
+    "window": null,
     "include_legacy": false
   },
   "provenance": {
@@ -443,7 +445,7 @@ non-overlapping sensitivity、其他指標的 cluster CI 與自相關驅動 bloc
 
 未登入或 token 無效回 HTTP 401；未知 horizon 回 422。合法但沒有成熟 outcome、或 model filter 沒有資料時回 HTTP 200 + `status=unverifiable`，不把「沒有資料」當 0 分。
 
-沒有同時明確指定單一 `model_version + horizon` 時，overall 只屬 aggregate diagnostic view，`single_model_horizon_scope=not_applicable`，不得拿它作升級依據。指定單一 model、但查看全部 horizon 時，可逐一閱讀 `by_horizon[].promotion_gates`，不能用跨 horizon overall 掩蓋弱項。
+沒有同時明確指定單一 `model_version + horizon`，或查詢帶有 `symbol`／`window` 篩選時，overall 只屬 diagnostic view，`single_model_horizon_scope=not_applicable`，不得拿它作升級依據。正式 gate 固定使用完整 live ledger universe 與完整歷史，防止挑最好看的幣或期間。指定單一 model、但查看全部 horizon 時，可逐一閱讀未篩選的 `by_horizon[].promotion_gates`，不能用跨 horizon overall 掩蓋弱項。
 
 排程順序：
 
@@ -479,7 +481,7 @@ scorecard 不另建可被誤認為真相的 cache table。同一 ledger 與參�
 
 | Gate | P0 要求 | 失敗結果 |
 |---|---|---|
-| Scope | 必須明確指定單一 model version 與 horizon | aggregate 只供診斷，`not_applicable` |
+| Scope | 單一 model version、單一 horizon、完整 symbol universe、完整歷史 | aggregate／symbol／window slice 只供診斷，`not_applicable` |
 | Provenance | 預設只用 v2；`include_legacy=true` 必定失敗 | legacy 可研究，不可當發布證據 |
 | Sample | 至少 1,000 筆 scorable observations | `failed`，top-level 至多 `insufficient_evidence` |
 | Independent dates | 至少 180 個不同 issue dates | `failed`，top-level 至多 `insufficient_evidence` |
@@ -560,6 +562,7 @@ log-loss delta CI、校準 bin gate、ready coverage/value、區間 coverage CI�
 - [x] scorecard GET 需要有效 admin token，且前後 ledger row counts 不變。
 - [x] 不支援的 horizon 回 422；未知 model／合法空結果回 200 + `unverifiable`。
 - [x] 未指定單一 model+horizon 時，aggregate promotion gate 為 `not_applicable`。
+- [x] 任意 symbol／window 篩選只供診斷，不能通過正式 promotion gate。
 - [x] 每日 outcome 解析完成後才計算 scorecard 摘要。
 - [x] scorecard 計算失敗不阻斷或回寫已完成的 forecast pipeline。
 - [x] 目前資料庫實測回 `resolved_count=0`、`status=unverifiable`、`metrics=null`。

@@ -169,7 +169,11 @@ def test_cli_writes_explicit_output_atomically(capsys):
 
         assert result == 0
         assert output.is_file()
-        assert '"records": 1' in capsys.readouterr().out
+        stdout_payload = json.loads(capsys.readouterr().out)
+        assert stdout_payload["records"] == 1
+        assert "f1_score" in stdout_payload["scorecard"]["overall"]
+        assert "roc_auc" in stdout_payload["scorecard"]["overall"]
+        assert "average_precision" in stdout_payload["scorecard"]["overall"]
         payload = json.loads(output.read_text(encoding="utf-8"))
         assert payload["provenance"]["vintage_exact"] is False
         assert payload["provenance"]["universe_source"] == "explicit_cli_symbols"

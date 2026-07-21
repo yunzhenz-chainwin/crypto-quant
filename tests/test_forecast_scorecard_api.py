@@ -172,9 +172,26 @@ def test_scorecard_deduplicates_revisions_before_outcome_filtering(
     assert body["overall"]["resolved_count"] == 1
     assert body["overall"]["observations"] == 1
     assert body["overall"]["metrics"]["brier_score"] == pytest.approx(0.04)
-    assert {gate["status"] for gate in body["overall"]["promotion_gates"]} <= {
+    assert body["overall"]["metrics"]["f1_score"] == 1.0
+    assert body["overall"]["metrics"]["roc_auc"] is None
+    assert "average_precision" in body["overall"]["metrics"]
+    assert body["overall"]["promotion_gates"][0]["gate"] == (
+        "single_model_horizon_scope"
+    )
+    assert body["overall"]["promotion_gates"][0]["status"] == "not_applicable"
+
+    formal = client.get(
+        "/api/forecast/scorecard",
+        params={"horizon": 1, "model_version": MODEL},
+        headers=admin_headers,
+    ).json()
+    assert {gate["status"] for gate in formal["overall"]["promotion_gates"]} <= {
         "pass", "failed", "not_testable",
     }
+    assert all(
+        gate["gate"] != "single_model_horizon_scope"
+        for gate in formal["overall"]["promotion_gates"]
+    )
 
     aggregate = client.get(
         "/api/forecast/scorecard", headers=admin_headers,
@@ -182,8 +199,11 @@ def test_scorecard_deduplicates_revisions_before_outcome_filtering(
     assert aggregate["overall"]["promotion_gates"] == [{
         "gate": "single_model_horizon_scope",
         "status": "not_applicable",
-        "actual": "aggregate diagnostic view",
-        "required": "one explicit model_version and one horizon",
+        "actual": "model_version is not explicit; horizon is not explicit",
+        "required": (
+            "one explicit model_version and one horizon over the full "
+            "unfiltered symbol universe and full history"
+        ),
     }]
 
 
@@ -258,6 +278,11 @@ def test_prequential_baseline_is_built_before_window_and_flat_is_non_up(
     assert body["overall"]["metrics"]["baseline_brier_score"] == pytest.approx((2 / 3) ** 2)
     assert body["overall"]["ready_count"] == 0
     assert body["overall"]["coverage"] == 0.0
+    scope_gate = body["overall"]["promotion_gates"][0]
+    assert scope_gate["gate"] == "single_model_horizon_scope"
+    assert scope_gate["status"] == "not_applicable"
+    assert "symbol-filtered" in scope_gate["actual"]
+    assert "window-filtered" in scope_gate["actual"]
 
 
 def test_legacy_rows_are_opt_in_and_fail_the_release_provenance_gate(
@@ -290,7 +315,7 @@ def test_legacy_rows_are_opt_in_and_fail_the_release_provenance_gate(
         )
     _resolve(legacy["forecast_id"], target="2025-02-06", realized=-1.0)
 
-    params = {"horizon": 5, "model_version": MODEL, "symbol": "ETHUSDT"}
+    params = {"horizon": 5, "model_version": MODEL}
     default_body = client.get(
         "/api/forecast/scorecard", params=params, headers=admin_headers,
     ).json()

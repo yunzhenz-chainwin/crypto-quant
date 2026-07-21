@@ -343,6 +343,7 @@ def _group_score(
     *,
     include_legacy: bool = False,
     promotion_scope: bool = True,
+    promotion_scope_reason: str = "aggregate diagnostic view",
 ) -> dict:
     scored = _scoreable(records)
     issue_values = sorted({row["issue_date"] for row in scored if _day(row.get("issue_date"))})
@@ -385,8 +386,11 @@ def _group_score(
         else [{
             "gate": "single_model_horizon_scope",
             "status": "not_applicable",
-            "actual": "aggregate diagnostic view",
-            "required": "one explicit model_version and one horizon",
+            "actual": promotion_scope_reason,
+            "required": (
+                "one explicit model_version and one horizon over the full "
+                "unfiltered symbol universe and full history"
+            ),
         }]
     )
     return {
@@ -443,10 +447,20 @@ def build_forecast_scorecard(
             and cutoff <= _day(row["target_as_of"]) <= data_as_of_day
         ]
 
+    overall_scope_issues = []
+    if normalized_model is None:
+        overall_scope_issues.append("model_version is not explicit")
+    if horizon is None:
+        overall_scope_issues.append("horizon is not explicit")
+    if normalized_symbol is not None:
+        overall_scope_issues.append("symbol-filtered diagnostic slice")
+    if window is not None:
+        overall_scope_issues.append("window-filtered diagnostic slice")
     overall = _group_score(
         records,
         include_legacy=bool(include_legacy),
-        promotion_scope=normalized_model is not None and horizon is not None,
+        promotion_scope=not overall_scope_issues,
+        promotion_scope_reason="; ".join(overall_scope_issues),
     )
     grouped: dict[int, list[dict]] = defaultdict(list)
     for row in records:
@@ -458,7 +472,19 @@ def build_forecast_scorecard(
             **_group_score(
                 grouped.get(days, []),
                 include_legacy=bool(include_legacy),
-                promotion_scope=normalized_model is not None,
+                promotion_scope=(
+                    normalized_model is not None
+                    and normalized_symbol is None
+                    and window is None
+                ),
+                promotion_scope_reason="; ".join(
+                    reason for reason in (
+                        "model_version is not explicit" if normalized_model is None else "",
+                        "symbol-filtered diagnostic slice" if normalized_symbol is not None else "",
+                        "window-filtered diagnostic slice" if window is not None else "",
+                    )
+                    if reason
+                ),
             ),
         }
         for days in horizon_values

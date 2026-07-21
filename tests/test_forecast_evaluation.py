@@ -1,8 +1,10 @@
+import json
 import math
 
 import pytest
 
 from src.forecast_evaluation import (
+    binary_classification_metrics,
     deterministic_block_bootstrap_ci,
     evaluate_binary_forecasts,
     evaluate_prediction_intervals,
@@ -10,6 +12,108 @@ from src.forecast_evaluation import (
     pinball_loss,
     risk_coverage_curve,
 )
+
+
+def test_binary_classification_metrics_cover_threshold_and_ranking_scores():
+    metrics = binary_classification_metrics(
+        [0.90, 0.80, 0.60, 0.40, 0.30, 0.10],
+        [1, 0, 1, 0, 1, 0],
+        threshold=0.50,
+    )
+
+    assert metrics["classification_threshold"] == 0.5
+    assert metrics["confusion_matrix"] == {
+        "true_positive": 2,
+        "false_positive": 1,
+        "true_negative": 2,
+        "false_negative": 1,
+    }
+    assert metrics["precision"] == pytest.approx(2 / 3)
+    assert metrics["accuracy"] == pytest.approx(2 / 3)
+    assert metrics["recall"] == pytest.approx(2 / 3)
+    assert metrics["sensitivity"] == metrics["recall"]
+    assert metrics["specificity"] == pytest.approx(2 / 3)
+    assert metrics["f1_score"] == pytest.approx(2 / 3)
+    assert metrics["balanced_accuracy"] == pytest.approx(2 / 3)
+    assert metrics["matthews_correlation_coefficient"] == pytest.approx(1 / 3)
+    assert metrics["roc_auc"] == pytest.approx(2 / 3)
+    assert metrics["average_precision"] == pytest.approx(0.7555555555555555)
+    assert metrics["positive_support"] == 3
+    assert metrics["negative_support"] == 3
+    assert metrics["positive_class"].startswith("up")
+
+
+def test_binary_classification_metrics_are_tie_stable():
+    first = binary_classification_metrics([0.8, 0.8, 0.2, 0.2], [1, 0, 1, 0])
+    second = binary_classification_metrics([0.8, 0.8, 0.2, 0.2], [0, 1, 0, 1])
+
+    assert first["roc_auc"] == second["roc_auc"] == 0.5
+    assert first["average_precision"] == second["average_precision"] == 0.5
+
+
+def test_binary_classification_metrics_return_null_when_undefined():
+    empty = binary_classification_metrics([], [])
+    single_class = binary_classification_metrics([0.2, 0.8], [1, 1])
+    all_flat = binary_classification_metrics([0.2, 0.8], [0, 0])
+    no_predicted_positive = binary_classification_metrics([0.1, 0.2], [0, 1])
+
+    assert empty["precision"] is None
+    assert empty["accuracy"] is None
+    assert empty["recall"] is None
+    assert empty["specificity"] is None
+    assert empty["f1_score"] is None
+    assert empty["balanced_accuracy"] is None
+    assert empty["matthews_correlation_coefficient"] is None
+    assert empty["roc_auc"] is None
+    assert empty["average_precision"] is None
+    assert single_class["specificity"] is None
+    assert single_class["balanced_accuracy"] is None
+    assert single_class["matthews_correlation_coefficient"] is None
+    assert single_class["roc_auc"] is None
+    assert single_class["average_precision"] is None
+    assert all_flat["recall"] is None
+    assert all_flat["roc_auc"] is None
+    assert all_flat["average_precision"] is None
+    assert no_predicted_positive["precision"] is None
+
+
+def test_empty_binary_forecast_evaluation_returns_null_scores():
+    metrics = evaluate_binary_forecasts([], [], baseline_probability=[])
+
+    assert metrics["observations"] == 0
+    assert metrics["brier_score"] is None
+    assert metrics["log_loss"] is None
+    assert metrics["coverage"] is None
+    assert metrics["precision"] is None
+    assert metrics["roc_auc"] is None
+    # The public scorecard contract must emit JSON null, never NaN/Infinity.
+    encoded = json.dumps(metrics, allow_nan=False)
+    assert '"brier_score": null' in encoded
+
+
+def test_classification_threshold_includes_probability_tie_as_positive():
+    metrics = binary_classification_metrics([0.5, 0.4999], [1, 0], threshold=0.5)
+
+    assert metrics["confusion_matrix"]["true_positive"] == 1
+    assert metrics["confusion_matrix"]["true_negative"] == 1
+    assert metrics["accuracy"] == 1.0
+
+
+def test_status_metrics_separate_ready_classification_from_all_forecasts():
+    metrics = evaluate_binary_forecasts(
+        [0.9, 0.8, 0.7, 0.1],
+        [1, 0, 1, 0],
+        statuses=["ready", "ready", "abstain", "abstain"],
+    )
+
+    ready = metrics["status_metrics"]["ready"]
+    assert metrics["observations"] == 4
+    assert ready["observations"] == 2
+    assert ready["coverage"] == 0.5
+    assert ready["positive_support"] == 1
+    assert ready["negative_support"] == 1
+    assert ready["precision"] == 0.5
+    assert ready["roc_auc"] == 1.0
 
 
 def test_perfect_binary_forecasts_have_zero_error():
@@ -191,3 +295,33 @@ def test_replay_scorecard_accepts_flat_and_nested_contracts():
     assert scorecard["intervals"]["observations"] == 2
     assert scorecard["brier_advantage_ci"]["block_size"] == 2
     assert scorecard["by_horizon"]["1"]["observations"] == 2
+
+
+def test_fallback_baseline_accepts_ledger_target_as_of_field():
+    records = [
+        {
+            "symbol": "BTCUSDT",
+            "issue_date": "2026-01-01",
+            "target_as_of": "2026-01-02",
+            "horizon_days": 1,
+            "probability_up": 0.5,
+            "outcome_up": 1,
+        },
+        {
+            "symbol": "BTCUSDT",
+            "issue_date": "2026-01-03",
+            "target_as_of": "2026-01-04",
+            "horizon_days": 1,
+            "probability_up": 0.5,
+            "outcome_up": 0,
+        },
+    ]
+
+    scorecard = evaluate_replay_records(records, bootstrap_samples=10)
+
+    # Row 1 has the neutral prior. Row 2 can use row 1 because its target
+    # resolved before row 2 was issued: Laplace(1,1) => (1 + 1) / (1 + 2).
+    expected = ((0.5 - 1) ** 2 + ((2 / 3) - 0) ** 2) / 2
+    assert scorecard["overall"]["baseline_brier_score"] == pytest.approx(expected)
+    assert scorecard["baseline_fallback_records"] == 2
+    assert scorecard["neutral_baseline_records"] == 0

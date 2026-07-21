@@ -74,12 +74,12 @@
 
 | 端點 | 權限 | 參數 | 回應摘要 |
 |---|---|---|---|
-| `GET /forecast/scorecard` | 🔒 | `horizon`（1/5/10，選）、`model_version`、`symbol`、`window`（正整數日）、`include_legacy`（預設 false） | v2 不可變 ledger 的 point-in-time 成績單：provenance、樣本數、Brier/BSS、log loss、ECE、ready coverage/accuracy、risk–coverage、區間/WIS、block-bootstrap CI 與 promotion gates |
+| `GET /forecast/scorecard` | 🔒 | `horizon`（1/5/10，選）、`model_version`、`symbol`、`window`（正整數日）、`include_legacy`（預設 false） | v2 不可變 ledger 的 point-in-time 成績單：provenance、樣本數、Brier/BSS、log loss、ECE、F1/Recall/MCC/ROC-AUC/AP、ready coverage/accuracy、risk–coverage、區間/WIS、block-bootstrap CI 與 promotion gates |
 | `GET /forecast/{symbol}` | 🌐 | `horizon`（1、5、10，預設5） | 不可變研究快照：漲跌機率、q10/q50/q90、下行風險、regime、confidence、證據、拒答原因、`input_hash`、`data_version`、`reference_close` |
 
 > 預測只使用已完成 UTC 日線；低信心、資料過期或樣本不足時回傳 `status=abstain`。同一 `as_of` 若歷史資料被修訂，會依 SHA-256 輸入雜湊另存新快照，不覆寫舊預測。此功能為研究基準，不是投資建議或報酬承諾。
 
-> Scorecard 靜態路由位於 `{symbol}` 動態路由之前，且只供後台使用。未登入回 401；無成熟 outcome 回 HTTP 200 + `status=unverifiable`、`metrics=null`。正式 promotion gate 必須明確指定單一 `model_version + horizon`；aggregate view 只供診斷。完整資料契約與方法見 [Forecast Scorecard P0](../forecast-scorecard-p0.md)。
+> Scorecard 靜態路由位於 `{symbol}` 動態路由之前，且只供後台使用。未登入回 401；無成熟 outcome 回 HTTP 200 + `status=unverifiable`、`metrics=null`。正式 promotion gate 必須明確指定單一 `model_version + horizon`，且不得帶 symbol/window 篩選；aggregate 與 filtered view 只供診斷。完整資料契約與方法見 [Forecast Scorecard P0](../forecast-scorecard-p0.md)。
 
 ## 6. `correlation` — 相關性（🌐）
 

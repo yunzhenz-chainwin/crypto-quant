@@ -141,7 +141,7 @@ function GateBadge({ status }) {
 
 export default function ForecastScorecardPage({ onLogout }) {
   const [horizon, setHorizon] = useState('5')
-  const [windowDays, setWindowDays] = useState('365')
+  const [windowDays, setWindowDays] = useState('all')
   const [symbolDraft, setSymbolDraft] = useState('')
   const [symbol, setSymbol] = useState('')
   const [modelVersionDraft, setModelVersionDraft] = useState('historical-baseline-v2')

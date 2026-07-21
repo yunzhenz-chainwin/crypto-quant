@@ -15,13 +15,170 @@ from typing import Any
 import numpy as np
 
 
-def _as_finite_vector(values: Iterable[float], name: str) -> np.ndarray:
+def _as_finite_vector(
+    values: Iterable[float],
+    name: str,
+    *,
+    allow_empty: bool = False,
+) -> np.ndarray:
     array = np.asarray(list(values), dtype=float)
-    if array.ndim != 1 or array.size == 0:
-        raise ValueError(f"{name} must be a non-empty one-dimensional sequence")
+    if array.ndim != 1 or (array.size == 0 and not allow_empty):
+        qualifier = (
+            "a one-dimensional sequence"
+            if allow_empty
+            else "a non-empty one-dimensional sequence"
+        )
+        raise ValueError(f"{name} must be {qualifier}")
     if not np.isfinite(array).all():
         raise ValueError(f"{name} must contain only finite values")
     return array
+
+
+def _safe_ratio(numerator: float | int, denominator: float | int) -> float | None:
+    """Return a finite ratio, or null when the metric is undefined."""
+
+    return None if denominator == 0 else float(numerator / denominator)
+
+
+def _roc_auc(probabilities: np.ndarray, outcomes: np.ndarray) -> float | None:
+    """Mann-Whitney ROC-AUC with deterministic average ranks for score ties."""
+
+    positives = int(outcomes.sum())
+    negatives = int(outcomes.size - positives)
+    if positives == 0 or negatives == 0:
+        return None
+    order = np.argsort(probabilities, kind="mergesort")
+    sorted_probabilities = probabilities[order]
+    ranks = np.empty(probabilities.size, dtype=float)
+    start = 0
+    while start < probabilities.size:
+        end = start + 1
+        while (
+            end < probabilities.size
+            and sorted_probabilities[end] == sorted_probabilities[start]
+        ):
+            end += 1
+        # Ranks are one-based; every member of a tie receives its average rank.
+        ranks[order[start:end]] = (start + 1 + end) / 2.0
+        start = end
+    positive_rank_sum = float(ranks[outcomes == 1].sum())
+    return float(
+        (positive_rank_sum - positives * (positives + 1) / 2.0)
+        / (positives * negatives)
+    )
+
+
+def _average_precision(probabilities: np.ndarray, outcomes: np.ndarray) -> float | None:
+    """Tie-stable average precision (step-wise area under the PR curve)."""
+
+    positives = int(outcomes.sum())
+    negatives = int(outcomes.size - positives)
+    if positives == 0 or negatives == 0:
+        return None
+    order = np.argsort(-probabilities, kind="mergesort")
+    sorted_probabilities = probabilities[order]
+    sorted_outcomes = outcomes[order]
+    true_positives = 0
+    selected = 0
+    previous_recall = 0.0
+    area = 0.0
+    start = 0
+    while start < probabilities.size:
+        end = start + 1
+        while (
+            end < probabilities.size
+            and sorted_probabilities[end] == sorted_probabilities[start]
+        ):
+            end += 1
+        true_positives += int(sorted_outcomes[start:end].sum())
+        selected += end - start
+        recall = true_positives / positives
+        precision = true_positives / selected
+        area += (recall - previous_recall) * precision
+        previous_recall = recall
+        start = end
+    return float(area)
+
+
+def binary_classification_metrics(
+    probabilities: Iterable[float],
+    outcomes: Iterable[int],
+    *,
+    threshold: float = 0.5,
+) -> dict[str, Any]:
+    """Return threshold and ranking metrics for a binary probability forecast.
+
+    A forecast is labelled positive when ``probability >= threshold``. Ratios
+    with a zero denominator are returned as ``None`` instead of being silently
+    coerced to zero. ROC-AUC and average precision require both outcome classes;
+    empty and single-class samples therefore return ``None`` for those ranking
+    metrics.
+    """
+
+    probs = _as_finite_vector(probabilities, "probabilities", allow_empty=True)
+    actual = _as_finite_vector(outcomes, "outcomes", allow_empty=True)
+    if probs.size != actual.size:
+        raise ValueError("probabilities and outcomes must have equal length")
+    if ((probs < 0) | (probs > 1)).any():
+        raise ValueError("probabilities must be between 0 and 1")
+    if not np.isin(actual, (0.0, 1.0)).all():
+        raise ValueError("outcomes must contain only 0 or 1")
+    if not 0 <= threshold <= 1:
+        raise ValueError("threshold must be between 0 and 1")
+
+    predicted = (probs >= threshold).astype(int)
+    labels = actual.astype(int)
+    true_positives = int(((predicted == 1) & (labels == 1)).sum())
+    false_positives = int(((predicted == 1) & (labels == 0)).sum())
+    true_negatives = int(((predicted == 0) & (labels == 0)).sum())
+    false_negatives = int(((predicted == 0) & (labels == 1)).sum())
+    precision = _safe_ratio(true_positives, true_positives + false_positives)
+    recall = _safe_ratio(true_positives, true_positives + false_negatives)
+    specificity = _safe_ratio(true_negatives, true_negatives + false_positives)
+    f1 = _safe_ratio(
+        2 * true_positives,
+        2 * true_positives + false_positives + false_negatives,
+    )
+    balanced_accuracy = (
+        None
+        if recall is None or specificity is None
+        else float((recall + specificity) / 2.0)
+    )
+    mcc_denominator = float(
+        np.sqrt(
+            (true_positives + false_positives)
+            * (true_positives + false_negatives)
+            * (true_negatives + false_positives)
+            * (true_negatives + false_negatives)
+        )
+    )
+    mcc = _safe_ratio(
+        true_positives * true_negatives - false_positives * false_negatives,
+        mcc_denominator,
+    )
+    return {
+        "observations": int(probs.size),
+        "positive_class": "up (realized_return_pct > 0; flat is non-up)",
+        "positive_support": int(labels.sum()),
+        "negative_support": int(labels.size - labels.sum()),
+        "classification_threshold": float(threshold),
+        "confusion_matrix": {
+            "true_positive": true_positives,
+            "false_positive": false_positives,
+            "true_negative": true_negatives,
+            "false_negative": false_negatives,
+        },
+        "accuracy": _safe_ratio(true_positives + true_negatives, labels.size),
+        "precision": precision,
+        "recall": recall,
+        "sensitivity": recall,
+        "specificity": specificity,
+        "f1_score": f1,
+        "balanced_accuracy": balanced_accuracy,
+        "matthews_correlation_coefficient": mcc,
+        "roc_auc": _roc_auc(probs, labels),
+        "average_precision": _average_precision(probs, labels),
+    }
 
 
 def _baseline_vector(
@@ -46,6 +203,7 @@ def risk_coverage_curve(
     outcomes: Iterable[int],
     *,
     confidence: Iterable[float] | None = None,
+    classification_threshold: float = 0.5,
 ) -> list[dict[str, float | int]]:
     """Return classification risk as progressively less-confident cases enter.
 
@@ -55,29 +213,36 @@ def risk_coverage_curve(
     hide badly calibrated probabilities.
     """
 
-    probs = _as_finite_vector(probabilities, "probabilities")
-    actual = _as_finite_vector(outcomes, "outcomes")
+    probs = _as_finite_vector(probabilities, "probabilities", allow_empty=True)
+    actual = _as_finite_vector(outcomes, "outcomes", allow_empty=True)
     if probs.size != actual.size:
         raise ValueError("probabilities and outcomes must have equal length")
     if ((probs < 0) | (probs > 1)).any():
         raise ValueError("probabilities must be between 0 and 1")
     if not np.isin(actual, (0.0, 1.0)).all():
         raise ValueError("outcomes must contain only 0 or 1")
+    if not 0 <= classification_threshold <= 1:
+        raise ValueError("classification_threshold must be between 0 and 1")
     if confidence is None:
         certainty = np.maximum(probs, 1.0 - probs)
     else:
-        certainty = _as_finite_vector(confidence, "confidence")
+        certainty = _as_finite_vector(confidence, "confidence", allow_empty=True)
         if certainty.size != probs.size:
             raise ValueError("confidence and probabilities must have equal length")
         if ((certainty < 0) | (certainty > 1)).any():
             raise ValueError("confidence must be between 0 and 1")
 
     # mergesort makes ordering deterministic even when confidence ties occur.
+    if probs.size == 0:
+        return []
+
     order = np.argsort(-certainty, kind="mergesort")
     sorted_confidence = certainty[order]
     sorted_probs = probs[order]
     sorted_actual = actual[order]
-    correct = ((sorted_probs >= 0.5).astype(float) == sorted_actual).astype(float)
+    correct = (
+        (sorted_probs >= classification_threshold).astype(float) == sorted_actual
+    ).astype(float)
     cumulative_correct = np.cumsum(correct)
     cumulative_brier = np.cumsum((sorted_probs - sorted_actual) ** 2)
 
@@ -105,6 +270,7 @@ def evaluate_binary_forecasts(
     outcomes: Iterable[int],
     *,
     baseline_probability: float | Iterable[float] | None = None,
+    classification_threshold: float = 0.5,
     confidence_threshold: float = 0.60,
     bins: int = 10,
     statuses: Iterable[str] | None = None,
@@ -118,18 +284,55 @@ def evaluate_binary_forecasts(
     separately for ``ready``, ``abstain``, or future policy states.
     """
 
-    probs = _as_finite_vector(probabilities, "probabilities")
-    actual = _as_finite_vector(outcomes, "outcomes")
+    probs = _as_finite_vector(probabilities, "probabilities", allow_empty=True)
+    actual = _as_finite_vector(outcomes, "outcomes", allow_empty=True)
     if probs.size != actual.size:
         raise ValueError("probabilities and outcomes must have equal length")
     if ((probs < 0) | (probs > 1)).any():
         raise ValueError("probabilities must be between 0 and 1")
     if not np.isin(actual, (0.0, 1.0)).all():
         raise ValueError("outcomes must contain only 0 or 1")
+    if not 0 <= classification_threshold <= 1:
+        raise ValueError("classification_threshold must be between 0 and 1")
     if not 0.5 <= confidence_threshold <= 1.0:
         raise ValueError("confidence_threshold must be between 0.5 and 1")
     if bins < 2:
         raise ValueError("bins must be at least 2")
+
+    classification = binary_classification_metrics(
+        probs,
+        actual,
+        threshold=classification_threshold,
+    )
+    if probs.size == 0:
+        if statuses is not None and len(list(statuses)) != 0:
+            raise ValueError("statuses and probabilities must have equal length")
+        if baseline_probability is not None and not np.isscalar(baseline_probability):
+            empty_baseline = _as_finite_vector(
+                baseline_probability,
+                "baseline_probability",
+                allow_empty=True,
+            )
+            if empty_baseline.size:
+                raise ValueError("baseline_probability and outcomes must have equal length")
+        return {
+            "observations": 0,
+            "positive_rate": None,
+            "brier_score": None,
+            "baseline_brier_score": None,
+            "brier_skill_score": None,
+            "log_loss": None,
+            "baseline_log_loss": None,
+            "expected_calibration_error": None,
+            "calibration_bins": [],
+            **classification,
+            "confidence_threshold": float(confidence_threshold),
+            "committed_predictions": 0,
+            "coverage": None,
+            "selective_accuracy": None,
+            "status_metrics": {},
+            "risk_coverage_curve": [],
+        }
 
     baseline = _baseline_vector(baseline_probability, actual)
     brier_losses = (probs - actual) ** 2
@@ -172,7 +375,7 @@ def evaluate_binary_forecasts(
     confidence = np.maximum(probs, 1 - probs)
     committed = confidence >= confidence_threshold
     committed_count = int(committed.sum())
-    predicted = (probs >= 0.5).astype(float)
+    predicted = (probs >= classification_threshold).astype(float)
     selective_accuracy = (
         float((predicted[committed] == actual[committed]).mean())
         if committed_count
@@ -187,6 +390,11 @@ def evaluate_binary_forecasts(
         for status in sorted({str(value) for value in status_array}):
             selected = np.asarray([str(value) == status for value in status_array], dtype=bool)
             count = int(selected.sum())
+            classification_for_status = binary_classification_metrics(
+                probs[selected],
+                actual[selected],
+                threshold=classification_threshold,
+            )
             status_metrics[status] = {
                 "observations": count,
                 "coverage": float(count / probs.size),
@@ -203,6 +411,7 @@ def evaluate_binary_forecasts(
                     )
                 ),
                 "mean_confidence": float(confidence[selected].mean()),
+                **classification_for_status,
             }
 
     return {
@@ -215,12 +424,17 @@ def evaluate_binary_forecasts(
         "baseline_log_loss": baseline_log_loss,
         "expected_calibration_error": float(ece),
         "calibration_bins": calibration,
+        **classification,
         "confidence_threshold": float(confidence_threshold),
         "committed_predictions": committed_count,
         "coverage": float(committed_count / probs.size),
         "selective_accuracy": selective_accuracy,
         "status_metrics": status_metrics,
-        "risk_coverage_curve": risk_coverage_curve(probs, actual),
+        "risk_coverage_curve": risk_coverage_curve(
+            probs,
+            actual,
+            classification_threshold=classification_threshold,
+        ),
     }
 
 
@@ -410,7 +624,10 @@ def _point_in_time_fallback_baselines(
     for indices in groups.values():
         candidates: list[tuple[str, int]] = []
         for index in indices:
-            target_date = records[index].get("target_date")
+            target_date = (
+                records[index].get("target_date")
+                or records[index].get("target_as_of")
+            )
             if target_date:
                 candidates.append((str(target_date), int(records[index]["outcome_up"])))
         candidates.sort(key=lambda item: item[0])
