@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from backend.routers.admin import require_admin
 from backend.services import app_db
+from backend.services.forecast_scorecard import build_forecast_scorecard
 from backend.services.reader import available_symbols, load_prices
 from src.forecasting import (
     MODEL_VERSION,
@@ -15,6 +17,41 @@ from src.forecasting import (
 
 
 router = APIRouter()
+
+
+@router.get("/forecast/scorecard")
+def get_forecast_scorecard(
+    horizon: int | None = Query(
+        default=None,
+        description="Optional scorecard horizon: 1, 5, or 10 days",
+    ),
+    model_version: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    window: int | None = Query(
+        default=None,
+        ge=1,
+        le=36500,
+        description="Trailing calendar days ending at the ledger data_as_of",
+    ),
+    include_legacy: bool = Query(
+        default=False,
+        description="Research-only compatibility view; formal gates require false",
+    ),
+    _admin: str = Depends(require_admin),
+):
+    """Evaluate the immutable forecast/outcome ledger without inventing data."""
+    if horizon is not None and horizon not in (1, 5, 10):
+        raise HTTPException(status_code=422, detail="horizon must be 1, 5, or 10")
+    try:
+        return build_forecast_scorecard(
+            horizon=horizon,
+            model_version=model_version,
+            symbol=symbol,
+            window=window,
+            include_legacy=include_legacy,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/forecast/{symbol}")

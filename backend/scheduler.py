@@ -22,6 +22,7 @@ from backend.services.app_db import (
     save_forecast_snapshot, resolve_mature_forecast_outcomes, AppendOnlyConflict,
 )
 from backend.services.reader import load_prices
+from backend.services.forecast_scorecard import build_forecast_scorecard
 from src.forecasting import (
     MODEL_VERSION, SUPPORTED_HORIZONS, generate_forecast,
     latest_completed_daily_date, model_metadata,
@@ -139,6 +140,22 @@ def run_forecast_pipeline():
             return rows_by_symbol.get(symbol) or load_prices(symbol, interval="1d")
 
         outcomes = resolve_mature_forecast_outcomes(_price_loader)
+        # The scorecard is derived on demand from the append-only ledger. Run
+        # it only after outcomes resolve so this job's summary reflects the new
+        # evidence immediately; a scorecard error must not rewrite or discard
+        # the snapshots/outcomes that were already appended successfully.
+        try:
+            scorecard = build_forecast_scorecard(model_version=MODEL_VERSION)
+            scorecard_summary = {
+                "status": scorecard["status"],
+                "data_as_of": scorecard["data_as_of"],
+                "observations": scorecard["overall"]["observations"],
+            }
+        except Exception as scorecard_error:
+            scorecard_summary = {
+                "status": "failed",
+                "error": str(scorecard_error),
+            }
         summary = {
             "status": "success",
             "symbols": len(symbols),
@@ -147,6 +164,7 @@ def run_forecast_pipeline():
             "abstained": abstained,
             "resolved": len(outcomes),
             "missing_symbols": missing_symbols,
+            "scorecard": scorecard_summary,
         }
         message = (
             f"{len(symbols)} 幣 · 新增 {created} · 已存在 {cached} · "

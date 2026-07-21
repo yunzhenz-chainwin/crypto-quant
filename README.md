@@ -17,6 +17,7 @@
 | **快速了解 / 接手** | 本檔 README（你在這） |
 | **部署、重啟、改前端、輪密鑰、排錯** | [`docs/archive/部署與運維.md`](docs/archive/部署與運維.md) |
 | **呼叫 API（前台/後台端點規格）** | [`docs/archive/API規格.md`](docs/archive/API規格.md) |
+| **研究預測成績單、資料契約與發布門檻** | [`docs/forecast-scorecard-p0.md`](docs/forecast-scorecard-p0.md) |
 | **本地開發、開發鐵律、測試怎麼跑** | [`docs/archive/開發指南.md`](docs/archive/開發指南.md) |
 | **資料庫每張表結構與資料流** | [`docs/archive/資料庫說明.md`](docs/archive/資料庫說明.md) |
 | **給主管的成果匯報 / 驗證數據** | [`docs/archive/成果匯報.md`](docs/archive/成果匯報.md) |
@@ -115,7 +116,7 @@ backend/
     indicators.py        /indicators/{sym}?interval=
     signals.py           /signals（6 因子訊號）/signals/{sym}/history
     backtest.py          /backtest/{sym}（日線策略回測）/backtest/db/*（入庫結果）
-    forecast.py          /forecast/{sym}?horizon=1|5|10（研究預測＋拒答）
+    forecast.py          /forecast/{sym}（研究預測）＋/forecast/scorecard（後台樣本外成績）
     correlation.py       /correlation
     sentiment.py         新聞抓取+情緒詞庫(中英)+幣種標記；/sentiment/*（news、summary、fear_greed）
     ai.py                /ai/analysis /ai/ask /ai/config（AI 機器人）
@@ -123,6 +124,7 @@ backend/
     admin.py             /admin/*（登入、監控、幣種、任務、DB 檢視、AI 設定、成績單、策略、操作）
   services/
     app_db.py            data/app.db 全部表與存取（設定/任務/K線/指標/訊號/預測/AI 快取…）
+    forecast_scorecard.py 不可變 ledger 去重、point-in-time 基準與發布閘門
     reader.py            前台讀取層（多週期查詢、data_versions；停用幣如 MATIC 自動隱藏）
     signal_engine.py     6 因子訊號（計分核心在 src/scoring.py）
     ai_analyst.py        ★AI 雙引擎：build_context→規則分析→GPT(固定提示詞)→交叉檢核
@@ -137,7 +139,8 @@ src/
   scoring.py             ★6 因子計分單一真相來源（前台訊號與回測共用）
   backtest.py            ★回測核心（scheduler/app_db/backtest_engine 共用）
   forecasting.py         ★內容定址研究預測、拒答門檻與 outcome 解析
-  forecast_evaluation.py Brier/log loss/ECE/coverage/區間覆蓋率評估
+  forecast_evaluation.py Brier/log loss/ECE/risk-coverage/WIS/block-bootstrap 評估
+  forecast_replay.py     嚴格 j+h<=t 的歷史 replay CLI（研究證據，不冒充線上預測）
   momentum_signal.py     ★防禦型跨幣動量策略（已驗證有效；後台「現況」頁）
   signal_eval.py         訊號成績單（forward edge 檢驗；後台即時）
   verify_indicators.py   指標交叉驗證（前台信任徽章；後台即時）
@@ -147,6 +150,7 @@ src/
 frontend/src/
   App.jsx                根元件：總覽/詳細切換、60 秒輪詢自動更新、時線切換
   api/client.js          公開 API client；api/admin.js 後台 client
+  admin/ForecastScorecardPage.jsx 後台模型治理成績單與升級門檻
   lib/useLivePrices.js   ★Binance WebSocket 即時報價 hook
   components/
     CandlestickChart.jsx 主圖（lightweight-charts，多週期時間軸）

@@ -63,6 +63,34 @@ export const fetchSignalScorecard = () => adminGet('/signal/scorecard')
 // 防禦型跨幣動量「正式策略訊號」(今日建議 + 績效)
 export const fetchStrategy = () => adminGet('/strategy')
 
+// 研究預測的不可變 ledger 成績單。filters 只決定顯示範圍；
+// forecast-time baseline 由後端依當時已成熟結果建立。
+export async function fetchForecastScorecard({
+  horizon = null,
+  symbol = null,
+  modelVersion = null,
+  window = 365,
+} = {}) {
+  const params = new URLSearchParams()
+  if (horizon) params.set('horizon', horizon)
+  if (symbol) params.set('symbol', symbol)
+  if (modelVersion) params.set('model_version', modelVersion)
+  if (window) params.set('window', window)
+
+  const suffix = params.size ? `?${params}` : ''
+  const res = await fetch(`/api/forecast/scorecard${suffix}`, {
+    cache: 'no-store',
+    headers: { Authorization: `Bearer ${getToken()}` },
+  })
+  if (res.status === 401) {
+    clearToken()
+    throw new Error('UNAUTH')
+  }
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data?.detail || `API /forecast/scorecard 回應 ${res.status}`)
+  return data
+}
+
 // 工作項目 / 進度追蹤
 export const fetchTasks  = () => adminGet('/tasks')
 export const createTask  = (task)       => adminSend('/tasks', 'POST', task)

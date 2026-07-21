@@ -17,6 +17,7 @@ import {
 import {
   ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, ReferenceLine, Tooltip, LabelList,
 } from 'recharts'
+import ForecastScorecardPage from './ForecastScorecardPage'
 
 // ── 登入頁 ──────────────────────────────────────────────────────────────────
 function Login({ onSuccess }) {
@@ -113,6 +114,8 @@ function AdminHeader({ tab, setTab, onLogout }) {
                 onClick={() => setTab('db')}>資料庫</button>
         <button className={`admin-tab ${tab === 'status' ? 'active' : ''}`}
                 onClick={() => setTab('status')}>現況</button>
+        <button className={`admin-tab ${tab === 'forecast' ? 'active' : ''}`}
+                onClick={() => setTab('forecast')}>模型成績</button>
         <button className="admin-tab" disabled title="P3">分析（即將推出）</button>
       </div>
       <div className="admin-header-right">
@@ -1485,6 +1488,7 @@ export default function AdminApp() {
         : tab === 'coins' ? <CoinsPage onLogout={logout} />
         : tab === 'tasks' ? <TasksPage onLogout={logout} />
         : tab === 'status' ? <StatusPage onLogout={logout} />
+        : tab === 'forecast' ? <ForecastScorecardPage onLogout={logout} />
         : <DbViewer onLogout={logout} />}
     </div>
   )

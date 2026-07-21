@@ -336,6 +336,14 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_forecast_v2_lookup "
             "ON forecast_snapshot_v2(symbol, horizon_days, as_of, model_version, input_hash)"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_forecast_scorecard "
+            "ON forecast_snapshot(model_version, horizon_days, symbol, as_of)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_forecast_v2_scorecard "
+            "ON forecast_snapshot_v2(model_version, horizon_days, symbol, as_of)"
+        )
         # 既有資料庫的欄位遷移：補上 tasks.notes（備註 / 交接說明）
         _ensure_column(conn, "tasks", "notes", "TEXT")
         conn.commit()
@@ -1022,6 +1030,87 @@ def load_forecast_outcome(forecast_id: str) -> dict | None:
                 "SELECT payload_json FROM forecast_outcome WHERE forecast_id=?", (forecast_id,)
             ).fetchone()
     return json.loads(row["payload_json"]) if row else None
+
+
+def load_forecast_ledger(
+    *,
+    horizon_days: int | None = None,
+    model_version: str | None = None,
+    symbol: str | None = None,
+    include_legacy: bool = False,
+) -> list[dict]:
+    """Read immutable forecast snapshots together with their optional outcomes.
+
+    Content-addressed v2 rows are the default evidence source.  Legacy rows can
+    be requested explicitly for compatibility research, but callers must not
+    silently mix them into a production release gate.  This function does not
+    decide which same-day revision should count in a model scorecard; that
+    policy belongs to ``forecast_scorecard`` and is deliberately applied before
+    unresolved rows are discarded.
+    """
+    if horizon_days is not None and int(horizon_days) not in (1, 5, 10):
+        raise ValueError("forecast horizon must be 1, 5, or 10 days")
+
+    clauses: list[str] = []
+    params: list[object] = []
+    if horizon_days is not None:
+        clauses.append("s.horizon_days=?")
+        params.append(int(horizon_days))
+    if model_version is not None:
+        clauses.append("s.model_version=?")
+        params.append(str(model_version))
+    if symbol is not None:
+        clauses.append("s.symbol=?")
+        params.append(str(symbol).upper())
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+
+    def _select(snapshot_table: str, outcome_table: str, schema_version: int) -> list[dict]:
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT s.rowid AS snapshot_rowid, s.forecast_id, s.symbol, "
+                "s.horizon_days, s.as_of, "
+                "s.generated_at, s.model_version, s.status, s.payload_json AS snapshot_json, "
+                "s.created_at AS snapshot_created_at, "
+                "o.target_as_of, o.resolved_at, o.realized_return_pct, "
+                "o.actual_direction, o.payload_json AS outcome_json, "
+                "o.created_at AS outcome_created_at "
+                f"FROM {snapshot_table} s LEFT JOIN {outcome_table} o "
+                "ON o.forecast_id=s.forecast_id" + where,
+                tuple(params),
+            ).fetchall()
+        return [
+            {
+                "snapshot_rowid": int(row["snapshot_rowid"]),
+                "forecast_id": row["forecast_id"],
+                "symbol": row["symbol"],
+                "horizon_days": int(row["horizon_days"]),
+                "as_of": row["as_of"],
+                "generated_at": row["generated_at"],
+                "model_version": row["model_version"],
+                "status": row["status"],
+                "snapshot_created_at": row["snapshot_created_at"],
+                "target_as_of": row["target_as_of"],
+                "resolved_at": row["resolved_at"],
+                "realized_return_pct": row["realized_return_pct"],
+                "actual_direction": row["actual_direction"],
+                "outcome_created_at": row["outcome_created_at"],
+                "schema_version": schema_version,
+                "snapshot": json.loads(row["snapshot_json"]),
+                "outcome": json.loads(row["outcome_json"]) if row["outcome_json"] else None,
+            }
+            for row in rows
+        ]
+
+    records = _select("forecast_snapshot_v2", "forecast_outcome_v2", 2)
+    if include_legacy:
+        records.extend(_select("forecast_snapshot", "forecast_outcome", 1))
+    records.sort(
+        key=lambda row: (
+            row["as_of"], row["symbol"], row["horizon_days"],
+            row["model_version"], row["generated_at"], row["forecast_id"],
+        )
+    )
+    return records
 
 
 def resolve_mature_forecast_outcomes(price_loader, limit: int = 1000, now=None) -> list[dict]:
