@@ -144,7 +144,7 @@ target_date < t
 
 ## 7. Forecast-time baseline、BSS 與不確定性
 
-完整 73,881 筆 raw replay 的基準結果已在 [預測模型指標報告](forecast-model-metrics.md) 固定：
+完整 73,881 筆 raw replay 的基準結果已固定於 [crypto-quant 文件合集](crypto-quant_文件合集.docx)第陸章「預測模型指標與參考門檻」：
 
 - Raw Brier：`0.252671`
 - Forecast-time baseline Brier：`0.251558`
@@ -222,7 +222,7 @@ SHAP 不是 F1、AUC 或 Brier 這類效能指標，而是針對 `f(X)` 的 feat
 | Source CSV manifest SHA-256 | `9315c60b65772ed5ae495a5442ead39df06f14b5b329e7bc8d77baaf7338d000` |
 | Calibration report v2 size | 172,806,445 bytes（172.81 MB／164.80 MiB） |
 
-每個來源 CSV 的 row count 與 SHA-256 列在 [預測模型指標報告](forecast-model-metrics.md#71-manifest-hash)。Report hash 固定的是本次 snapshot；若 evaluator schema 或 serializer 增加欄位，即使逐筆預測相同，輸出檔 hash 仍會不同。現行程式另輸出由 calibrator family、canonical input hash 與完整設定 hash 組成的 `artifact_id`／`configuration_sha256`；所以用本 commit 重跑時，完整 report file hash 預期會因新增欄位而不同，不能拿上表舊 serializer hash硬比。
+來源 CSV 的 aggregate manifest SHA-256 已列在 [crypto-quant 文件合集](crypto-quant_文件合集.docx)第陸章；每個檔案的 row count 與 SHA-256 保留於本次 machine-readable replay artifact。Report hash 固定的是本次 snapshot；若 evaluator schema 或 serializer 增加欄位，即使逐筆預測相同，輸出檔 hash 仍會不同。現行程式另輸出由 calibrator family、canonical input hash 與完整設定 hash 組成的 `artifact_id`／`configuration_sha256`；所以用本 commit 重跑時，完整 report file hash 預期會因新增欄位而不同，不能拿上表舊 serializer hash硬比。
 
 ### 10.2 重跑 replay
 
@@ -281,6 +281,6 @@ Promotion gate 需針對 report 中單一 `model_version + horizon_days` 的 rec
 
 - 校準實作：`src/forecast_calibration.py`
 - 校準測試：`tests/test_forecast_calibration.py`
-- 指標定義與完整 raw replay：[預測模型指標報告](forecast-model-metrics.md)
+- 指標定義、完整 raw replay 與參考門檻：[crypto-quant 文件合集](crypto-quant_文件合集.docx)第陸章
 - Scorecard 與 promotion policy：[Forecast Scorecard P0](forecast-scorecard-p0.md)
 - 方法背景：Kull et al., 2017, [Beta calibration: a well-founded and easily implemented improvement on logistic calibration for binary classifiers](https://proceedings.mlr.press/v54/kull17a.html)

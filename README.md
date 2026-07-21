@@ -18,7 +18,7 @@
 | **部署、重啟、改前端、輪密鑰、排錯** | [`docs/archive/部署與運維.md`](docs/archive/部署與運維.md) |
 | **呼叫 API（前台/後台端點規格）** | [`docs/archive/API規格.md`](docs/archive/API規格.md) |
 | **研究預測成績單、資料契約與發布門檻** | [`docs/forecast-scorecard-p0.md`](docs/forecast-scorecard-p0.md) |
-| **模型實測指標（F1／Recall／AUC／AP／SHAP 適用性）** | [`docs/forecast-model-metrics.md`](docs/forecast-model-metrics.md) |
+| **模型實測指標（F1／Recall／AUC／AP／SHAP 適用性）** | [`docs/crypto-quant_文件合集.docx`](docs/crypto-quant_文件合集.docx) 第陸章 |
 | **機率校準研究（Platt／Beta、walk-forward 與升級判定）** | [`docs/forecast-calibration.md`](docs/forecast-calibration.md) |
 | **本地開發、開發鐵律、測試怎麼跑** | [`docs/archive/開發指南.md`](docs/archive/開發指南.md) |
 | **資料庫每張表結構與資料流** | [`docs/archive/資料庫說明.md`](docs/archive/資料庫說明.md) |

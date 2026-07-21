@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-merge_docx.py — 把 docs/ 下的 5 份 .docx 合併成「一份合集」給主管一次看完。
+merge_docx.py — 把 docs/ 下的 6 份 .docx 合併成「一份合集」給主管一次看完。
 
 用 docxcompose（保留每份原有的表格 / 標題 / 樣式），每份之間插入分頁，
 最前面加一頁封面 + 目錄。
@@ -9,10 +9,11 @@ merge_docx.py — 把 docs/ 下的 5 份 .docx 合併成「一份合集」給主
   .venv\\Scripts\\python.exe scripts\\merge_docx.py
 輸出：
   docs/crypto-quant_文件合集.docx
-本腳本會**先自動重生 4 份可生成的來源 docx**（md2docx.py 產 專案說明/增準/ML、
-  export_qa_docs.py 產 問答範本），再與「情緒詞庫範本.docx」(手工來源、無生成腳本) 合併。
+本腳本會**先自動重生 5 份可生成的來源 docx**（md2docx.py 產 專案說明/增準/ML、
+  export_qa_docs.py 產問答範本、export_forecast_metrics_docx.py 產模型指標），再與
+  「情緒詞庫範本.docx」(手工來源、無生成腳本) 合併。
   → 一鍵重生合集：改 README / 各 .md / canned_qa.py 後，直接跑本腳本即可。
-  那 4 份 docx 是中繼產物（已 gitignore，不入版）；只有合集與情緒詞庫範本.docx 進版控。
+  那 5 份 docx 是中繼產物（已 gitignore，不入版）；只有合集與情緒詞庫範本.docx 進版控。
 """
 import io
 import os
@@ -39,6 +40,7 @@ SECTIONS = [
     ("ML訊號研究計畫.docx",          "參、ML 訊號研究計畫"),
     ("AI機器人固定問答範本.docx",     "肆、AI 機器人固定問答庫"),
     ("情緒詞庫範本.docx",            "伍、情緒詞庫範本"),
+    ("預測模型指標報告.docx",        "陸、預測模型指標與參考門檻"),
 ]
 
 
@@ -55,10 +57,14 @@ def _ea(run, size=None, bold=False, color=None):
 
 
 def _regen_sources():
-    """用子行程重生 4 份可生成來源（md2docx ×3 + export_qa ×1）。
+    """用子行程重生 5 份可生成來源（md2docx ×3 + export_qa ×1 + metrics ×1）。
     情緒詞庫範本.docx 無生成腳本（手工來源），不在此列，需自身存在。"""
     here = Path(__file__).resolve().parent
-    for script in ("md2docx.py", "export_qa_docs.py"):
+    for script in (
+        "md2docx.py",
+        "export_qa_docs.py",
+        "export_forecast_metrics_docx.py",
+    ):
         print(f"  重生來源：{script} …")
         subprocess.run([sys.executable, str(here / script)], check=True)
 
@@ -78,7 +84,7 @@ def main():
 
     _ea(master.add_paragraph().add_run("crypto-quant 文件合集"), size=26, bold=True,
         color=RGBColor(0x1F, 0x3A, 0x5F))
-    _ea(master.add_paragraph().add_run("加密貨幣量化分析平台 — 文件包（合併 5 份）"),
+    _ea(master.add_paragraph().add_run("加密貨幣量化分析平台 — 文件包（合併 6 份）"),
         size=12, color=RGBColor(0x66, 0x66, 0x66))
     master.add_paragraph()
     _ea(master.add_paragraph().add_run("內容"), size=14, bold=True)

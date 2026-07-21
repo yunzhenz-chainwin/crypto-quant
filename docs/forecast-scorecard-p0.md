@@ -4,7 +4,7 @@
 > 適用系統：crypto-quant 研究預測服務
 > 性質：外部可閱讀的功能、資料與驗收規格；不是投資建議，也不是報酬承諾。
 
-現行模型的完整實測數值、F1／Recall／ROC-AUC／Average Precision 定義與 SHAP 適用性，見 [預測模型指標基準報告](forecast-model-metrics.md)；Platt／Beta strict walk-forward 實驗與 `keep_identity` 結論見 [預測機率校準研究報告](forecast-calibration.md)。
+現行模型的完整實測數值、F1／Recall／ROC-AUC／Average Precision 定義與 SHAP 適用性，見 [crypto-quant 文件合集](crypto-quant_文件合集.docx)第陸章「預測模型指標與參考門檻」；Platt／Beta strict walk-forward 實驗與 `keep_identity` 結論見 [預測機率校準研究報告](forecast-calibration.md)。
 
 ## 1. 摘要
 
