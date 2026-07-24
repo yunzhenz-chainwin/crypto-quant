@@ -1,9 +1,7 @@
 /**
  * App.jsx — 應用程式根元件
  *
- * 兩種模式：
- *   'overview'  市場總覽：卡片網格 + 頂部摘要列
- *   'detail'    幣種詳細：蠟燭圖（日線/時線）、AI 分析、回測、情緒、指標
+ * 公開首頁直接顯示 BTCUSDT 詳細頁；幣別分類放在頁內選幣區。
  *
  * 自動更新（不用手動重整）：
  *   每 60 秒輪詢 /api/status 的 data_version（各週期最新 K 棒時間戳），
@@ -12,7 +10,7 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import {
   fetchSymbols, fetchAllSignals, fetchOHLC, fetchStatus, fetchIntervals,
-  fetchIndicators, fetchBacktest, fetchBacktestSummary, fetchFearGreed,   // fetchCorrelation 暫停（幣種相關性分析）
+  fetchIndicators, fetchBacktest, fetchFearGreed,   // fetchCorrelation 暫停（幣種相關性分析）
 } from './api/client'
 import StatusBar        from './components/StatusBar'
 import CandlestickChart from './components/CandlestickChart'
@@ -20,14 +18,13 @@ import HeroSignal        from './components/HeroSignal'
 import IndicatorCards   from './components/IndicatorCards'
 import RecommendationCard from './components/RecommendationCard'
 import ForecastDecisionCard from './components/ForecastDecisionCard'
-import MarketOverview   from './components/MarketOverview'
 // import MacroPanel    from './components/MacroPanel'   // 2026-07-07 先隱藏（價值待議；程式碼＋/api/macro 保留，未來或改「以 BTC 為主的相關性溫度計」版）
 import MarketSummary    from './components/MarketSummary'
 // import BotWidget     from './components/BotWidget'   // 2026-07-06 暫時下架：使用者確定為主管/老闆，聊天小幫手先隱藏（要恢復連同底部掛載一起取消註解）
 // import OnboardingTour   from './components/OnboardingTour' // 2026-07-06 暫停新手導覽
 import GlossaryModal    from './components/GlossaryModal'
 import useLivePrices    from './lib/useLivePrices'
-import { coinName }     from './constants/coins'
+import { coinName, coinCat, catInfo, CATEGORIES } from './constants/coins'
 
 // 折疊面板動態載入（code splitting #29）：首屏不下載 recharts 等重依賴，
 // 進入詳細頁/展開面板時才抓對應 chunk（Suspense 顯示輕量載入字樣）。
@@ -78,8 +75,8 @@ const TODAY = toDateStr(new Date())
 export default function App() {
   const [symbols,     setSymbols]     = useState([])
   const [intervals,   setIntervals]   = useState({})        // {'1d': [...], '1h': [...]}
-  const [view,        setView]        = useState('overview')
   const [active,      setActive]      = useState('BTCUSDT')
+  const [coinCategory, setCoinCategory] = useState('all')   // 詳細頁選幣分類：all 或 CATEGORIES key
   const [interval,    setKInterval]   = useState('1d')      // K 線週期：1d 日線 / 1h 時線
   const [days,        setDays]        = useState(180)
   const [hourDays,    setHourDays]    = useState(7)         // 時線用的區間（天）
@@ -89,7 +86,6 @@ export default function App() {
   const [pendingStart, setPendingStart] = useState('')
   const [pendingEnd,   setPendingEnd]   = useState(TODAY)
   const [signals,     setSignals]     = useState([])
-  const [btSummary,   setBtSummary]   = useState([])       // 各幣回測績效摘要（市場總覽第二評估標準）
   const [fearGreed,   setFearGreed]   = useState(null)
   const [lastUpdated, setLastUpdated] = useState(0)
   const [refreshing,  setRefreshing]  = useState(false)
@@ -129,14 +125,12 @@ export default function App() {
   const refreshMarket = useCallback(async (showSpinner = true) => {
     if (showSpinner) setRefreshing(true)
     try {
-      const [sigs, fg, bts] = await Promise.all([
+      const [sigs, fg] = await Promise.all([
         fetchAllSignals(),
         fetchFearGreed(1),
-        fetchBacktestSummary().catch(() => []),   // 回測摘要失敗不該擋住訊號載入 → 降級空陣列
       ])
       setSignals(sigs)
       setFearGreed(fg?.[0] ?? null)
-      setBtSummary(Array.isArray(bts) ? bts : [])
       setLastUpdated(Date.now())
       setApiError(false)
     } catch {
@@ -201,8 +195,8 @@ export default function App() {
   const loadDetailRef = useRef(loadDetail)
   useEffect(() => { loadDetailRef.current = loadDetail }, [loadDetail])
   useEffect(() => {
-    if (view === 'detail' && dataVersion) loadDetailRef.current(false)
-  }, [dataVersion, view])
+    if (dataVersion) loadDetailRef.current(false)
+  }, [dataVersion])
 
   // 保險絲：就算版本比對失敗，每 5 分鐘仍全量刷新一次摘要
   useEffect(() => {
@@ -212,14 +206,13 @@ export default function App() {
 
   // 切換幣種 / 週期 / 天數 / 日期範圍 → 重新載入詳細頁資料
   useEffect(() => {
-    if (view !== 'detail') return
     loadDetail(true)
-  }, [view, loadDetail])
+  }, [loadDetail])
 
   // 回測與幣種、參數及資料版本有關；K 線買賣標記與回測面板共用同一份結果。
   // 每次請求都有 identity 並取消上一筆，避免快速切幣／資料更新時舊結果覆蓋新結果。
   useEffect(() => {
-    if (view !== 'detail' || !active) return
+    if (!active) return
     const controller = new AbortController()
     const requestId = ++backtestRequestRef.current
     let alive = true
@@ -247,7 +240,16 @@ export default function App() {
       alive = false
       controller.abort()
     }
-  }, [active, btParams, dataVersion, view])
+  }, [active, btParams, dataVersion])
+
+  // API 尚未回傳幣種清單時仍先提供 BTC，確保首頁選幣器有穩定值。
+  const selectableSymbols = symbols.includes('BTCUSDT')
+    ? symbols
+    : ['BTCUSDT', ...symbols]
+  const categorySymbols = coinCategory === 'all'
+    ? selectableSymbols
+    : selectableSymbols.filter(symbol => coinCat(symbol) === coinCategory)
+  const categoryCount = (category) => selectableSymbols.filter(symbol => coinCat(symbol) === category).length
 
   // 任一彈窗（放大圖 / 詳細資訊）開啟時：Esc 關閉
   useEffect(() => {
@@ -259,14 +261,16 @@ export default function App() {
 
   const handleSelectCoin = (symbol) => {
     setActive(symbol)
-    setView('detail')
+    setLabTrades(null)
     // 新幣種沒有時線資料時自動退回日線
     if (!(intervals['1h'] ?? []).includes(symbol)) setKInterval('1d')
   }
 
-  const handleBackToOverview = () => {
-    setView('overview')
-    setLabTrades(null)
+  const handleSelectCategory = (category) => {
+    setCoinCategory(category)
+    if (category === 'all' || coinCat(active) === category) return
+    const firstSymbol = selectableSymbols.find(symbol => coinCat(symbol) === category)
+    if (firstSymbol) handleSelectCoin(firstSymbol)
   }
 
   const activeSignal = signals.find(s => s.symbol === active)
@@ -281,22 +285,6 @@ export default function App() {
       <header className="header">
         <span className="logo">Crypto Quant</span>
         <nav className="header-nav">
-          {view === 'detail' && (
-            <button
-              className="nav-btn nav-back-btn"
-              onClick={handleBackToOverview}
-              aria-label="返回市場總覽"
-              title="返回市場總覽"
-            >
-              ←
-            </button>
-          )}
-          <button
-            className={`nav-btn ${view === 'overview' ? 'active' : ''}`}
-            onClick={handleBackToOverview}
-          >
-            市場總覽
-          </button>
           <button className="nav-btn" onClick={() => setShowGlossary(true)} title="名詞小辭典">
             辭典
           </button>
@@ -319,13 +307,13 @@ export default function App() {
       {apiError && (
         <div className="api-error-banner">
           注意：資料載入失敗（網路或伺服器暫時無回應）
-          <button onClick={() => { refreshMarket(true); if (view === 'detail') loadDetail(true) }}>
+          <button onClick={() => { refreshMarket(true); loadDetail(true) }}>
             重試
           </button>
         </div>
       )}
 
-      {/* ── 市場摘要列（兩個模式都顯示）────────────────────────────────── */}
+      {/* ── 市場摘要列 ────────────────────────────────────────────────── */}
       <MarketSummary
         signals={signals}
         fearGreed={fearGreed}
@@ -334,27 +322,49 @@ export default function App() {
         refreshing={refreshing}
       />
 
-      {/* ── 市場總覽模式 ────────────────────────────────────────────────── */}
-      {view === 'overview' && (
-        <div className="overview-layout">
-          {/* <MacroPanel /> 先隱藏——見上方 import 註解，程式碼保留 */}
-          <MarketOverview signals={signals} backtests={btSummary} livePrices={livePrices} onSelect={handleSelectCoin} />
-        </div>
-      )}
-
-      {/* ── 幣種詳細模式 ────────────────────────────────────────────────── */}
-      {view === 'detail' && (
-        <div className="app-layout">
-          <main className="main-content">
-            {/* 詳細頁頂列：幣種下拉選擇 + 區塊顯示開關（取代左側整排幣種清單，版面更簡潔）*/}
+      {/* ── 公開首頁：預設 BTCUSDT 的幣種詳細頁 ────────────────────────── */}
+      <div className="app-layout">
+        <main className="main-content">
+            {/* 詳細頁頂列：主題分類會篩選選幣下拉；切分類時同步切至該類第一個幣。 */}
             <div className="detail-topbar">
-              <label className="coin-picker-wrap">
-                <span className="coin-picker-lbl">幣種</span>
-                <select className="coin-picker" value={active}
-                        onChange={e => handleSelectCoin(e.target.value)}>
-                  {symbols.map(s => <option key={s} value={s}>{coinName(s)}</option>)}
-                </select>
-              </label>
+              <div className="detail-coin-controls">
+                <div className="cat-tabs detail-cat-tabs" role="group" aria-label="主題分類篩選">
+                  <button
+                    type="button"
+                    className={`cat-tab ${coinCategory === 'all' ? 'active' : ''}`}
+                    onClick={() => handleSelectCategory('all')}
+                    aria-pressed={coinCategory === 'all'}
+                  >
+                    全部 <span className="cat-tab-count">{selectableSymbols.length}</span>
+                  </button>
+                  {CATEGORIES.map(category => (
+                    categoryCount(category.key) > 0 && (
+                      <button
+                        type="button"
+                        key={category.key}
+                        className={`cat-tab ${coinCategory === category.key ? 'active' : ''}`}
+                        onClick={() => handleSelectCategory(category.key)}
+                        title={category.hint}
+                        aria-pressed={coinCategory === category.key}
+                      >
+                        {category.label} <span className="cat-tab-count">{categoryCount(category.key)}</span>
+                      </button>
+                    )
+                  ))}
+                </div>
+                {coinCategory !== 'all' && (
+                  <div className="cat-hint">{catInfo(coinCategory).label}：{catInfo(coinCategory).hint}</div>
+                )}
+                <label className="coin-picker-wrap">
+                  <span className="coin-picker-lbl">幣種</span>
+                  <select className="coin-picker" value={active}
+                          onChange={e => handleSelectCoin(e.target.value)}>
+                    {categorySymbols.map(symbol => (
+                      <option key={symbol} value={symbol}>{coinName(symbol)}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <div className="panel-prefs">
                 <span className="panel-prefs-lbl">顯示區塊</span>
                 {PANELS.map(p => (
@@ -576,14 +586,13 @@ export default function App() {
                 </div>
               </div>
             )}
-          </main>
-        </div>
-      )}
+        </main>
+      </div>
 
       {/* ── 全站漂浮 AI 小幫手「小Q」（右下角）──────────────────────────
-          詳細頁＝跟隨當前幣；總覽頁＝全市場模式（不綁定任何幣）
+          跟隨當前幣。
           2026-07-06 暫時下架（使用者為主管/老闆）；要恢復把下行與頂部 import 取消註解即可。
-      <BotWidget defaultSymbol={view === 'detail' ? active : null} />
+      <BotWidget defaultSymbol={active} />
       */}
 
     </div>

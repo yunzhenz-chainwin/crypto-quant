@@ -70,6 +70,7 @@ export async function fetchForecastScorecard({
   symbol = null,
   modelVersion = null,
   window = 365,
+  signal = undefined,
 } = {}) {
   const params = new URLSearchParams()
   if (horizon) params.set('horizon', horizon)
@@ -80,6 +81,7 @@ export async function fetchForecastScorecard({
   const suffix = params.size ? `?${params}` : ''
   const res = await fetch(`/api/forecast/scorecard${suffix}`, {
     cache: 'no-store',
+    signal,
     headers: { Authorization: `Bearer ${getToken()}` },
   })
   if (res.status === 401) {

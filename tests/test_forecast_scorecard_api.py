@@ -14,6 +14,7 @@ from backend.main import app
 from backend.routers import admin as admin_router
 from backend.services import app_db
 from backend.services.forecast_scorecard import (
+    _build_performance_assessment,
     build_replay_records,
     deduplicate_forecast_ledger,
 )
@@ -118,6 +119,23 @@ def test_scorecard_requires_admin_and_empty_ledger_is_unverifiable(
     assert body["overall"]["metrics"] is None
     assert body["provenance"]["snapshot_tables"] == ["forecast_snapshot_v2"]
     assert body["provenance"]["revisions_excluded"] == 0
+    assessment = body["assessment"]
+    assert assessment["schema_version"] == "forecast-scorecard-assessment-v1"
+    assert assessment["verdict"] == "unverifiable"
+    assert assessment["trust_level"] == "unverifiable"
+    assert assessment["trust_score"] == 0.0
+    assert assessment["supports_probability_skill_claim"] is False
+    assert assessment["observed_metrics"]["f1_score"] is None
+    assert assessment["observed_metrics"]["roc_auc"] is None
+    assert assessment["explainability"]["shap"] == "not_available"
+    assert assessment["data_maturity"]["matured_observations"] == 0
+    first_action = assessment["recommended_actions"][0]
+    assert first_action["parameter"] == "minimum_evidence"
+    assert first_action["action"] == "collect_matured_outcomes"
+    assert first_action["priority"] == "high"
+    assert first_action["priority_level"] == "high"
+    assert first_action["order"] == 1
+    assert first_action["automatic_change"] is False
     assert _ledger_counts(isolated_scorecard_db) == before
 
 
@@ -179,6 +197,23 @@ def test_scorecard_deduplicates_revisions_before_outcome_filtering(
         "single_model_horizon_scope"
     )
     assert body["overall"]["promotion_gates"][0]["status"] == "not_applicable"
+    assessment = body["assessment"]
+    assert assessment["verdict"] == "insufficient_evidence"
+    assert assessment["observed_metrics"]["f1_score"] == 1.0
+    assert assessment["observed_metrics"]["roc_auc"] is None
+    assert assessment["recommended_actions"][0]["parameter"] == "minimum_evidence"
+    readiness = assessment["parameter_context"]["model_readiness"]
+    assert readiness["minimum_price_observations"] == 120
+    assert readiness["minimum_regime_outcomes"] == 30
+    assert readiness["minimum_ready_confidence"] == 40
+    assert {
+        reason["code"] for reason in assessment["reasons"]
+    } >= {
+        "insufficient_observations",
+        "insufficient_issue_dates",
+        "diagnostic_scope",
+        "ranking_metric_not_estimable",
+    }
 
     formal = client.get(
         "/api/forecast/scorecard",
@@ -336,3 +371,146 @@ def test_legacy_rows_are_opt_in_and_fail_the_release_provenance_gate(
         if gate["gate"] == "v2_only_provenance"
     )
     assert provenance_gate["status"] == "failed"
+
+
+def test_performance_assessment_distinguishes_supported_and_weak_evidence():
+    gate_names = (
+        "v2_only_provenance",
+        "all_resolved_scorable",
+        "minimum_observations",
+        "minimum_issue_dates",
+        "positive_brier_skill",
+        "brier_advantage_ci",
+    )
+    filters = {
+        "horizon": 5,
+        "model_version": MODEL,
+        "symbol": None,
+        "window": None,
+        "include_legacy": False,
+    }
+    provenance = {
+        "pending": 0,
+        "include_legacy": False,
+        "release_eligible": True,
+    }
+    strong_metrics = {
+        "accuracy": 0.70,
+        "precision": 0.71,
+        "recall": 0.70,
+        "specificity": 0.70,
+        "f1_score": 0.705,
+        "roc_auc": 0.74,
+        "average_precision": 0.73,
+        "classification_threshold": 0.5,
+        "brier_score": 0.18,
+        "baseline_brier_score": 0.22,
+        "brier_skill_score": 0.18,
+        "log_loss": 0.55,
+        "baseline_log_loss": 0.62,
+        "expected_calibration_error": 0.03,
+    }
+    strong_overall = {
+        "status": "evaluated",
+        "resolved_count": 1000,
+        "observations": 1000,
+        "unscorable_count": 0,
+        "issue_dates": 180,
+        "ready_count": 800,
+        "coverage": 0.8,
+        "metrics": strong_metrics,
+        "brier_advantage_ci": {"lower": 0.01, "upper": 0.07},
+        "promotion_gates": [
+            {"gate": name, "status": "pass"} for name in gate_names
+        ],
+    }
+    strong = _build_performance_assessment(
+        overall=strong_overall,
+        by_horizon=[{"horizon_days": 5, **strong_overall}],
+        filters=filters,
+        provenance=provenance,
+    )
+    assert strong["verdict"] == "release_review_eligible"
+    assert strong["trust_level"] == "high"
+    assert strong["trust_score"] == 1.0
+    assert strong["performance_level"] == "probability_skill_supported"
+    assert strong["supports_probability_skill_claim"] is True
+    assert strong["release_review_eligible"] is True
+    assert strong["recommended_actions"][0]["action"] == "continue_shadow_monitoring"
+
+    weak_metrics = {
+        **strong_metrics,
+        "recall": 0.30,
+        "specificity": 0.80,
+        "roc_auc": 0.49,
+        "brier_skill_score": -0.10,
+        "expected_calibration_error": 0.12,
+    }
+    weak_overall = {
+        **strong_overall,
+        "metrics": weak_metrics,
+        "brier_advantage_ci": {"lower": -0.04, "upper": 0.01},
+        "promotion_gates": [
+            {
+                "gate": name,
+                "status": (
+                    "failed"
+                    if name in {"positive_brier_skill", "brier_advantage_ci"}
+                    else "pass"
+                ),
+            }
+            for name in gate_names
+        ],
+    }
+    weak = _build_performance_assessment(
+        overall=weak_overall,
+        by_horizon=[{"horizon_days": 5, **weak_overall}],
+        filters=filters,
+        provenance=provenance,
+    )
+    assert weak["verdict"] == "not_better_than_baseline"
+    assert weak["performance_level"] == "below_baseline"
+    assert weak["supports_probability_skill_claim"] is False
+    assert {
+        reason["code"] for reason in weak["reasons"]
+    } >= {
+        "brier_skill_below_baseline",
+        "weak_observed_ranking",
+        "classification_threshold_tradeoff",
+    }
+    actions = {
+        action["parameter"]: action for action in weak["recommended_actions"]
+    }
+    assert actions["calibration"]["suggested"]["challengers"] == ["platt", "beta"]
+    assert actions["classification_threshold"]["current"] == 0.5
+    assert actions["classification_threshold"]["suggested"]["direction"] == "lower_to_test"
+    assert actions["classification_threshold"]["priority"] == "medium"
+    assert isinstance(actions["classification_threshold"]["order"], int)
+    assert actions["regime_definition"]["current"][
+        "historical_baseline_reference"
+    ] == {
+        "model_version": "historical-baseline-v2",
+        "ma_days": 60,
+        "return_days": 20,
+    }
+    assert all(
+        action["automatic_change"] is False
+        for action in weak["recommended_actions"]
+    )
+
+    baseline_filters = {
+        **filters,
+        "model_version": "historical-baseline-v2",
+    }
+    baseline = _build_performance_assessment(
+        overall=strong_overall,
+        by_horizon=[{"horizon_days": 5, **strong_overall}],
+        filters=baseline_filters,
+        provenance=provenance,
+    )
+    assert baseline["explainability"]["shap"] == "not_applicable"
+    assert baseline["parameter_context"]["calibration"]["current"] == "raw"
+    assert baseline["parameter_context"]["regime_definition"]["current"] == {
+        "ma_days": 60,
+        "return_days": 20,
+    }

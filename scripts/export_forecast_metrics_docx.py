@@ -10,6 +10,7 @@ document, appends it to the handbook, and removes the intermediate afterwards.
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 from docx import Document
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
@@ -20,7 +21,18 @@ from docx.shared import Cm, Pt, RGBColor
 
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.forecasting import (  # noqa: E402
+    MIN_OBSERVATIONS,
+    MIN_OUTCOMES,
+    MIN_READY_CONFIDENCE,
+    MODEL_VERSION,
+)
+
 OUT = ROOT / "docs" / "預測模型指標報告.docx"
+REPORT_DATE = "2026-07-24"
 ZH_FONT = "微軟正黑體"
 NAVY = "1F3A5F"
 BLUE = "DCE6F1"
@@ -203,7 +215,7 @@ def build_document() -> Document:
 
     properties = doc.core_properties
     properties.title = "crypto-quant 預測模型指標與參考門檻"
-    properties.subject = "historical-baseline-v2 point-in-time replay 與內部研究門檻"
+    properties.subject = f"{MODEL_VERSION} point-in-time replay、動態可信度與內部研究門檻"
     properties.author = "crypto-quant"
 
     title = doc.add_paragraph(style="Title")
@@ -213,7 +225,7 @@ def build_document() -> Document:
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _font(
         subtitle.add_run(
-            "historical-baseline-v2｜point-in-time replay｜報告日期 2026-07-21"
+            f"{MODEL_VERSION}｜point-in-time replay｜報告日期 {REPORT_DATE}"
         ),
         size=10.5,
         color="666666",
@@ -234,7 +246,48 @@ def build_document() -> Document:
         "正式判定必須逐一針對 model_version × horizon，以 exact-vintage、未觸碰樣本及 paired confidence interval 驗證。",
     )
 
-    doc.add_heading("一、評估範圍與證據限制", level=1)
+    doc.add_heading("一、公開首頁與主題分類選幣", level=1)
+    entry_rows = [
+        ("公開入口", "所有非 /admin 路徑進入公開 App；不再先顯示 MarketOverview，也沒有『市場總覽』導覽入口。"),
+        ("第一個畫面", "直接顯示 BTCUSDT（比特幣 BTC）詳細頁；即使幣種 API 尚未回傳，選幣器仍保留 BTCUSDT 作為穩定 fallback。"),
+        ("主題分類", "沿用 CATEGORIES：全部、主流幣、公鏈平台、DeFi 基礎、支付轉帳、迷因幣；分類籤直接放在詳細頁選幣區。"),
+        ("切換規則", "分類籤只篩選下拉選單；若目前幣不屬於新分類，自動切到該分類第一個可用幣。切回『全部』時保留目前幣。"),
+        ("責任邊界", "首頁分類與幣種選擇是 UI 導覽／查詢狀態，不訓練、不校準、不寫入模型參數，也不改變歷史成績。"),
+    ]
+    _add_table(
+        doc,
+        ("項目", "穩定行為"),
+        entry_rows,
+        (3.0, 12.0),
+        font_size=8.2,
+    )
+
+    doc.add_heading("二、後台模型成績的動態可信度判讀", level=1)
+    _add_note(
+        doc,
+        "契約仍可演進，原則不可退讓",
+        "後端 assessment 欄位與前端 fallback 呈現仍可逐步整合，但同一組 fail-closed 規則必須固定："
+        "沒有成熟資料就顯示不可驗證；樣本不足只可描述；缺值顯示『—／樣本不足』，不得補 0、補綠燈或沿用舊 snapshot。",
+        fill=LIGHT_YELLOW,
+    )
+    trust_rows = [
+        ("資料來源", "每次查詢從不可變 forecast ledger 的 first-issued snapshot 與已解析 outcome 動態計算；不得用畫面快取或 frozen Word 數字代替目前資料。"),
+        ("資料成熟度", "只計 target 已到期、outcome 已封存且 probability／baseline／日期可評分的 records；未成熟與 unresolved 只顯示數量，不進 Accuracy、Brier 等分母。"),
+        ("最低評估證據", "正式 scorecard gate 為每個 model × horizon 至少 1,000 筆、180 個 issue dates；低於門檻為 insufficient_evidence。這和模型自身 120 根日線／30 筆成熟 outcome 的 ready gate 是兩件事。"),
+        ("可信度判定", "依 data maturity、provenance、正確 forecast-time baseline、Brier skill 與 paired CI 共同動態判讀；不是固定百分比，也不是單一 Accuracy。"),
+        ("判定階梯", "unverifiable → insufficient_evidence／diagnostic_only → not_better_than_baseline → promising_not_confirmed → release_review_eligible；只有全部 hard gates 通過才可進人工發布審查。"),
+        ("篩選後呈現", "window、symbol 或非單一 horizon 的切片可以看診斷，但 promotion gate 必須標示 not_applicable；不可把最好看的切片包裝成整體可信度。"),
+        ("自動刷新", "前端可週期重抓與顯示 data_as_of／generated_at；重新整理只重算成績，不得在背景修改模型或門檻。"),
+    ]
+    _add_table(
+        doc,
+        ("層次", "動態判讀原則"),
+        trust_rows,
+        (3.0, 12.0),
+        font_size=7.8,
+    )
+
+    doc.add_heading("三、評估範圍與證據限制", level=1)
     _add_bullet(doc, "資料範圍：15 個幣種、1／5／10 日 horizon，合計 73,881 筆已成熟 replay observations。")
     _add_bullet(doc, "Issue dates：2021-10-30 至 2026-07-19；positive／non-up support 為 34,956／38,925。")
     _add_bullet(doc, "Forecast-time baseline 只使用預測發出當下已成熟的歷史結果，不能使用最終全樣本上漲率。")
@@ -242,7 +295,30 @@ def build_document() -> Document:
     _add_bullet(doc, "Ready observations=0，且 live ledger 尚無已成熟 ready outcomes；所有 ready-only 指標必須保持 null。")
     _add_bullet(doc, "因此現有結果只屬研究診斷，不構成 production、交易或獲利證據。")
 
-    doc.add_heading("二、目前指標怎麼樣", level=1)
+    doc.add_heading("四、目前指標怎麼樣", level=1)
+    doc.add_heading("4.1 指標定義與後台顯示規則", level=2)
+    metric_definition_rows = [
+        ("Accuracy", "threshold 0.5 下預測正確的比例", "必須和同切片 majority baseline 一起看；類別不平衡時不可單獨判斷。"),
+        ("Precision", "預測 up 中實際 up 的比例 TP/(TP+FP)", "沒有 predicted-up 時分母為 0，顯示 null／樣本不足，不得填 0。"),
+        ("Recall", "實際 up 中被抓到的比例 TP/(TP+FN)", "高 Recall 可能來自幾乎全部預測 up，必須連同 Specificity 與 coverage。"),
+        ("F1", "Precision 與 Recall 的 harmonic mean", "不含 TN；必須連同 Balanced accuracy、MCC 與固定 threshold 閱讀。"),
+        ("ROC-AUC", "正例排序高於負例的機率型 ranking 指標", "0.5 近似隨機；只有單一 outcome class 時為 null。"),
+        ("Average Precision（AP）", "tie-preserving step-wise precision-recall area", "必須和同切片 positive prevalence 比；不可用 trapezoid PR-AUC 混稱。"),
+        ("Brier score", "mean((p-y)^2)，同時評估校準與辨別", "越低越好；promotion 優先和相同 forecast IDs 的 point-in-time baseline paired 比較。"),
+        ("Brier Skill Score", "1 - Brier_model/Brier_baseline", "大於 0 才表示勝過 baseline；仍須 baseline-model loss CI 下界大於 0。"),
+        ("Log loss", "-mean(y log p + (1-y) log(1-p))", "越低越好，會重罰過度自信的錯誤；必須 paired 比較同一批 outcomes。"),
+        ("ECE", "固定 10 個 equal-width bins 的 probability/observed-rate gap 加權平均", "越低通常越好，但對分箱敏感；不能在 Brier 或 AUC 惡化時單獨升級。"),
+        ("SHAP", "對固定 feature model f(X) 的 attribution", "historical statistical baseline 沒有固定 feature schema/model object，故 N/A；它不是準確率。"),
+    ]
+    _add_table(
+        doc,
+        ("指標", "回答什麼", "正確解讀／null 規則"),
+        metric_definition_rows,
+        (3.2, 4.4, 7.4),
+        font_size=7.1,
+    )
+
+    doc.add_heading("4.2 固定 replay 的目前數值", level=2)
     current_rows = [
         ("Proper", "Brier / baseline", "0.252671 / 0.251558", "模型較差；BSS = -0.4424%", "不合格"),
         ("Proper", "Log loss / baseline", "0.698954 / 0.696363", "模型較差", "不合格"),
@@ -268,7 +344,7 @@ def build_document() -> Document:
         status_column=4,
     )
 
-    doc.add_heading("三、各 horizon 是否一致", level=1)
+    doc.add_heading("五、各 horizon 是否一致", level=1)
     horizon_rows = [
         ("1 日", "24,692", "0.250876", "0.250380", "-0.1979%", "0.500261", "0.488347", "0.022802"),
         ("5 日", "24,632", "0.252440", "0.251355", "-0.4319%", "0.503384", "0.469506", "0.033197"),
@@ -289,7 +365,7 @@ def build_document() -> Document:
         fill=LIGHT_YELLOW,
     )
 
-    doc.add_heading("四、預計多少才有參考意義", level=1)
+    doc.add_heading("六、預計多少才有參考意義", level=1)
     target_rows = [
         ("證據量與 provenance", "pooled N=73,881；vintage_exact=false；ready N=0", "每個 model+horizon 至少 1,000 筆、180 個 issue dates、正負類各 100；完整 universe、唯一 forecast ID、exact immutable vintage", "前述條件設為 hard gate；另累積同規模 live/shadow matured outcomes"),
         ("Brier / BSS", "0.252671 / -0.4424%", "BSS > 0，且 issue-date block-bootstrap 的 baseline − model 95% CI 下界 > 0", "每個 horizon BSS ≥ +1%。1／5／10 日 Brier 約需 ≤0.247876／0.248841／0.250418"),
@@ -320,13 +396,75 @@ def build_document() -> Document:
         fill=LIGHT_GREEN,
     )
 
-    doc.add_heading("五、F1、Recall 與 SHAP 為什麼不能單獨判斷", level=1)
+    doc.add_heading("七、F1、Recall 與 SHAP 為什麼不能單獨判斷", level=1)
     _add_bullet(doc, "依目前 prevalence，永遠預測 up 可得到 Precision 0.473139、Recall 1.0、F1 0.642355，卻沒有任何辨別何時上漲的能力。")
     _add_bullet(doc, "因此 F1 或 Recall 的漂亮數字可能只是退化成單一類別策略；必須連同 Specificity、Balanced accuracy、MCC、coverage 與成本閱讀。")
     _add_bullet(doc, "SHAP 是模型 attribution，不是效能分數。它回答『模型為什麼這樣預測』，不回答『模型有多準』，所以沒有越高越好的 target。")
     _add_bullet(doc, "目前 historical-baseline-v2 沒有固定 X → f(X) feature schema 與 model object，SHAP 必須誠實標示 N/A。")
 
-    doc.add_heading("六、發布判定與下一步", level=1)
+    doc.add_heading("八、真實控制參數、查詢篩選與校準 challenger", level=1)
+    _add_note(
+        doc,
+        "參數名稱必須對得上程式",
+        "下列值是目前程式實際存在的 model/evaluation controls；不代表都已開放後台 UI 即時修改。"
+        "若未來提供調參介面，必須建立版本化設定與獨立 validation，不能直接覆寫 frozen scorecard 的測試條件。",
+    )
+    control_rows = [
+        ("MIN_READY_CONFIDENCE", str(MIN_READY_CONFIDENCE), "模型 confidence score 的研究發布門檻（0–100 分），不是 p(up) threshold；低於此值就 abstain。"),
+        ("MIN_OBSERVATIONS", str(MIN_OBSERVATIONS), "產生預測前至少需要的 completed daily bars；屬模型資料準備門檻，不是 scorecard promotion N。"),
+        ("MIN_OUTCOMES", str(MIN_OUTCOMES), "同 regime 可用成熟 outcomes 的最低數；不足時 fallback／abstain，不得引用未成熟未來結果。"),
+        ("Regime", "MA60 + trailing 20d return", "以 close 對 MA60 與過去 20 日報酬定義 bull／bear／sideways；改 60 或 20 就是模型版本變更。"),
+        ("Classification threshold", "0.5", "只用來把 p(up) 轉成 up/non-up 以計算 Accuracy、Precision、Recall、F1；p=0.5 歸 up。不是 ready confidence 40。"),
+        ("Scorecard evidence gate", "1,000 observations / 180 issue dates", "評估可信度門檻；和模型 120 bars／30 outcomes 分開，不得混為同一參數。"),
+    ]
+    _add_table(
+        doc,
+        ("控制項", "目前值", "作用與邊界"),
+        control_rows,
+        (3.6, 3.2, 8.2),
+        font_size=7.5,
+    )
+
+    filter_rows = [
+        ("window", "只限制 scorecard 的 target date 查詢窗；不改模型、不重估參數。", "window-filtered diagnostic slice；formal promotion gate 為 not_applicable。"),
+        ("horizon", "選擇 1／5／10 日既有 forecast group；不是把模型的 horizon 調成新值。", "正式審查必須明確選一個 horizon，不能 pooled 後宣稱通過。"),
+        ("symbol", "只選單一幣種查看診斷；不改跨幣資料或模型係數。", "symbol-filtered diagnostic slice；不可取最好幣種代表完整 universe。"),
+        ("model_version", "只選既有 immutable model version 的成績。", "正式審查必須明確指定一個版本；新參數應建立新版本而非覆寫舊版。"),
+    ]
+    _add_table(
+        doc,
+        ("畫面／API 篩選", "實際作用", "Promotion 限制"),
+        filter_rows,
+        (3.0, 6.0, 6.0),
+        font_size=7.5,
+    )
+    _add_note(
+        doc,
+        "禁止 scorecard feedback loop",
+        "Frozen scorecard 是獨立稽核／test 證據，不能由系統看完成績後自動改 MIN_READY_CONFIDENCE、MA window、classification threshold、"
+        "calibrator 或任何模型參數再重跑同一份資料。調參只能在 training／validation 或 nested chronological walk-forward 內進行；"
+        "參數鎖定後才可一次評估 untouched test，並建立新 model_version。",
+        fill=LIGHT_RED,
+    )
+
+    doc.add_heading("8.1 Identity、Platt 與 Beta 的定位", level=2)
+    calibration_rows = [
+        ("Identity", "g(p)=p；原始機率控制組", "目前保留；production_model_changed=false。"),
+        ("Monotone Platt", "sigmoid(a·logit(p)+b)，a≥0", "研究 challenger；逐 issue date strict walk-forward fit。"),
+        ("Monotone Beta", "sigmoid(α·log(p)-β·log(1-p)+c)，α,β≥0", "研究 challenger；逐 issue date strict walk-forward fit。"),
+        ("訓練成熟規則", "target_date < current_issue_date；同日 batch 共用同一 fit", "避免把當天才成熟的 outcome 洩漏進當天校準器。"),
+        ("隔離規則", "每個 model_version × horizon 分開；同組可跨 symbol pooling", "不可跨 horizon 混 fit；pooling 假設仍需敏感度分析。"),
+        ("目前決策", "六組 gate 均 keep_identity", "Platt/Beta 的 Brier／log loss 點估計改善，不足以抵銷 AUC／Recall 惡化與 CI／vintage blockers。"),
+    ]
+    _add_table(
+        doc,
+        ("方法／規則", "定義", "目前狀態"),
+        calibration_rows,
+        (3.2, 5.6, 6.2),
+        font_size=7.3,
+    )
+
+    doc.add_heading("九、發布判定與下一步", level=1)
     _add_note(
         doc,
         "現在的發布決策",
@@ -339,7 +477,7 @@ def build_document() -> Document:
     _add_bullet(doc, "第三優先：達到 BSS >0 且 paired CI 下界 >0，再追求 BSS ≥1%、AUC ≥0.53 與 AP relative lift ≥5%。")
     _add_bullet(doc, "第四優先：先 shadow，不直接上線；納入交易成本、滑價、最大回撤、錯誤代價與人工覆核。")
 
-    doc.add_heading("七、方法依據與重現資訊", level=1)
+    doc.add_heading("十、方法依據與重現資訊", level=1)
     method_rows = [
         ("Brier / proper scores", "Brier (1950); Gneiting & Raftery (2007)", "模型選擇優先看 proper score 與 forecast-time baseline skill"),
         ("ROC-AUC", "Fawcett (2006)", "和 0.5 及其 clustered CI 比較"),
@@ -358,7 +496,7 @@ def build_document() -> Document:
 
     footer = section.footer.paragraphs[0]
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _font(footer.add_run("crypto-quant｜預測模型指標與參考門檻｜2026-07-21"), size=8, color="777777")
+    _font(footer.add_run(f"crypto-quant｜預測模型指標與參考門檻｜{REPORT_DATE}"), size=8, color="777777")
     return doc
 
 

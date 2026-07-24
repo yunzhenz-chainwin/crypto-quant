@@ -2284,6 +2284,9 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
   padding: 10px 12px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
 }
+.detail-coin-controls { flex: 1 1 560px; min-width: 0; }
+.detail-cat-tabs { margin-bottom: 8px; }
+.detail-coin-controls .cat-hint { margin: -2px 0 8px; }
 .coin-picker-wrap { display: flex; align-items: center; gap: 8px; }
 .coin-picker-lbl { font-size: 12px; color: var(--muted); font-weight: 600; }
 .coin-picker {
