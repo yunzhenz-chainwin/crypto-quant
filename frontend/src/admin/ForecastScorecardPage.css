@@ -40,16 +40,9 @@
 }
 .forecast-symbol-filter { flex: 1; min-width: 280px; }
 .forecast-model-filter { min-width: 260px; }
-.forecast-symbol-filter > div { display: flex; gap: 7px; }
-.forecast-symbol-filter input { flex: 1; min-width: 130px; }
-.forecast-symbol-filter button {
-  color: var(--accent);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 12px;
-  cursor: pointer;
-}
+.forecast-symbol-filter select { width: 100%; min-width: 220px; }
+.forecast-filter-hint { min-height: 14px; color: var(--muted); font-size: 10px; }
+.forecast-filter-hint.error { color: #ef4444; }
 .forecast-apply-filter {
   min-height: 36px;
   padding: 6px 14px;

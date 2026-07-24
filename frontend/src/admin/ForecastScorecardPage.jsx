@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { fetchForecastScorecard } from '../api/admin'
+import { fetchCoins, fetchForecastScorecard } from '../api/admin'
 import './ForecastScorecardPage.css'
 
 const STATUS_COPY = {
@@ -117,6 +117,14 @@ function normalizeGates(payload) {
   ))
 }
 
+function coinLabel(coin) {
+  const symbol = String(coin?.symbol || '').toUpperCase()
+  const ticker = String(coin?.ticker || symbol.replace(/USDT$/, '')).toUpperCase()
+  const name = String(coin?.zh || '').trim()
+  const status = coin?.enabled === false ? ' · 已停用' : ''
+  return `${name ? `${name} ` : ''}${ticker}（${symbol}）${status}`
+}
+
 function MetricCard({ label, value, note, tone = '' }) {
   return (
     <div className={`forecast-score-metric ${tone}`}>
@@ -144,6 +152,9 @@ export default function ForecastScorecardPage({ onLogout }) {
   const [windowDays, setWindowDays] = useState('all')
   const [symbolDraft, setSymbolDraft] = useState('')
   const [symbol, setSymbol] = useState('')
+  const [coinOptions, setCoinOptions] = useState([])
+  const [coinsLoading, setCoinsLoading] = useState(true)
+  const [coinsError, setCoinsError] = useState('')
   const [modelVersionDraft, setModelVersionDraft] = useState('historical-baseline-v2')
   const [modelVersion, setModelVersion] = useState('historical-baseline-v2')
   const [payload, setPayload] = useState(null)
@@ -177,6 +188,34 @@ export default function ForecastScorecardPage({ onLogout }) {
     return () => window.clearTimeout(timer)
   }, [load])
 
+  useEffect(() => {
+    let active = true
+    void fetchCoins()
+      .then(result => {
+        if (!active) return
+        const options = (result?.coins ?? [])
+          .filter(coin => coin?.symbol)
+          .sort((left, right) => {
+            const enabledOrder = Number(right.enabled !== false) - Number(left.enabled !== false)
+            return enabledOrder || String(left.symbol).localeCompare(String(right.symbol))
+          })
+        setCoinOptions(options)
+        setCoinsError('')
+      })
+      .catch(err => {
+        if (!active) return
+        if (err.message === 'UNAUTH') {
+          onLogout()
+          return
+        }
+        setCoinsError('幣別清單載入失敗，請重新整理後再試。')
+      })
+      .finally(() => {
+        if (active) setCoinsLoading(false)
+      })
+    return () => { active = false }
+  }, [onLogout])
+
   const overall = payload?.overall ?? {}
   const groups = useMemo(() => normalizeGroups(payload?.by_horizon), [payload])
   const gates = useMemo(() => normalizeGates(payload), [payload])
@@ -187,7 +226,7 @@ export default function ForecastScorecardPage({ onLogout }) {
 
   const applyFilters = (event) => {
     event.preventDefault()
-    setSymbol(symbolDraft.trim().toUpperCase())
+    setSymbol(symbolDraft)
     setModelVersion(modelVersionDraft.trim())
   }
 
@@ -223,17 +262,21 @@ export default function ForecastScorecardPage({ onLogout }) {
           </select>
         </label>
         <label className="forecast-symbol-filter">
-          <span>幣種（可留空）</span>
-          <div>
-            <input
-              value={symbolDraft}
-              onChange={event => setSymbolDraft(event.target.value)}
-              placeholder="例如 BTCUSDT"
-            />
-            {symbol && (
-              <button type="button" onClick={() => { setSymbolDraft(''); setSymbol('') }}>清除</button>
-            )}
-          </div>
+          <span>幣別</span>
+          <select
+            value={symbolDraft}
+            onChange={event => setSymbolDraft(event.target.value)}
+            aria-label="篩選幣別"
+            disabled={coinsLoading && coinOptions.length === 0}
+          >
+            <option value="">全部幣別</option>
+            {coinOptions.map(coin => (
+              <option key={coin.symbol} value={coin.symbol}>{coinLabel(coin)}</option>
+            ))}
+          </select>
+          <small className={`forecast-filter-hint ${coinsError ? 'error' : ''}`}>
+            {coinsError || (coinsLoading ? '正在載入幣別…' : `${coinOptions.length} 個幣別可篩選`)}
+          </small>
         </label>
         <label className="forecast-model-filter">
           <span>模型版本（留空為診斷彙總）</span>
