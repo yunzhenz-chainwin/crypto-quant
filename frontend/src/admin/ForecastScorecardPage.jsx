@@ -3,6 +3,7 @@ import { fetchCoins, fetchForecastScorecard } from '../api/admin'
 import './ForecastScorecardPage.css'
 
 const AUTO_REFRESH_MS = 5 * 60 * 1000
+const VIEW_MODE_STORAGE_KEY = 'cq-forecast-scorecard-view-mode'
 
 const VERDICT_COPY = {
   unverifiable: { label: '目前無法判定', tone: 'neutral' },
@@ -50,6 +51,117 @@ const ACTION_COPY = {
   audit_abstention_causes: '檢查 abstain 原因與資料充分性，不直接放寬信心門檻。',
   monitor_without_parameter_change: '維持參數並持續監控新成熟結果。',
   continue_shadow_monitoring: '維持參數並持續監控新成熟結果。',
+}
+
+const PARAMETER_GUIDE = {
+  minimum_evidence: {
+    label: '先把驗證資料累積夠',
+    description: '資料太少時，今天看起來很準、明天也可能完全相反；這時先不要追著分數改模型。',
+  },
+  model_version: {
+    label: '鎖定單一模型版本',
+    description: '一次只比較一個不能被偷偷改寫的版本，才知道改善到底來自哪次調整。',
+  },
+  horizon: {
+    label: '分開評估預測天數',
+    description: '1 日、5 日、10 日是不同問題，不能挑最好看的那一個宣稱整體變準。',
+  },
+  symbol: {
+    label: '改用完整幣別範圍驗證',
+    description: '單一幣別可以找問題，但正式成績必須檢查模型原本承諾涵蓋的全部幣別。',
+  },
+  window: {
+    label: '改用完整歷史驗證',
+    description: '短視窗適合觀察最近是否漂移，不適合挑一段有利行情當正式成績。',
+  },
+  evaluation_filter: {
+    label: '先恢復完整評估範圍',
+    description: '目前篩選只用來診斷；正式決策要回到完整幣別與完整歷史。',
+  },
+  calibration: {
+    label: '測試機率校準方法',
+    description: '比較原始、Platt、Beta，確認「70% 信心」是否真的約有七成發生，而不是只讓數字看起來漂亮。',
+  },
+  calibration_method: {
+    label: '測試機率校準方法',
+    description: '比較原始、Platt、Beta，確認機率是否更誠實；校準不會自動讓方向判斷變準。',
+  },
+  classification_threshold: {
+    label: '測試方向判定門檻',
+    description: '門檻降低會抓到更多上漲，也可能增加誤報；只能在未碰過的驗證資料上找平衡。',
+  },
+  ready_abstain_threshold: {
+    label: '測試出手／保留門檻',
+    description: '門檻太高會幾乎不提供判斷，太低又會放出低品質預測；必須同時看覆蓋率與命中率。',
+  },
+  regime_definition: {
+    label: '研究新的市場狀態與特徵',
+    description: '若排序能力接近隨機，只調機率外觀沒有用，應研究真正能區分行情的新訊號。',
+  },
+  forecast_readiness_policy: {
+    label: '先找出模型為何不願判斷',
+    description: '先分辨是資料不足、罕見行情或信心不足，再決定要不要測試發布門檻。',
+  },
+  monitoring_window: {
+    label: '維持模型並監控漂移',
+    description: '目前沒有足夠理由改參數，先用固定週期觀察新資料是否讓表現變差。',
+  },
+  production_parameters: {
+    label: '目前不用改正式參數',
+    description: '持續累積新結果；若未來出現穩定失敗訊號，再建立新候選版本驗證。',
+  },
+}
+
+const EVIDENCE_KEY_COPY = {
+  observations: '成熟樣本',
+  issue_dates: '獨立預測日期',
+  minimum_observations: '最低樣本',
+  minimum_issue_dates: '最低獨立日期',
+  observation_gap: '尚缺樣本',
+  issue_date_gap: '尚缺獨立日期',
+  pending: '等待成熟',
+  policy: '原則',
+  classification_threshold: '目前方向門檻',
+  recall: '抓到上漲的比例',
+  specificity: '抓到未上漲的比例',
+  brier_skill_score: '相對基準機率表現',
+  expected_calibration_error: '信心校準誤差',
+  log_loss: '過度自信錯誤',
+  baseline_log_loss: '基準過度自信錯誤',
+  roc_auc: '方向排序能力',
+  ready_count: '實際發布筆數',
+  coverage: '發布覆蓋率',
+  challengers: '候選方法',
+  validation: '驗證方式',
+  promotion: '升級條件',
+  formal_evaluation: '正式評估天數',
+  one_horizon_per_scorecard: '每次只看一個預測期',
+  direction: '測試方向',
+  method: '測試方法',
+  action: '行動',
+  minimum_price_observations: '最低價格樣本',
+  minimum_regime_outcomes: '最低同類行情結果',
+  minimum_ready_confidence: '最低發布信心',
+}
+
+const EVIDENCE_VALUE_COPY = {
+  collect_before_parameter_tuning: '先累積資料，再調參',
+  one_explicit_registered_model_version: '鎖定一個正式模型版本',
+  walk_forward_out_of_sample: '走勢外 walk-forward 驗證',
+  lower_brier_and_log_loss_with_auc_noninferiority: '機率誤差降低，而且方向能力不能退步',
+  lower_to_test: '先離線測試降低門檻',
+  raise_to_test: '先離線測試提高門檻',
+  predeclared_walk_forward_search: '事先鎖定範圍的 walk-forward 搜尋',
+  register_predeclared_challenger_versions: '建立事先定義的新候選版本',
+  keep_current_until_abstention_root_cause_is_validated: '找出拒答原因前維持現況',
+  predeclared_rolling_drift_reviews: '固定週期的滾動漂移檢查',
+}
+
+const CHECK_STATE_COPY = {
+  pass: '已過關',
+  fail: '需要優化',
+  caution: '先觀察',
+  waiting: '等資料',
 }
 
 const STATUS_COPY = {
@@ -214,11 +326,12 @@ function displayEvidence(value) {
   if (Array.isArray(value)) return value.map(displayEvidence).filter(Boolean).join('；')
   if (typeof value === 'object') {
     return Object.entries(value)
-      .map(([key, item]) => `${key}: ${displayEvidence(item)}`)
+      .map(([key, item]) => `${EVIDENCE_KEY_COPY[key] || key}: ${displayEvidence(item)}`)
       .filter(item => !item.endsWith(': '))
       .join('；')
   }
-  return String(value)
+  if (typeof value === 'boolean') return value ? '是' : '否'
+  return EVIDENCE_VALUE_COPY[String(value)] || String(value)
 }
 
 function deriveMaturity(payload, overall, gates) {
@@ -522,6 +635,372 @@ function coinLabel(coin) {
   return `${name ? `${name} ` : ''}${ticker}（${symbol}）${status}`
 }
 
+function parameterGuide(parameter) {
+  return PARAMETER_GUIDE[parameter] || {
+    label: String(parameter || '模型設定').replaceAll('_', ' '),
+    description: '先建立候選版本並用未碰過的資料驗證，確認真的改善後才考慮套用。',
+  }
+}
+
+function missingAmount(current, required) {
+  const currentNumber = finite(current)
+  const requiredNumberValue = finite(required)
+  if (currentNumber == null || requiredNumberValue == null) return null
+  return Math.max(0, Math.ceil(requiredNumberValue - currentNumber))
+}
+
+function deriveBeginnerDecision(assessment) {
+  const maturity = assessment.maturity
+  const observationGap = missingAmount(maturity.observations, maturity.minimumObservations)
+  const issueDateGap = missingAmount(maturity.issueDates, maturity.minimumIssueDates)
+  const gapParts = [
+    observationGap ? `${count(observationGap)} 筆成熟樣本` : '',
+    issueDateGap ? `${count(issueDateGap)} 個獨立日期` : '',
+  ].filter(Boolean)
+
+  if (!maturity.observations || assessment.verdict === 'unverifiable') {
+    return {
+      tone: 'waiting',
+      label: '先等資料',
+      title: '現在還不能判斷模型準不準',
+      summary: '目前沒有足夠的預測已經走到結果日。系統會等待真實結果，不用空資料製造漂亮分數。',
+      avoid: '不要把空白或 0 當成模型很差，也不要先猜參數。',
+    }
+  }
+  if (!maturity.ready || assessment.verdict === 'insufficient_evidence') {
+    return {
+      tone: 'waiting',
+      label: '資料累積中',
+      title: '先別追著短期分數調模型',
+      summary: gapParts.length
+        ? `至少還需要 ${gapParts.join('、')}。現在的 Accuracy、F1、AUC 會隨少量案例大幅跳動。`
+        : '目前的成熟資料還沒達到最低門檻，短期分數只能觀察，不能據此改正式模型。',
+      avoid: '不要因為今天命中率變高就立刻調門檻或換模型。',
+    }
+  }
+  if (assessment.releaseReviewEligible) {
+    return {
+      tone: 'good',
+      label: '可送人工審查',
+      title: '模型已通過統計門檻，可以進下一關',
+      summary: '這代表證據足以交由人員審查版本、成本與風險；仍不是保證未來報酬，也不會自動上線。',
+      avoid: '不要跳過人工審查、交易成本與 shadow monitoring。',
+    }
+  }
+  if (assessment.verdict === 'not_better_than_baseline') {
+    return {
+      tone: 'bad',
+      label: '需要優化',
+      title: '模型還沒有比簡單基準更可靠',
+      summary: '先從下方第一個建議做離線測試。每次只改一件事，建立新版本，再用同一套樣本外規則比較。',
+      avoid: '不要在正式版本直接覆寫參數，也不要只挑對自己有利的期間。',
+    }
+  }
+  if (assessment.verdict === 'diagnostic_only') {
+    return {
+      tone: 'caution',
+      label: '只能找問題',
+      title: '這個篩選結果不能拿來決定模型升級',
+      summary: '單一幣別、短時間窗或混合預測期很適合定位問題，但正式判斷要回到完整範圍。',
+      avoid: '不要把目前切片中最好看的數字當成全模型成績。',
+    }
+  }
+  return {
+    tone: 'caution',
+    label: '有訊號，未確認',
+    title: '看見改善跡象，但還不能套用',
+    summary: '先完成信賴區間、基準與各項升級門檻；只有同一方向的證據穩定重現，才建立候選版本。',
+    avoid: '不要只靠單一 Accuracy、F1 或 ECE 宣稱模型已變準。',
+  }
+}
+
+function deriveBeginnerChecks(payload, overall, gates, assessment) {
+  const maturity = assessment.maturity
+  const brierSkill = finite(observedMetric(payload, overall, 'brier_skill_score'))
+  const auc = finite(observedMetric(payload, overall, 'roc_auc'))
+  const failedGates = gates.filter(gate => ['fail', 'failed'].includes(gateStatus(gate))).length
+  const passedGates = gates.filter(gate => gateStatus(gate) === 'pass').length
+  const checks = []
+
+  checks.push({
+    id: 'maturity',
+    title: '資料夠不夠？',
+    state: maturity.ready ? 'pass' : 'waiting',
+    headline: maturity.ready ? '已達最低資料門檻' : '還在等更多真實結果',
+    detail: `${count(maturity.observations)} / ${count(maturity.minimumObservations)} 筆；${count(maturity.issueDates)} / ${count(maturity.minimumIssueDates)} 個獨立日期`,
+  })
+
+  checks.push({
+    id: 'baseline',
+    title: '有沒有比簡單方法好？',
+    state: !maturity.ready || brierSkill == null
+      ? 'waiting'
+      : assessment.supportsProbabilitySkillClaim
+        ? 'pass'
+        : brierSkill <= 0 ? 'fail' : 'caution',
+    headline: brierSkill == null
+      ? '目前還算不出相對表現'
+      : brierSkill > 0 ? `暫時領先基準 ${skill(brierSkill)}` : `暫時落後基準 ${skill(brierSkill)}`,
+    detail: '不是只看命中率，而是比較每次預測機率和當時可知的基準。',
+  })
+
+  checks.push({
+    id: 'ranking',
+    title: '方向排序有沒有能力？',
+    state: !maturity.ready || auc == null
+      ? 'waiting'
+      : auc < 0.5 ? 'fail' : auc < 0.53 ? 'caution' : 'pass',
+    headline: auc == null
+      ? '目前還算不出 AUC'
+      : auc < 0.5
+        ? `AUC ${decimal(auc, 3)}，暫時低於隨機排序`
+        : auc < 0.53
+          ? `AUC ${decimal(auc, 3)}，仍接近隨機`
+          : `AUC ${decimal(auc, 3)}，達到第一個弱訊號里程碑`,
+    detail: 'AUC 0.50 約等於隨機排序；0.53 是開始值得研究，不代表已可上線。',
+  })
+
+  checks.push({
+    id: 'release',
+    title: '現在可以升級嗎？',
+    state: assessment.releaseReviewEligible
+      ? 'pass'
+      : failedGates > 0 ? 'fail' : maturity.ready ? 'caution' : 'waiting',
+    headline: assessment.releaseReviewEligible
+      ? '可進人工發布審查'
+      : failedGates > 0 ? `${failedGates} 項門檻未通過` : '目前維持研究／觀察',
+    detail: `${passedGates} 項已通過；通過統計門檻仍不等於自動上線。`,
+  })
+  return checks
+}
+
+function higherGoalProgress(value, floor, target) {
+  const number = finite(value)
+  if (number == null) return 0
+  return clampProgress((number - floor) / (target - floor)) ?? 0
+}
+
+function lowerGoalProgress(value, target, ceiling) {
+  const number = finite(value)
+  if (number == null) return 0
+  if (number <= target) return 1
+  return clampProgress((ceiling - number) / (ceiling - target)) ?? 0
+}
+
+function deriveBeginnerGoals(payload, overall, assessment) {
+  const ready = assessment.maturity.ready
+  const auc = finite(observedMetric(payload, overall, 'roc_auc'))
+  const recall = finite(observedMetric(payload, overall, 'recall') ?? observedMetric(payload, overall, 'sensitivity'))
+  const f1 = finite(observedMetric(payload, overall, 'f1_score') ?? observedMetric(payload, overall, 'f1'))
+  const brierSkill = finite(observedMetric(payload, overall, 'brier_skill_score'))
+  const ece = finite(observedMetric(payload, overall, 'expected_calibration_error'))
+  const state = (value, passed, severe = false) => {
+    if (value == null || !ready) return 'waiting'
+    if (passed) return 'pass'
+    return severe ? 'fail' : 'caution'
+  }
+
+  return [
+    {
+      id: 'auc', label: '方向辨識力', value: metricDecimal(auc, 3), target: '先達 0.53；較強目標 0.55',
+      progress: higherGoalProgress(auc, 0.5, 0.53),
+      state: state(auc, auc >= 0.53, auc < 0.5),
+      note: '0.50 約等於隨機排序。',
+    },
+    {
+      id: 'recall', label: '實際上漲有抓到多少', value: metricPercent(recall), target: '內部參考 ≥ 50%',
+      progress: higherGoalProgress(recall, 0, 0.5),
+      state: state(recall, recall >= 0.5),
+      note: '太低代表漏掉很多上漲；太高也要防止全部猜上漲。',
+    },
+    {
+      id: 'f1', label: '抓準與抓全的平衡', value: metricDecimal(f1, 3), target: '內部參考 ≥ 0.50',
+      progress: higherGoalProgress(f1, 0, 0.5),
+      state: state(f1, f1 >= 0.5),
+      note: '必須和未上漲辨識力一起看。',
+    },
+    {
+      id: 'brier-skill', label: '機率有沒有贏基準', value: metricSkill(brierSkill), target: '至少 > 0；內部目標 +1%',
+      progress: higherGoalProgress(brierSkill, 0, 0.01),
+      state: state(brierSkill, brierSkill >= 0.01, brierSkill <= 0),
+      note: '負值代表比當時的簡單基準更差。',
+    },
+    {
+      id: 'ece', label: '信心與結果差多少', value: metricPercent(ece, 2), target: '內部參考 ≤ 2%',
+      progress: lowerGoalProgress(ece, 0.02, 0.1),
+      state: state(ece, ece <= 0.02, ece > 0.05),
+      note: '越低通常越好，但不能單獨決定升級。',
+    },
+  ]
+}
+
+function ViewModeSwitch({ value, onChange }) {
+  return (
+    <div className="forecast-view-switch" role="group" aria-label="模型成績顯示方式">
+      <button type="button" className={value === 'guided' ? 'active' : ''} aria-pressed={value === 'guided'} onClick={() => onChange('guided')}>
+        新手導覽
+      </button>
+      <button type="button" className={value === 'expert' ? 'active' : ''} aria-pressed={value === 'expert'} onClick={() => onChange('expert')}>
+        專業指標
+      </button>
+    </div>
+  )
+}
+
+function BeginnerDashboard({ payload, overall, gates, assessment, onShowExpert }) {
+  const decision = deriveBeginnerDecision(assessment)
+  const checks = deriveBeginnerChecks(payload, overall, gates, assessment)
+  const primaryAction = assessment.actions[0]
+  const primaryGuide = parameterGuide(primaryAction?.parameter)
+  const accuracy = observedMetric(payload, overall, 'accuracy')
+  const auc = observedMetric(payload, overall, 'roc_auc')
+  const brierSkill = observedMetric(payload, overall, 'brier_skill_score')
+
+  return (
+    <>
+      <section className={`forecast-beginner-hero ${decision.tone}`} aria-labelledby="forecast-beginner-title" aria-live="polite">
+        <div className="forecast-beginner-main">
+          <div className="forecast-decision-light" aria-hidden="true"><span /></div>
+          <div className="forecast-beginner-copy">
+            <p className="forecast-card-kicker">先看這一句</p>
+            <span className={`forecast-human-status ${decision.tone}`}>{decision.label}</span>
+            <h2 id="forecast-beginner-title">{decision.title}</h2>
+            <p>{decision.summary}</p>
+          </div>
+        </div>
+
+        <div className="forecast-human-metrics" aria-label="目前三個重點數字">
+          <div><span>方向命中率</span><strong>{metricPercent(accuracy)}</strong><small>不能單獨判斷</small></div>
+          <div><span>方向排序 AUC</span><strong>{metricDecimal(auc, 3)}</strong><small>0.50 約等於隨機</small></div>
+          <div><span>機率相對基準</span><strong>{metricSkill(brierSkill)}</strong><small>正值才是領先</small></div>
+        </div>
+
+        <div className="forecast-human-actions">
+          <div className="forecast-human-do">
+            <span>現在先做</span>
+            <strong>{primaryGuide.label}</strong>
+            <p>{primaryAction?.action || '持續累積新結果，等系統提供下一個可驗證步驟。'}</p>
+          </div>
+          <div className="forecast-human-dont">
+            <span>現在先不要做</span>
+            <strong>{decision.avoid}</strong>
+          </div>
+        </div>
+
+        <div className="forecast-human-footer">
+          <span>成熟資料：{count(assessment.maturity.observations)} 筆／{count(assessment.maturity.issueDates)} 個獨立日期</span>
+          <button type="button" onClick={onShowExpert}>查看原始專業指標</button>
+        </div>
+      </section>
+
+      <section className="forecast-checkup" aria-labelledby="forecast-checkup-title">
+        <div className="forecast-friendly-heading">
+          <div>
+            <p className="forecast-card-kicker">四關模型健檢</p>
+            <h2 id="forecast-checkup-title">系統怎麼判斷能不能調？</h2>
+          </div>
+          <p>由左到右看；前一關沒過，後面的漂亮數字也不能拿來升級。</p>
+        </div>
+        <div className="forecast-checkup-grid">
+          {checks.map((check, index) => (
+            <article className={`forecast-check-card ${check.state}`} key={check.id}>
+              <div className="forecast-check-top">
+                <span className="forecast-check-number">{index + 1}</span>
+                <span className={`forecast-check-badge ${check.state}`}>{CHECK_STATE_COPY[check.state]}</span>
+              </div>
+              <h3>{check.title}</h3>
+              <strong>{check.headline}</strong>
+              <p>{check.detail}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+    </>
+  )
+}
+
+function BeginnerGoalPanel({ payload, overall, assessment }) {
+  const goals = deriveBeginnerGoals(payload, overall, assessment)
+  return (
+    <section className="forecast-human-goals" aria-labelledby="forecast-human-goals-title">
+      <div className="forecast-friendly-heading">
+        <div>
+          <p className="forecast-card-kicker">動態目標條</p>
+          <h2 id="forecast-human-goals-title">離「有參考意義」還差多少？</h2>
+        </div>
+        <p>{assessment.maturity.ready ? '目標條依目前篩選結果即時更新。' : '資料未成熟前，目標條只顯示進度，不會標成通過。'}</p>
+      </div>
+      <div className="forecast-goal-grid">
+        {goals.map(goal => (
+          <article className={`forecast-goal-card ${goal.state}`} key={goal.id}>
+            <div className="forecast-goal-title">
+              <span>{goal.label}</span>
+              <span className={`forecast-check-badge ${goal.state}`}>{CHECK_STATE_COPY[goal.state]}</span>
+            </div>
+            <strong>{goal.value}</strong>
+            <div className="forecast-goal-track" role="progressbar" aria-label={`${goal.label} 目標進度`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(goal.progress * 100)}>
+              <span style={{ width: `${goal.progress * 100}%` }} />
+            </div>
+            <div className="forecast-goal-target"><span>參考目標</span><b>{goal.target}</b></div>
+            <p>{goal.note}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function BeginnerRecommendationPanel({ actions }) {
+  return (
+    <section className="forecast-friendly-recommendations" id="forecast-adjustments" aria-labelledby="forecast-friendly-actions-title">
+      <div className="forecast-friendly-heading">
+        <div>
+          <p className="forecast-card-kicker">一次只改一件事</p>
+          <h2 id="forecast-friendly-actions-title">接下來到底要調什麼？</h2>
+        </div>
+        <p>排序會隨成績動態改變；第 1 步永遠是目前最優先。所有變更先做離線驗證，不會直接改正式模型。</p>
+      </div>
+      <ol className="forecast-friendly-action-list">
+        {actions.map((action, index) => {
+          const guide = parameterGuide(action.parameter)
+          const priority = priorityDisplay(action.priority)
+          return (
+            <li className={index === 0 ? 'primary' : ''} key={action.id}>
+              <div className="forecast-friendly-step">
+                <span>第 {index + 1} 步</span>
+                <span className={`forecast-priority ${priority.tone}`}>{priority.label}</span>
+              </div>
+              <div className="forecast-friendly-action-copy">
+                <h3>{guide.label}</h3>
+                <p>{guide.description}</p>
+                <div className="forecast-friendly-change">
+                  <div><span>目前</span><strong>{action.current}</strong></div>
+                  <span className="forecast-change-arrow" aria-hidden="true">→</span>
+                  <div><span>先測試</span><strong>{action.suggested}</strong></div>
+                </div>
+                <div className="forecast-friendly-command">
+                  <span>實際行動</span>
+                  <strong>{action.action}</strong>
+                </div>
+                <details>
+                  <summary>為什麼建議這樣做？</summary>
+                  <p>{action.rationale}</p>
+                  {action.evidence && <small>目前依據：{action.evidence}</small>}
+                  <code>技術參數：{action.parameter}</code>
+                </details>
+              </div>
+            </li>
+          )
+        })}
+      </ol>
+      <div className="forecast-filter-warning" role="note">
+        <strong>頁面篩選不會改模型。</strong>
+        <span>幣別、預測期、視窗只改變你正在看的成績；真正調參必須建立候選版本、walk-forward 驗證，再由人員決定是否採用。</span>
+      </div>
+    </section>
+  )
+}
+
 function MetricCard({ label, value, note, tone = '' }) {
   return (
     <div className={`forecast-score-metric ${tone}`}>
@@ -699,6 +1178,13 @@ export default function ForecastScorecardPage({ onLogout }) {
   const [nextRefreshAt, setNextRefreshAt] = useState(null)
   const [countdownSeconds, setCountdownSeconds] = useState(AUTO_REFRESH_MS / 1000)
   const [pageVisible, setPageVisible] = useState(() => document.visibilityState === 'visible')
+  const [viewMode, setViewMode] = useState(() => {
+    try {
+      return window.localStorage.getItem(VIEW_MODE_STORAGE_KEY) === 'expert' ? 'expert' : 'guided'
+    } catch {
+      return 'guided'
+    }
+  })
   const requestRef = useRef(null)
 
   const load = useCallback(async (reason = 'manual') => {
@@ -820,6 +1306,16 @@ export default function ForecastScorecardPage({ onLogout }) {
   )
   const explainability = payload?.assessment?.explainability ?? {}
 
+  const changeViewMode = (nextMode) => {
+    const normalized = nextMode === 'expert' ? 'expert' : 'guided'
+    setViewMode(normalized)
+    try {
+      window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, normalized)
+    } catch {
+      // localStorage unavailable: the current page can still switch modes.
+    }
+  }
+
   const applyFilters = (event) => {
     event.preventDefault()
     const nextSymbol = symbolDraft
@@ -837,23 +1333,28 @@ export default function ForecastScorecardPage({ onLogout }) {
       <div className="forecast-scorecard-heading">
         <div>
           <p className="forecast-scorecard-eyebrow">POINT-IN-TIME MODEL GOVERNANCE</p>
-          <h1>研究預測模型成績單</h1>
-          <p>只評分已封存且已成熟的預測，並用預測當時可取得的歷史結果建立基準。</p>
+          <h1>模型成績與優化導覽</h1>
+          <p>{viewMode === 'guided'
+            ? '先用白話回答「能不能信、該調什麼、何時才算改善」；需要時再切到完整專業指標。'
+            : '只評分已封存且已成熟的預測，並用預測當時可取得的歷史結果建立基準。'}</p>
         </div>
-        <div className="forecast-refresh-controls">
-          <div className="forecast-refresh-status" role="status" aria-live="polite">
-            <span className={`forecast-live-dot ${refreshing ? 'refreshing' : ''}`} aria-hidden="true" />
-            <span>最後更新：{formatLocalTime(lastUpdatedAt)}</span>
-            <span>{pageVisible ? `下次自動更新：${formatCountdown(countdownSeconds)}` : '頁面隱藏，自動更新已暫停'}</span>
+        <div className="forecast-heading-tools">
+          <ViewModeSwitch value={viewMode} onChange={changeViewMode} />
+          <div className="forecast-refresh-controls">
+            <div className="forecast-refresh-status" role="status" aria-live="polite">
+              <span className={`forecast-live-dot ${refreshing ? 'refreshing' : ''}`} aria-hidden="true" />
+              <span>最後更新：{formatLocalTime(lastUpdatedAt)}</span>
+              <span>{pageVisible ? `下次自動更新：${formatCountdown(countdownSeconds)}` : '頁面隱藏，自動更新已暫停'}</span>
+            </div>
+            <button
+              className="admin-link"
+              type="button"
+              onClick={() => { void load('manual') }}
+              disabled={refreshing}
+            >
+              {refreshing ? '更新中…' : '立即重新整理'}
+            </button>
           </div>
-          <button
-            className="admin-link"
-            type="button"
-            onClick={() => { void load('manual') }}
-            disabled={refreshing}
-          >
-            {refreshing ? '更新中…' : '立即重新整理'}
-          </button>
         </div>
       </div>
 
@@ -909,7 +1410,23 @@ export default function ForecastScorecardPage({ onLogout }) {
         </div>
       )}
 
-      <section className={`forecast-scorecard-status ${payload?.status || 'unverifiable'}`}>
+      {viewMode === 'guided' && (
+        <>
+          <BeginnerDashboard
+            payload={payload}
+            overall={overall}
+            gates={gates}
+            assessment={assessment}
+            onShowExpert={() => changeViewMode('expert')}
+          />
+          <BeginnerGoalPanel payload={payload} overall={overall} assessment={assessment} />
+          <BeginnerRecommendationPanel actions={assessment.actions} />
+        </>
+      )}
+
+      {viewMode === 'expert' && (
+        <>
+        <section className={`forecast-scorecard-status ${payload?.status || 'unverifiable'}`}>
         <div>
           <strong>{status.title}</strong>
           <p>{payload?.message || status.note}</p>
@@ -919,11 +1436,11 @@ export default function ForecastScorecardPage({ onLogout }) {
           <div><dt>模型版本</dt><dd>{filters.model_version || '全部'}</dd></div>
           <div><dt>產生時間</dt><dd>{payload?.generated_at || '—'}</dd></div>
         </dl>
-      </section>
+        </section>
 
-      <AssessmentPanel assessment={assessment} />
+        <AssessmentPanel assessment={assessment} />
 
-      <section>
+        <section>
         <div className="forecast-section-heading">
           <div>
             <p className="forecast-card-kicker">LIVE OUT-OF-SAMPLE METRICS</p>
@@ -1044,6 +1561,8 @@ export default function ForecastScorecardPage({ onLogout }) {
           </ul>
         </div>
       </section>
+        </>
+      )}
     </div>
   )
 }
