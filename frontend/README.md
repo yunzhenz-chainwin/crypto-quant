@@ -7,19 +7,19 @@ React + Vite 前端，包含前台市場分析介面與 `/admin` 後台。正式
 ```powershell
 cd frontend
 npm install
-npm run start   # 同時啟動 uvicorn :8000 與 Vite :5173
+npm run start   # 同時啟動 uvicorn :8001 與 Vite :5174
 ```
 
 也可以分開跑：
 
 ```powershell
 cd ..
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --port 8000 --reload
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --port 8001 --reload
 cd frontend
 npm run ui
 ```
 
-Vite dev server 會把 `/api` proxy 到 `http://localhost:8000`，設定在 `vite.config.js`。
+Vite dev server 會把 `/api` proxy 到 `http://localhost:8001`，設定在 `vite.config.js`。
 
 ## Build
 

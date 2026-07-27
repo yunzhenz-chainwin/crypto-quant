@@ -21,17 +21,24 @@ frontend/dist/
 
 # 動態產生的資料（頻繁變動，不追蹤）
 data/raw/
+data/clean/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/backups/
 
 # 後端執行期資料庫（app.db 等，執行時產生，勿提交）
 backend/*.db
 backend/*.db-wal
 backend/*.db-shm
 
-# 報告圖片（二進位檔，不追蹤）
+# 執行期／研究重跑報表（可由資料與程式重建，不追蹤）
+# reports/*.md 可作為人工審閱文件追蹤；固定測試資料請放 tests/fixtures/。
+reports/*.csv
+reports/*.json
 reports/*.png
+reports/validation_*.txt
+reports/crosscheck_*.txt
 
 # Claude 工作階段記憶(非專案程式)
 memory/

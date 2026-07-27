@@ -3,7 +3,8 @@ admin.py — 後台管理台 API（全部掛在 /api/admin，除登入外都需�
 
 認證：環境變數 ADMIN_USER / ADMIN_PASS 設定帳密；登入成功發一個 HMAC 簽章的
 token（純標準庫，不需額外套件），前端帶在 Authorization: Bearer <token>。
-本機自用預設 admin / admin；正式環境請用環境變數覆蓋並設定 ADMIN_SECRET。
+本機開發 fallback 為 admin / admin123，且只允許明確宣告 loopback 與開發覆寫；
+正式環境必須用環境變數覆蓋並設定 ADMIN_SECRET。
 
 目前實作（P2 v1：登入 + 監控）：
   POST /api/admin/login       帳密 → token
@@ -27,22 +28,27 @@ from pydantic import BaseModel
 
 from backend.services.reader import last_updated
 from backend.services import app_db, news_store
-from backend.services.rate_limiter import RATE_LIMITER, enforce_rate_limit
+from backend.services.rate_limiter import (
+    LOGIN_FAILURE_GUARD,
+    RATE_LIMITER,
+    client_identity,
+    enforce_rate_limit,
+)
+from backend.services.security_hardening import load_admin_security_config
 
 router = APIRouter()
 
-ADMIN_USER = os.getenv("ADMIN_USER", "admin")
-ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")  # 可用環境變數 ADMIN_PASS 覆蓋成強密碼
-_SECRET    = os.getenv("ADMIN_SECRET", "dev-secret-change-me").encode()
+_SECURITY_CONFIG = load_admin_security_config()
+ADMIN_USER = _SECURITY_CONFIG.username
+ADMIN_PASS = _SECURITY_CONFIG.password
+_SECRET = _SECURITY_CONFIG.secret
 TOKEN_TTL  = 8 * 3600  # token 有效 8 小時
 
-# 安全防線（#70 T0）：對外服務絕不能用預設帳密/密鑰——知道預設 SECRET 的人可自簽 token 直接過驗證。
-# 正式啟動請經 start_backend.cmd（會載入 .env.admin.cmd 覆蓋）；這裡偵測到預設值就大聲警告。
-if ADMIN_PASS == "admin123" or _SECRET == b"dev-secret-change-me":
-    print("=" * 70)
-    print("[SECURITY WARNING] 後台帳密/簽章密鑰仍是預設值！對外環境請設定")
-    print("  ADMIN_PASS / ADMIN_SECRET 環境變數（見 .env.admin.cmd）後重啟。")
-    print("=" * 70)
+# 本機若明確選擇 fallback，只記錄模式，不輸出任何帳密或密鑰。
+if _SECURITY_CONFIG.insecure_local_override:
+    print("[SECURITY] local-only fallback admin credentials explicitly enabled")
+if _SECURITY_CONFIG.weak_external_password:
+    print("[SECURITY WARNING] external admin password is the explicitly configured legacy default; rotate ADMIN_PASS")
 
 
 # ── token：HMAC 簽章，純標準庫（payload.signature，base64url）──────────────────
@@ -79,6 +85,10 @@ def require_admin(authorization: str = Header(None)) -> str:
     return user
 
 
+def _constant_time_text_equal(left: str, right: str) -> bool:
+    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
 class LoginReq(BaseModel):
     username: str
     password: str
@@ -86,6 +96,14 @@ class LoginReq(BaseModel):
 
 @router.post("/admin/login")
 def login(body: LoginReq, request: Request):
+    client = client_identity(request)
+    lockout = LOGIN_FAILURE_GUARD.status(client)
+    if lockout.locked:
+        raise HTTPException(
+            status_code=429,
+            detail="登入失敗次數過多，請稍後再試",
+            headers={"Retry-After": str(lockout.retry_after)},
+        )
     enforce_rate_limit(
         request,
         scope="admin_login",
@@ -93,8 +111,13 @@ def login(body: LoginReq, request: Request):
         window_seconds=60,
         limiter=RATE_LIMITER,
     )
-    if body.username == ADMIN_USER and body.password == ADMIN_PASS:
+    if (
+        _constant_time_text_equal(body.username, ADMIN_USER)
+        and _constant_time_text_equal(body.password, ADMIN_PASS)
+    ):
+        LOGIN_FAILURE_GUARD.record_success(client)
         return {"ok": True, "token": _make_token(body.username), "user": body.username}
+    LOGIN_FAILURE_GUARD.record_failure(client)
     raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
 
 
@@ -245,7 +268,14 @@ def remove_task(task_id: int, _: str = Depends(require_admin)):
 
 # ── 手動把最新 K 線 / 指標匯入資料庫 ─────────────────────────────────────────
 @router.post("/admin/ingest")
-def ingest(_: str = Depends(require_admin)):
+def ingest(request: Request, _: str = Depends(require_admin)):
+    enforce_rate_limit(
+        request,
+        scope="admin_ingest",
+        limit=3,
+        window_seconds=3600,
+        limiter=RATE_LIMITER,
+    )
     jid = app_db.start_job("ingest_market")
     try:
         r = app_db.ingest_market_data()
@@ -270,9 +300,16 @@ _OPS_JOB_TYPE = {"daily": "daily_pipeline", "hourly": "hourly_pipeline", "news":
 
 
 @router.post("/admin/ops/run/{job}")
-def ops_run(job: str, _: str = Depends(require_admin)):
+def ops_run(job: str, request: Request, _: str = Depends(require_admin)):
     if job not in _OPS:
         raise HTTPException(status_code=404, detail="unknown job")
+    enforce_rate_limit(
+        request,
+        scope=f"admin_ops_{job}",
+        limit=6,
+        window_seconds=3600,
+        limiter=RATE_LIMITER,
+    )
     # 防重複：同型任務還在 running（且 2 小時內開始）就不疊加——並發抓 Binance 易觸發 429
     last = _last_job(_OPS_JOB_TYPE[job])
     if last and last.get("status") == "running":
@@ -332,7 +369,14 @@ def coins_list(_: str = Depends(require_admin)):
 
 
 @router.post("/admin/coins")
-def coins_add(body: CoinAddReq, _: str = Depends(require_admin)):
+def coins_add(body: CoinAddReq, request: Request, _: str = Depends(require_admin)):
+    enforce_rate_limit(
+        request,
+        scope="admin_coin_add",
+        limit=5,
+        window_seconds=3600,
+        limiter=RATE_LIMITER,
+    )
     symbol = body.symbol.strip().upper()
     if not symbol:
         raise HTTPException(status_code=400, detail="請輸入幣種代號")
@@ -500,7 +544,14 @@ def ai_config_put(body: AIConfigReq, _: str = Depends(require_admin)):
 
 
 @router.post("/admin/ai/test")
-def ai_config_test(_: str = Depends(require_admin)):
+def ai_config_test(request: Request, _: str = Depends(require_admin)):
+    enforce_rate_limit(
+        request,
+        scope="admin_ai_test",
+        limit=5,
+        window_seconds=600,
+        limiter=RATE_LIMITER,
+    )
     from backend.services import ai_analyst
     return ai_analyst.test_gpt()
 

@@ -7,9 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:forecast": "node --test --test-isolation=none src/lib/forecastViewModel.test.js",
     "preview": "vite preview",
     "start": "concurrently --kill-others-on-fail --names \"API,UI\" --prefix-colors \"cyan,magenta\" \"npm run api\" \"npm run ui\"",
-    "api": "cd .. && .venv\\Scripts\\python.exe -m uvicorn backend.main:app --port 8000 --reload",
+    "api": "set CRYPTO_QUANT_MODE=development&& set CRYPTO_QUANT_BIND_HOST=127.0.0.1&& set ALLOW_INSECURE_ADMIN_DEFAULTS=1&& cd .. && .venv\\Scripts\\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8001 --reload",
     "ui": "vite"
   },
   "dependencies": {

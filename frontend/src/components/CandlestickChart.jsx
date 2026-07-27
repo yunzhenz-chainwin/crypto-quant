@@ -10,7 +10,7 @@
  * Props：prices（OHLCV）、indicators（含 BB/RSI/MACD…）、trades（回測交易）、
  *        interval（'1d' 日線 / '1h' 時線；時線用 epoch 時間軸並隱藏回測標記）
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import {
   createChart, CandlestickSeries, HistogramSeries, LineSeries,
   CrosshairMode, createSeriesMarkers,
@@ -21,9 +21,11 @@ import { movingAvg, kdj, dmi, bias, atr, obv } from '../lib/indicators'
 function Toggle({ on, onClick, color, children }) {
   return (
     <button
+      type="button"
       className={`layer-toggle ${on ? 'on' : ''}`}
       style={{ color: on ? color : '#64748b', borderColor: on ? color : 'var(--border)' }}
       onClick={onClick}
+      aria-pressed={on}
     >
       {on ? '●' : '○'} {children}
     </button>
@@ -128,6 +130,7 @@ const OSC_DETAIL = {
 }
 
 export default function CandlestickChart({ prices, indicators, trades, interval = '1d', compact = false }) {
+  const helpId = useId()
   const containerRef = useRef(null)
   const tooltipRef   = useRef(null)   // 懸停資訊框（直接操作 DOM，避免高頻 re-render）
   const [maType, setMaType] = useState('EMA')   // 均線類型:SMA / EMA
@@ -399,16 +402,30 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
     const applySize = () => {
       const el = containerRef.current
       if (!el) return
-      chart.applyOptions({ width: el.clientWidth, height: el.clientHeight || fallbackH })
+      const width = Math.max(1, Math.floor(el.getBoundingClientRect().width))
+      chart.applyOptions({ width, height: el.clientHeight || fallbackH })
       if (declutterMarkers) declutterMarkers()   // 尺寸變了、座標跟著變，重算標籤疏密
+    }
+    let resizeRaf = 0
+    const handleViewportResize = () => {
+      cancelAnimationFrame(resizeRaf)
+      // 讓 responsive layout 先完成，再讀取容器最終寬度；orientation change
+      // 在部分行動瀏覽器會跨兩個 frame 才穩定，因此連排兩次。
+      resizeRaf = requestAnimationFrame(() => {
+        applySize()
+        resizeRaf = requestAnimationFrame(applySize)
+      })
     }
     const ro = new ResizeObserver(applySize)
     if (containerRef.current) ro.observe(containerRef.current)
-    window.addEventListener('resize', applySize)
+    window.addEventListener('resize', handleViewportResize)
+    window.addEventListener('orientationchange', handleViewportResize)
     return () => {
       cancelAnimationFrame(raf)
+      cancelAnimationFrame(resizeRaf)
       ro.disconnect()
-      window.removeEventListener('resize', applySize)
+      window.removeEventListener('resize', handleViewportResize)
+      window.removeEventListener('orientationchange', handleViewportResize)
       if (declutterMarkers) chart.timeScale().unsubscribeVisibleLogicalRangeChange(declutterMarkers)
       if (tooltipRef.current) tooltipRef.current.style.display = 'none'   // 重建圖表時清掉殘留的資訊框
       chart.remove()
@@ -424,11 +441,25 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
     )
   }
 
+  const latest = prices[prices.length - 1]
+  const previous = prices.length > 1 ? prices[prices.length - 2] : null
+  const latestChange = previous?.close
+    ? (Number(latest.close) - Number(previous.close)) / Number(previous.close) * 100
+    : null
+  const latestSummary = [
+    `${interval === '1h' ? '時線' : '日線'}圖最新資料 ${latest.date}`,
+    `開盤 ${Number(latest.open).toLocaleString()}`,
+    `最高 ${Number(latest.high).toLocaleString()}`,
+    `最低 ${Number(latest.low).toLocaleString()}`,
+    `收盤 ${Number(latest.close).toLocaleString()}`,
+    latestChange == null ? null : `相較前一根 ${latestChange >= 0 ? '上漲' : '下跌'} ${Math.abs(latestChange).toFixed(2)}%`,
+  ].filter(Boolean).join('；')
+
   return (
     <div className="chart-root" style={{ position: 'relative' }}>
             <div className="chart-toolbar">
         <span className="toolbar-lbl">圖層：</span>
-        <button className="matype-btn" onClick={() => setMaType(t => t === 'SMA' ? 'EMA' : 'SMA')} title="切換 簡單(SMA)/指數(EMA) 移動平均">均線:{maType}</button>
+        <button type="button" className="matype-btn" onClick={() => setMaType(t => t === 'SMA' ? 'EMA' : 'SMA')} title="切換 簡單(SMA)/指數(EMA) 移動平均" aria-label={`目前為 ${maType} 均線，按下切換均線類型`}>均線:{maType}</button>
         {mas.map((ma, i) => (
           <Toggle
             key={i} on={ma.on} color={ma.color}
@@ -445,26 +476,30 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
         <span className="osc-selector">
           <span className="osc-lbl">擺盪：</span>
           {OSC_LIST.map(o => (
-            <button key={o} className={`osc-tab ${osc === o ? 'active' : ''}`} onClick={() => setOsc(o)}>
+            <button type="button" key={o} className={`osc-tab ${osc === o ? 'active' : ''}`} onClick={() => setOsc(o)} aria-pressed={osc === o}>
               {o}{OSC_NAME[o] ? `(${OSC_NAME[o]})` : ''}
             </button>
           ))}
         </span>
       </div>
-      <div ref={containerRef} className="candlestick-wrap">
+      <div ref={containerRef} className="candlestick-wrap" role="img" tabIndex="0" aria-label={latestSummary}>
         {/* 懸停資訊框（subscribeCrosshairMove 直接寫入內容與座標） */}
         <div ref={tooltipRef} className="chart-tooltip" />
       </div>
+      <details className="chart-data-summary">
+        <summary>最新 K 棒文字資料</summary>
+        <p>{latestSummary}。圖中歷史數值可用日期範圍控制縮小後，再從資料 API 查閱。</p>
+      </details>
       {osc !== '無' && OSC_DETAIL[osc] && (
         <div className="osc-help">
           <div className="osc-help-row">
             <span><span className="osc-help-tag">怎麼看 {osc}</span>{OSC_DETAIL[osc].summary}</span>
-            <button className="osc-help-more" onClick={() => setOscDetail(v => !v)}>
+            <button type="button" className="osc-help-more" onClick={() => setOscDetail(v => !v)} aria-expanded={oscDetail} aria-controls={helpId}>
               {oscDetail ? '收合 ▲' : '看詳細 ▾'}
             </button>
           </div>
           {oscDetail && (
-            <div className="osc-help-detail">
+            <div id={helpId} className="osc-help-detail">
               {OSC_DETAIL[osc].sections.map(([label, text]) => (
                 <div key={label} className="osc-help-sec">
                   <span className="osc-help-sec-label">{label}</span>

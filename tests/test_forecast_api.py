@@ -16,6 +16,7 @@ from backend.routers import forecast as forecast_router
 from backend.services import app_db
 from src.forecasting import (
     MIN_READY_CONFIDENCE, MODEL_VERSION,
+    apply_freshness_guard,
     generate_forecast,
     model_metadata,
     resolve_forecast_outcome,
@@ -78,6 +79,20 @@ def test_forecast_api_contract_uses_only_completed_daily_bars(isolated_forecast_
     assert body["data_quality"]["observations"] == 300
     assert body["probabilities"]["up"] is None or 0 <= body["probabilities"]["up"] <= 1
     assert body["downside_risk"]["threshold_pct"] == -7.0
+    assert body["confidence"]["threshold"] == MIN_READY_CONFIDENCE
+    evidence = body["evidence"]
+    assert evidence["schema_version"] == 2
+    assert evidence["items"] == [*evidence["supporting"], *evidence["opposing"]]
+    assert evidence["for"] == [item["label"] for item in evidence["supporting"][:3]]
+    assert evidence["against"] == [item["label"] for item in evidence["opposing"][:4]]
+    for source_bucket in ("supporting", "opposing"):
+        for item in evidence[source_bucket]:
+            assert item["source_bucket"] == source_bucket
+            assert item["code"]
+            assert item["polarity"] in {"bullish", "bearish", "neutral"}
+            assert item["category"] in {
+                "directional", "risk", "release_gate", "observation", "notice", "evidence",
+            }
 
     # Same model + same as_of returns the immutable snapshot, not a rewrite.
     assert client.get("/api/forecast/TESTUSDT?horizon=5").json()["generated_at"] == body["generated_at"]
@@ -146,6 +161,8 @@ def test_forecast_abstains_for_insufficient_or_stale_data():
     assert short_result["status"] == "abstain"
     assert "樣本不足" in short_result["abstain_reason"]
     assert short_result["probabilities"]["up"] is None
+    assert short_result["evidence"]["opposing"][0]["code"] == "insufficient_observations"
+    assert short_result["evidence"]["opposing"][0]["source_bucket"] == "opposing"
 
     enough = _price_rows(300, start)
     stale_result = generate_forecast(
@@ -155,6 +172,46 @@ def test_forecast_abstains_for_insufficient_or_stale_data():
     assert stale_result["status"] == "abstain"
     assert stale_result["data_quality"]["stale"] is True
     assert "資料已過期" in stale_result["abstain_reason"]
+    assert "data_stale" in {
+        item["code"] for item in stale_result["evidence"]["opposing"]
+    }
+
+
+def test_freshness_guard_upgrades_legacy_evidence_without_text_reclassification():
+    snapshot = {
+        "status": "ready",
+        "recommendation": "research_watch_upside",
+        "as_of": "2026-01-01",
+        "data_quality": {"stale": False, "observations": 200},
+        "evidence": {
+            "for": ["legacy supporting text"],
+            "against": ["legacy opposing text"],
+        },
+    }
+
+    guarded = apply_freshness_guard(
+        snapshot,
+        now=datetime(2026, 1, 10, tzinfo=timezone.utc),
+    )
+
+    assert guarded["status"] == "abstain"
+    assert guarded["evidence"]["schema_version"] == 2
+    assert guarded["evidence"]["supporting"][0] == {
+        "code": "legacy_supporting_0",
+        "polarity": "neutral",
+        "source_bucket": "supporting",
+        "category": "evidence",
+        "status": "info",
+        "label": "legacy supporting text",
+        "detail": "",
+    }
+    assert guarded["evidence"]["opposing"][0]["code"] == "data_stale"
+    assert guarded["evidence"]["against"][0] == guarded["abstain_reason"]
+    # The immutable source object is not rewritten by the delivery guard.
+    assert snapshot["evidence"] == {
+        "for": ["legacy supporting text"],
+        "against": ["legacy opposing text"],
+    }
 
 
 def test_forecast_and_outcome_are_append_only(isolated_forecast_db):

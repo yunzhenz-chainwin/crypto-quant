@@ -6,6 +6,7 @@ scheduler.py — 背景排程任務
               （台灣 09:00 = UTC 01:00，日棒 UTC 00:00 收盤後才抓；舊版排 01:00 會固定慢一根）
   每小時 :06  run_hourly_pipeline() 抓 BTC/ETH 等主流幣 1h K 線（增量）→ 算指標 → 入庫
   每 30 分鐘  fetch_news_job()      從 RSS 抓取最新新聞並存入資料庫
+  每日 03:30  run_sqlite_backup()   以 SQLite online backup API 備份 WAL 資料庫
 
 使用 APScheduler 的 BackgroundScheduler，在 FastAPI 啟動時一起跑（非阻塞）
 """
@@ -15,6 +16,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.routers.sentiment import _fetch_and_save
+from backend.services import app_db as app_db_service, news_store
 from backend.services.app_db import (
     get_enabled_symbols, get_hourly_symbols, start_job, finish_job,
     ingest_market_data, backfill_daily_signals, fetch_fear_greed_history,
@@ -23,6 +25,7 @@ from backend.services.app_db import (
 )
 from backend.services.reader import load_prices
 from backend.services.forecast_scorecard import build_forecast_scorecard
+from backend.services.sqlite_backup import backup_sqlite_databases, prune_managed_backups
 from src.forecasting import (
     MODEL_VERSION, SUPPORTED_HORIZONS, generate_forecast,
     latest_completed_daily_date, model_metadata,
@@ -35,6 +38,56 @@ PYTHON = str(ROOT / ".venv" / "Scripts" / "python.exe")
 
 # 資料最多可落後幾天；超過視為抓取失敗（而非靜默沿用舊資料）
 MAX_DATA_LAG_DAYS = 2
+
+
+def _backup_directory() -> Path:
+    configured = os.getenv("SQLITE_BACKUP_DIR")
+    return Path(configured).expanduser() if configured else ROOT / "data" / "backups" / "sqlite"
+
+
+def _backup_retention_count() -> int:
+    try:
+        configured = int(os.getenv("SQLITE_BACKUP_KEEP", "14"))
+    except ValueError:
+        configured = 14
+    return max(1, min(configured, 365))
+
+
+def run_sqlite_backup():
+    """Back up WAL databases through SQLite's consistent online backup API."""
+    job_id = start_job("sqlite_backup")
+    try:
+        backup_root = _backup_directory()
+        results = backup_sqlite_databases(
+            {
+                "app": app_db_service.DB_PATH,
+                "news": news_store.DB_PATH,
+            },
+            backup_root,
+        )
+        removed = prune_managed_backups(
+            backup_root,
+            keep_per_database=_backup_retention_count(),
+        )
+        total_bytes = sum(int(item["size_bytes"]) for item in results)
+        finish_job(
+            job_id,
+            "success",
+            f"{len(results)} DB · {total_bytes} bytes · pruned {len(removed)}",
+        )
+        print(
+            f"[scheduler] sqlite backup done "
+            f"({len(results)} DB, {total_bytes} bytes, pruned {len(removed)})"
+        )
+        return {
+            "status": "success",
+            "backups": results,
+            "pruned": len(removed),
+        }
+    except Exception as exc:
+        finish_job(job_id, "failed", str(exc))
+        print(f"[scheduler] sqlite backup failed: {exc}")
+        return {"status": "failed", "error": str(exc)}
 
 
 def _run_step(name: str, args: list, env: dict):
@@ -374,5 +427,8 @@ def start_scheduler():
     scheduler.add_job(fetch_news_job, "interval", minutes=30,
                       id="news_fetch", replace_existing=True,
                       max_instances=1, coalesce=True)              # 每 30 分鐘
+    scheduler.add_job(run_sqlite_backup, "cron", hour=3, minute=30,
+                      id="sqlite_backup", replace_existing=True,
+                      max_instances=1, coalesce=True)              # 每日 03:30
     scheduler.start()
     return scheduler

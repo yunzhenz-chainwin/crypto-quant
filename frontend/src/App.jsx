@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import {
   fetchSymbols, fetchAllSignals, fetchOHLC, fetchStatus, fetchIntervals,
-  fetchIndicators, fetchBacktest, fetchFearGreed,   // fetchCorrelation 暫停（幣種相關性分析）
+  fetchIndicators, fetchBacktest, fetchFearGreed, fetchForecast,   // fetchCorrelation 暫停（幣種相關性分析）
 } from './api/client'
 import StatusBar        from './components/StatusBar'
 import CandlestickChart from './components/CandlestickChart'
@@ -18,12 +18,15 @@ import HeroSignal        from './components/HeroSignal'
 import IndicatorCards   from './components/IndicatorCards'
 import RecommendationCard from './components/RecommendationCard'
 import ForecastDecisionCard from './components/ForecastDecisionCard'
+import DecisionSummary from './components/DecisionSummary'
 // import MacroPanel    from './components/MacroPanel'   // 2026-07-07 先隱藏（價值待議；程式碼＋/api/macro 保留，未來或改「以 BTC 為主的相關性溫度計」版）
 import MarketSummary    from './components/MarketSummary'
 // import BotWidget     from './components/BotWidget'   // 2026-07-06 暫時下架：使用者確定為主管/老闆，聊天小幫手先隱藏（要恢復連同底部掛載一起取消註解）
 // import OnboardingTour   from './components/OnboardingTour' // 2026-07-06 暫停新手導覽
 import GlossaryModal    from './components/GlossaryModal'
 import useLivePrices    from './lib/useLivePrices'
+import { useDialogFocus } from './lib/useDialogFocus'
+import { normalizeForecast } from './lib/forecastViewModel'
 import { coinName, coinCat, catInfo, CATEGORIES } from './constants/coins'
 
 // 折疊面板動態載入（code splitting #29）：首屏不下載 recharts 等重依賴，
@@ -96,6 +99,9 @@ export default function App() {
   const [btParams, setBtParams] = useState({ stopLoss: -0.06, takeProfit: 0.20, feeRate: 0.001, slippage: 0.0005 })
   const [btLoading,   setBtLoading]   = useState(false)
   const [btError,     setBtError]     = useState(false)
+  const [forecastHorizon, setForecastHorizon] = useState(5)
+  const [forecastRetry, setForecastRetry] = useState(0)
+  const [forecastResult, setForecastResult] = useState({ key: '', data: null, error: null })
   // const [correlation, setCorrelation] = useState(null)                  // 2026-07-06 暫停幣種相關性分析
   const [dataVersion, setDataVersion] = useState('')        // 後端資料版本（變了=有新資料）
   // const [showCorrelation, setShowCorrelation] = useState(false)         // 2026-07-06 暫停幣種相關性分析
@@ -115,6 +121,14 @@ export default function App() {
   const [apiError, setApiError] = useState(false)   // API 失敗橫幅（輕量版 #22）
   const versionRef = useRef('')
   const backtestRequestRef = useRef(0)
+  const detailRequestRef = useRef(0)
+  const chartDialogRef = useRef(null)
+  const chartCloseRef = useRef(null)
+  const detailDialogRef = useRef(null)
+  const detailCloseRef = useRef(null)
+
+  useDialogFocus(chartDialogRef, () => setChartZoom(false), chartCloseRef, chartZoom)
+  useDialogFocus(detailDialogRef, () => setDetailView(null), detailCloseRef, Boolean(detailView))
 
   // 這顆幣有沒有時線資料（目前只開 BTC/ETH）
   const hasHourly = (intervals['1h'] ?? []).includes(active)
@@ -127,10 +141,11 @@ export default function App() {
     try {
       const [sigs, fg] = await Promise.all([
         fetchAllSignals(),
-        fetchFearGreed(1),
+        // Fear & Greed is auxiliary data; its outage must not fail the market view.
+        fetchFearGreed(1).catch(() => null),
       ])
       setSignals(sigs)
-      setFearGreed(fg?.[0] ?? null)
+      if (fg?.length) setFearGreed(fg[0])
       setLastUpdated(Date.now())
       setApiError(false)
     } catch {
@@ -141,6 +156,7 @@ export default function App() {
 
   // 載入詳細頁圖表資料。clear=false 用於背景自動更新：不清空舊圖、避免閃爍
   const loadDetail = useCallback(async (clear = true) => {
+    const requestId = ++detailRequestRef.current
     if (clear) { setOhlc([]); setIndicators([]) }
     const opts = interval === '1h'
       ? { days: hourDays, interval: '1h' }
@@ -152,9 +168,11 @@ export default function App() {
         fetchOHLC(active, opts),
         fetchIndicators(active, opts),
       ])
+      if (detailRequestRef.current !== requestId) return
       setOhlc(p); setIndicators(ind)
       setApiError(false)
     } catch {
+      if (detailRequestRef.current !== requestId) return
       setApiError(true)
     }
   }, [active, interval, days, hourDays, startDate, endDate, dateMode])
@@ -207,6 +225,7 @@ export default function App() {
   // 切換幣種 / 週期 / 天數 / 日期範圍 → 重新載入詳細頁資料
   useEffect(() => {
     loadDetail(true)
+    return () => { detailRequestRef.current += 1 }
   }, [loadDetail])
 
   // 回測與幣種、參數及資料版本有關；K 線買賣標記與回測面板共用同一份結果。
@@ -242,6 +261,35 @@ export default function App() {
     }
   }, [active, btParams, dataVersion])
 
+  // 研究預測由 App 統一取得與正規化。摘要卡與詳細卡共用同一個物件，
+  // 因此同一 symbol + horizon + dataVersion 只發出一筆請求。
+  const forecastRequestKey = `${active}:${forecastHorizon}:${dataVersion}:${forecastRetry}`
+  useEffect(() => {
+    if (!active) return undefined
+    const controller = new AbortController()
+    let alive = true
+
+    fetchForecast(active, forecastHorizon, { signal: controller.signal })
+      .then(payload => {
+        if (!alive) return
+        setForecastResult({
+          key: forecastRequestKey,
+          data: normalizeForecast(payload, forecastHorizon),
+          error: null,
+        })
+      })
+      .catch(error => {
+        if (alive && error?.name !== 'AbortError') {
+          setForecastResult({ key: forecastRequestKey, data: null, error })
+        }
+      })
+
+    return () => {
+      alive = false
+      controller.abort()
+    }
+  }, [active, dataVersion, forecastHorizon, forecastRequestKey, forecastRetry])
+
   // API 尚未回傳幣種清單時仍先提供 BTC，確保首頁選幣器有穩定值。
   const selectableSymbols = symbols.includes('BTCUSDT')
     ? symbols
@@ -251,14 +299,7 @@ export default function App() {
     : selectableSymbols.filter(symbol => coinCat(symbol) === coinCategory)
   const categoryCount = (category) => selectableSymbols.filter(symbol => coinCat(symbol) === category).length
 
-  // 任一彈窗（放大圖 / 詳細資訊）開啟時：Esc 關閉
-  useEffect(() => {
-    if (!chartZoom && !detailView) return
-    const onKey = (e) => { if (e.key === 'Escape') { setChartZoom(false); setDetailView(null) } }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [chartZoom, detailView])
-
+  // 切幣時同步清掉上一個幣的實驗室交易，避免舊標記殘留。
   const handleSelectCoin = (symbol) => {
     setActive(symbol)
     setLabTrades(null)
@@ -274,6 +315,11 @@ export default function App() {
   }
 
   const activeSignal = signals.find(s => s.symbol === active)
+  const currentForecast = forecastResult.key === forecastRequestKey ? forecastResult : null
+  const forecast = currentForecast?.data ?? null
+  const forecastLoading = Boolean(active) && currentForecast == null
+  const forecastError = currentForecast?.error ?? null
+  const retryForecast = () => setForecastRetry(value => value + 1)
   const rangeOptions = interval === '1h' ? HOUR_OPTIONS : DAY_OPTIONS
   const panelOn = (key) => panelPrefs[key] !== false                       // 預設開，明確設 false 才隱藏
   const togglePanel = (key) => setPanelPrefs(p => ({ ...p, [key]: !(p[key] !== false) }))
@@ -305,7 +351,7 @@ export default function App() {
 
       {/* ── API 失敗橫幅（取代永遠的「載入中…」）───────────────────────── */}
       {apiError && (
-        <div className="api-error-banner">
+        <div className="api-error-banner" role="alert">
           注意：資料載入失敗（網路或伺服器暫時無回應）
           <button onClick={() => { refreshMarket(true); loadDetail(true) }}>
             重試
@@ -378,7 +424,27 @@ export default function App() {
 
             <HeroSignal signal={activeSignal} symbol={active} live={livePrices[active]} slim />
 
-            <ForecastDecisionCard symbol={active} refreshKey={dataVersion} />
+            <DecisionSummary
+              signal={activeSignal}
+              backtest={backtest}
+              backtestStatus={btLoading ? 'loading' : btError ? 'error' : backtest ? 'ready' : 'idle'}
+              horizon={forecastHorizon}
+              onHorizonChange={setForecastHorizon}
+              forecast={forecast}
+              loading={forecastLoading}
+              error={forecastError}
+              onRetry={retryForecast}
+            />
+
+            <ForecastDecisionCard
+              symbol={active}
+              horizon={forecastHorizon}
+              onHorizonChange={setForecastHorizon}
+              forecast={forecast}
+              loading={forecastLoading}
+              error={forecastError}
+              onRetry={retryForecast}
+            />
 
             {/* 儀表板主區：左＝蠟燭圖（縮小、點🔍放大看大圖），右＝分數＋指標即時解讀 */}
             <div className="detail-main">
@@ -521,11 +587,11 @@ export default function App() {
             {/* 市場情緒 / 新聞：依需求移到最後面 */}
             {panelOn('sentiment') && (
             <section className="collapsible-section">
-              <button className="collapse-toggle" onClick={() => setShowSentiment(v => !v)}>
+              <button type="button" className="collapse-toggle" onClick={() => setShowSentiment(v => !v)} aria-expanded={showSentiment} aria-controls="sentiment-panel-content">
                 <span>市場情緒 / 新聞</span>
-                <span className="collapse-arrow">{showSentiment ? '▲' : '▼'}</span>
+                <span className="collapse-arrow" aria-hidden="true">{showSentiment ? '▲' : '▼'}</span>
               </button>
-              {showSentiment && <Suspense fallback={panelFallback}><SentimentPanel symbol={active} /></Suspense>}
+              {showSentiment && <div id="sentiment-panel-content"><Suspense fallback={panelFallback}><SentimentPanel symbol={active} /></Suspense></div>}
             </section>
             )}
 
@@ -548,10 +614,10 @@ export default function App() {
             {/* 蠟燭圖「放大」全螢幕彈窗（點背景 / ✕ / Esc 關閉；用完整尺寸非 compact） */}
             {chartZoom && (
               <div className="chart-modal-backdrop" onClick={() => setChartZoom(false)}>
-                <div className="chart-modal" onClick={e => e.stopPropagation()}>
+                <div ref={chartDialogRef} className="chart-modal" role="dialog" aria-modal="true" aria-labelledby="chart-dialog-title" tabIndex="-1" onClick={e => e.stopPropagation()}>
                   <div className="chart-modal-bar">
-                    <span className="chart-modal-title">{coinName(active)} 蠟燭圖</span>
-                    <button className="chart-modal-close" onClick={() => setChartZoom(false)} aria-label="關閉放大">✕</button>
+                    <h2 id="chart-dialog-title" className="chart-modal-title">{coinName(active)} 蠟燭圖</h2>
+                    <button ref={chartCloseRef} className="chart-modal-close" onClick={() => setChartZoom(false)} aria-label="關閉放大">✕</button>
                   </div>
                   <CandlestickChart
                     prices={ohlc}
@@ -566,12 +632,12 @@ export default function App() {
             {/* 「詳細資訊」彈窗：點右欄哪一塊就顯示對應詳細（計分明細 / 指標詳解 / 回測驗證）*/}
             {detailView && (
               <div className="chart-modal-backdrop" onClick={() => setDetailView(null)}>
-                <div className="detail-modal" onClick={e => e.stopPropagation()}>
+                <div ref={detailDialogRef} className="detail-modal" role="dialog" aria-modal="true" aria-labelledby="detail-dialog-title" tabIndex="-1" onClick={e => e.stopPropagation()}>
                   <div className="chart-modal-bar">
-                    <span className="chart-modal-title">
+                    <h2 id="detail-dialog-title" className="chart-modal-title">
                       {coinName(active)}｜{{ all: '計分明細 · 回測驗證', score: '計分明細與進出場規則', indicators: '指標詳解', backtest: '回測驗證明細' }[detailView]}
-                    </span>
-                    <button className="chart-modal-close" onClick={() => setDetailView(null)} aria-label="關閉詳細">✕</button>
+                    </h2>
+                    <button ref={detailCloseRef} className="chart-modal-close" onClick={() => setDetailView(null)} aria-label="關閉詳細">✕</button>
                   </div>
                   <Suspense fallback={detailFallback}>
                     <StrategyPanel

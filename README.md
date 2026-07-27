@@ -48,21 +48,23 @@
 ```powershell
 # 後端 + 前端一起（開發模式）
 cd frontend
-npm run start          # = uvicorn(8000, --reload) + vite(5173)
+npm run start          # 本機開發：uvicorn(8001, --reload) + vite(5174)
 
-# 或分開跑
+# 或分開跑（僅限 loopback 本機開發；fallback 帳密必須明確 opt-in）
 cd ..
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+$env:CRYPTO_QUANT_MODE='development'; $env:CRYPTO_QUANT_BIND_HOST='127.0.0.1'; $env:ALLOW_INSECURE_ADMIN_DEFAULTS='1'
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8001
 cd frontend && npm run ui
 
-# 正式：build 後由 FastAPI 直接服務（單一 8000 埠）
+# 正式：build 後由 FastAPI 直接服務（10.201.7.12:8000）
 cd frontend && npm run build
 ```
 
-- 前台：`http://localhost:8000`（或 vite 開發埠 5173）
-- 後台：`/admin`，帳密來自環境變數 `ADMIN_USER` / `ADMIN_PASS`；正式/排程啟動應由 `secrets.local.cmd` 注入 `ADMIN_PASS` 與 `ADMIN_SECRET`（該檔已 gitignore）。若未載入，程式會回到預設值並印安全警告。
+- 正式前台：`http://10.201.7.12:8000`；後台：`http://10.201.7.12:8000/admin`
+- 本機開發：前端 `http://localhost:5174`，API `http://localhost:8001`
+- 後台：`/admin`，帳密來自環境變數 `ADMIN_USER` / `ADMIN_PASS`；正式/排程啟動由 `secrets.local.cmd` 注入 `ADMIN_PASS` 與 `ADMIN_SECRET`（該檔已 gitignore）。正式/對外模式若簽章密鑰仍是預設值、密鑰少於 32 字元或一般密碼少於 12 字元會拒絕啟動；因既有使用者決策而明確設定的 legacy `admin123` 暫保留相容但會高風險警告，且登入連續失敗 5 次鎖定 15 分鐘。fallback 只允許明確宣告 `CRYPTO_QUANT_BIND_HOST=127.0.0.1` 的 loopback 開發，並須設定 `ALLOW_INSECURE_ADMIN_DEFAULTS=1`。
 - GPT 金鑰：後台「AI 設定」頁填入，或環境變數 `OPENAI_API_KEY`（優先）；不填則 AI 只用規則引擎
-- 對外公開（選用）：可將 Cloudflare Quick Tunnel 指向 8000；啟用前必須先更換預設後台密碼與簽章密鑰（每次重啟 tunnel 網址會變；根治方案見待辦 #64）
+- 對外公開（選用）：可將 Cloudflare Quick Tunnel 指向 `10.201.7.12:8000`；啟用前必須先更換預設後台密碼與簽章密鑰。named tunnel、Cloudflare Access/WAF 仍需外部網域與帳號權限，尚未由本 repo 自動完成。
 - **正式部署（開機自啟/看門狗/服務化）詳見 [`docs/archive/部署與運維.md`](docs/archive/部署與運維.md)。**
 
 > ⚠️ Windows 上 `.venv\Scripts\python.exe` 是啟動器殼，工作管理員會看到
@@ -182,6 +184,8 @@ reports/ indicators_*.csv backtest_*（json/csv；圖 png 不追蹤）
 **data/news.db**：`news`（url 唯一、標題、來源、情緒、分類、`coins` 幣種標記）、
 `news_sentiment_daily`（每日×每幣情緒分數 -100~+100）。
 
+兩個 WAL 資料庫每日以 SQLite online backup API 產生一致快照至 `data/backups/sqlite/`；先在同目錄暫存、執行 `PRAGMA quick_check`，成功後才原子發布，預設每個 DB 保留 14 份（`SQLITE_BACKUP_DIR` / `SQLITE_BACKUP_KEEP` 可覆蓋）。
+
 > 目前啟用清單為 15 幣且包含 `POLUSDT`；`MATICUSDT` 相關 `data/clean` / `reports` 檔案是歷史殘留，不屬目前前台啟用清單。
 
 ## 6. 排程一覽（scheduler.py，隨 FastAPI 啟動）
@@ -191,6 +195,7 @@ reports/ indicators_*.csv backtest_*（json/csv；圖 png 不追蹤）
 | 每日 09:00（台灣，=UTC 01:00） | daily_pipeline | 抓各啟用幣日線→算指標→入庫 `prices`/`indicators`→重算 `daily_signal`→重產回測報表並入庫→新鮮度檢查→封存 1/5/10 日研究預測與成熟 outcome→恐懼貪婪→幣種級新聞+情緒彙總→清理 |
 | 每小時 :06 | hourly_pipeline | BTC/ETH 1h 增量抓取→指標→入庫（幣種清單在 `app_config.hourly_symbols`） |
 | 每 30 分 | news_fetch | 9 家 RSS + Google News 中文 → 詞庫標註 → 去重入庫 → 滾動更新今日情緒彙總 |
+| 每日 03:30 | sqlite_backup | 以 SQLite online backup API 備份 `app.db` / `news.db`，驗證完整性後原子發布並輪替 |
 
 **▸ 圖：每日 pipeline 步驟與失敗防線**（線上 README 可見渲染圖）
 
@@ -266,8 +271,30 @@ flowchart TD
 - 設定集中：幣種清單、時線幣種、AI 金鑰等都在 `app_config`，別寫死在程式裡。
 - 資料正確性鐵律：只存**已收盤** K 棒；訊號計分只改 `src/scoring.py`（改完要重跑回測與 verify）；回測**不前視**。
 - 版控：單人 repo，直接 commit＋push `main`；只提交當次工作的檔，**別把排程器改的 `data/`、`reports/` 一起提交**。
-- 安全（對外前必做）：改掉 `ADMIN_PASS`/`ADMIN_SECRET` 預設值；其餘強化見任務 #70。
+- 安全：對外 launcher 明確標記 external mode，預設 `ADMIN_PASS`/`ADMIN_SECRET` 會 fail closed；HTTP 安全標頭、敏感端點 per-IP quota 與 WAL-safe SQLite 備份已在 repo 落地。Cloudflare named tunnel / Access / WAF 仍需外部權限，保留待辦。
 - 未來方向與待辦：見 **§12 未來規劃**與後台「工作項目」（`tasks` 表為進度真相）。
+
+### Runtime 產物版控防線
+
+下列檔案是排程、回測或研究重跑的可重建輸出，不是 feature commit 的來源碼：
+
+| 路徑 | 內容 | 政策 |
+|---|---|---|
+| `data/clean/*` | 已清理 OHLCV 快照 | runtime generated，不提交 |
+| `reports/*.csv` | 指標與交易明細 | runtime generated，不提交 |
+| `reports/*.json` | 回測 metrics、forecast replay／research | runtime generated，不提交 |
+| `reports/*.png` | 圖表 | runtime generated，不提交 |
+| `reports/validation_*.txt`、`reports/crosscheck_*.txt` | 驗證輸出 | 可重跑，不提交 |
+
+應追蹤的例外是可審閱的來源與規格：人工維護文件放 `docs/`（`reports/*.md` 亦可）、程式與重跑腳本放 `src/`／`scripts/`、固定且最小化的測試樣本放 `tests/fixtures/`。若確實需要保存某個市場資料或模型基準，應使用獨立、明確標示資料 vintage／hash 的 snapshot commit，不與功能修改混合。
+
+每次 feature commit 前執行以下只讀檢查；發現產物時會列出全部路徑並以 exit code `1` 阻擋，Git 讀取失敗則回傳 `2`：
+
+```powershell
+python scripts/check_staged_runtime_artifacts.py
+```
+
+檢查程式只讀取 Git index，**不會**自行 unstage、刪除、`git rm --cached` 或改寫任何資料。`.gitignore` 只會防止新的未追蹤產物被加入；目前已在 Git 歷史中的 runtime 檔仍會繼續顯示修改，是否一次性停止追蹤必須另行審閱與決定。
 
 ## 11. 各腳本手動執行
 
@@ -314,7 +341,7 @@ flowchart LR
 
 **C. 基礎設施與營運**
 - named tunnel 固定對外網址（根治「tunnel 重啟就換網址」）+ 服務化收尾。
-- 安全強化：登入失敗鎖定、per-IP 限流、寫入端點驗證、夜間 DB 備份、Cloudflare Access 保護 `/admin`。
+- 安全強化：登入失敗鎖定、per-IP 限流、寫入端點驗證與每日 SQLite online backup 已完成；尚待 legacy 密碼輪替、多進程共享防線，以及 Cloudflare Access／named tunnel（#165～#168）。
 - 使用分析：`access_log` middleware 已記錄 API 路徑/幣種/耗時；待補後台圖表化（造訪量 / 熱門幣 / API 狀況）。
 
 **D. AI / 內容深化**

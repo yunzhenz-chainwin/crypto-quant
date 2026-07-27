@@ -5,32 +5,50 @@
  * 用白話呈現:用獨立演算法重算、逐點比對、各幣是否一致;
  * 不丟 1e-15 那種數字,而是說明「差異小到等於完全相同」。
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { fetchVerify } from '../api/client'
+import { useDialogFocus } from '../lib/useDialogFocus'
 
 export default function VerifyModal({ onClose }) {
   const [d, setD]     = useState(null)
   const [err, setErr] = useState(false)
+  const dialogRef = useRef(null)
+  const closeRef = useRef(null)
+
+  useDialogFocus(dialogRef, onClose, closeRef)
 
   useEffect(() => {
-    fetchVerify().then(setD).catch(() => setErr(true))
+    const controller = new AbortController()
+    fetchVerify({ signal: controller.signal }).then(setD).catch(error => {
+      if (error?.name !== 'AbortError') setErr(true)
+    })
+    return () => controller.abort()
   }, [])
 
   return (
     <div className="vm-overlay" onClick={onClose}>
-      <div className="vm" onClick={e => e.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        className="vm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="verify-dialog-title"
+        aria-describedby="verify-dialog-description"
+        tabIndex="-1"
+        onClick={e => e.stopPropagation()}
+      >
         <div className="vm-head">
-          <span className="vm-title">指標交叉驗證</span>
-          <button className="vm-x" onClick={onClose}>✕</button>
+          <h2 id="verify-dialog-title" className="vm-title">指標交叉驗證</h2>
+          <button ref={closeRef} className="vm-x" onClick={onClose} aria-label="關閉指標交叉驗證">✕</button>
         </div>
 
-        <p className="vm-intro">
+        <p id="verify-dialog-description" className="vm-intro">
           我們用<b>另一套獨立演算法</b>重新計算所有技術指標,再跟系統顯示的數值
           <b>逐點比對</b>,確認指標<b>算得正確</b>。
         </p>
 
-        {!d && !err && <div className="vm-loading">驗證中…</div>}
-        {err && <div className="vm-err">讀取失敗,請稍後再試。</div>}
+        {!d && !err && <div className="vm-loading" role="status">驗證中…</div>}
+        {err && <div className="vm-err" role="alert">讀取失敗,請稍後再試。</div>}
 
         {d && (
           <>

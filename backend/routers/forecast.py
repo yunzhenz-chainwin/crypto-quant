@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from backend.routers.admin import require_admin
 from backend.services import app_db
 from backend.services.forecast_scorecard import build_forecast_scorecard
+from backend.services.rate_limiter import RATE_LIMITER, enforce_rate_limit
 from backend.services.reader import available_symbols, load_prices
 from src.forecasting import (
     MODEL_VERSION,
@@ -21,6 +22,7 @@ router = APIRouter()
 
 @router.get("/forecast/scorecard")
 def get_forecast_scorecard(
+    request: Request,
     horizon: int | None = Query(
         default=None,
         description="Optional scorecard horizon: 1, 5, or 10 days",
@@ -40,6 +42,13 @@ def get_forecast_scorecard(
     _admin: str = Depends(require_admin),
 ):
     """Evaluate the immutable forecast/outcome ledger without inventing data."""
+    enforce_rate_limit(
+        request,
+        scope="forecast_scorecard",
+        limit=12,
+        window_seconds=60,
+        limiter=RATE_LIMITER,
+    )
     if horizon is not None and horizon not in (1, 5, 10):
         raise HTTPException(status_code=422, detail="horizon must be 1, 5, or 10")
     try:
@@ -56,10 +65,18 @@ def get_forecast_scorecard(
 
 @router.get("/forecast/{symbol}")
 def get_forecast(
+    request: Request,
     symbol: str,
     horizon: int = Query(default=5, description="Research forecast horizon: 1, 5, or 10 days"),
 ):
     """Return an immutable, explicitly research-only forecast snapshot."""
+    enforce_rate_limit(
+        request,
+        scope="forecast_snapshot",
+        limit=30,
+        window_seconds=60,
+        limiter=RATE_LIMITER,
+    )
     symbol = symbol.upper()
     if horizon not in (1, 5, 10):
         raise HTTPException(status_code=422, detail="horizon 僅支援 1、5、10 日")

@@ -1,96 +1,10 @@
-import { useEffect, useState } from 'react'
-import { fetchForecast } from '../api/client'
-
-const HORIZONS = [1, 5, 10]
-
-const REGIME_LABELS = {
-  bull: '偏多趨勢',
-  bear: '偏空趨勢',
-  sideways: '區間盤整',
-  neutral: '方向中性',
-  unknown: '狀態未明',
-}
-
-const RECOMMENDATION_LABELS = {
-  research_watch_upside: '研究模型偏多',
-  research_watch_downside: '研究模型偏空',
-  wait: '等待更多證據',
-}
-
-function numberOrNull(value) {
-  if (value == null || value === '') return null
-  const number = Number(value)
-  return Number.isFinite(number) ? number : null
-}
-
-function probabilityPct(value) {
-  const number = numberOrNull(value)
-  if (number == null) return null
-  return Math.abs(number) <= 1 ? number * 100 : number
-}
-
-function flatQuantile(raw, key) {
-  const explicitPct = numberOrNull(raw?.[`${key}_pct`])
-  if (explicitPct != null) return explicitPct
-  const value = numberOrNull(raw?.[key])
-  if (value == null) return null
-  return raw?.return_unit === 'pct' || raw?.quantile_unit === 'pct'
-    ? value
-    : (Math.abs(value) <= 1 ? value * 100 : value)
-}
-
-function normalizeEvidence(items) {
-  if (!Array.isArray(items)) return []
-  return items.map((item, index) => {
-    if (typeof item === 'string') return { id: `${index}-${item}`, label: item, detail: '' }
-    const label = item?.label ?? item?.title ?? item?.feature ?? item?.name ?? '模型證據'
-    const detail = item?.detail ?? item?.reason ?? item?.description ?? item?.value ?? ''
-    return { id: item?.id ?? `${index}-${label}`, label: String(label), detail: String(detail) }
-  })
-}
-
-function normalizeForecast(payload, requestedHorizon) {
-  const raw = payload?.forecast ?? payload ?? {}
-  const probabilities = raw.probabilities ?? {}
-  const quantiles = raw.return_quantiles_pct ?? raw.return_quantiles ?? {}
-  const downside = raw.downside_risk ?? {}
-  const evidence = raw.evidence ?? {}
-  const quality = raw.data_quality ?? {}
-  const confidenceObject = typeof raw.confidence === 'object' && raw.confidence !== null
-    ? raw.confidence
-    : {}
-  const confidenceScore = numberOrNull(
-    confidenceObject.score ?? raw.confidence_score ?? (
-      typeof raw.confidence === 'number' ? raw.confidence : null
-    ),
-  )
-
-  return {
-    symbol: raw.symbol,
-    horizon: numberOrNull(raw.horizon_days ?? raw.horizon) ?? requestedHorizon,
-    status: String(raw.status ?? 'unknown').toLowerCase(),
-    research: raw.research !== false,
-    asOf: raw.as_of ?? raw.data_as_of ?? null,
-    generatedAt: raw.generated_at ?? null,
-    modelVersion: raw.model_version ?? '—',
-    regime: String(raw.regime ?? 'unknown').toLowerCase(),
-    confidenceScore,
-    confidenceLevel: String(confidenceObject.level ?? raw.confidence_level ?? '').toLowerCase(),
-    recommendation: raw.recommendation ?? null,
-    abstainReason: raw.abstain_reason ?? null,
-    pUp: probabilityPct(probabilities.up ?? raw.p_up),
-    pDown: probabilityPct(probabilities.down ?? raw.p_down),
-    q10: numberOrNull(quantiles.q10) ?? flatQuantile(raw, 'q10'),
-    q50: numberOrNull(quantiles.q50) ?? flatQuantile(raw, 'q50'),
-    q90: numberOrNull(quantiles.q90) ?? flatQuantile(raw, 'q90'),
-    downsideThreshold: numberOrNull(downside.threshold_pct ?? raw.downside_threshold_pct),
-    downsideProbability: probabilityPct(downside.probability ?? raw.downside_risk_probability ?? raw.drawdown_probability),
-    supports: normalizeEvidence(evidence.for ?? evidence.supporting ?? raw.supporting_evidence),
-    concerns: normalizeEvidence(evidence.against ?? evidence.opposing ?? raw.opposing_evidence),
-    stale: Boolean(quality.stale ?? raw.stale),
-    observations: numberOrNull(quality.observations ?? raw.observations),
-  }
-}
+import { useId, useState } from 'react'
+import {
+  FORECAST_HORIZONS,
+  REGIME_LABELS,
+  stateOfForecast,
+  uniqueEvidence,
+} from '../lib/forecastViewModel'
 
 function pct(value, { signed = false } = {}) {
   if (value == null) return '—'
@@ -101,7 +15,6 @@ function pct(value, { signed = false } = {}) {
 function formatTime(value) {
   if (!value) return '—'
   // A daily candle's as_of value is a calendar date, not midnight UTC.
-  // Rendering it through Date would misleadingly display 08:00 in Taiwan.
   if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return String(value).replaceAll('-', '/')
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
@@ -116,29 +29,17 @@ function formatTime(value) {
   }).format(date)
 }
 
-function stateOf(forecast) {
-  if (forecast.stale) {
-    return { kind: 'stale', title: '資料已過期，暫停解讀', note: '等待資料更新後重新產生預測。' }
-  }
-  if (forecast.status === 'insufficient' || forecast.status === 'insufficient_data') {
-    return { kind: 'insufficient', title: '資料不足，無法形成預測', note: forecast.abstainReason || '累積足夠樣本後會自動重試。' }
-  }
-  if (forecast.status !== 'ready' || forecast.abstainReason) {
-    return { kind: 'abstain', title: '模型選擇不判斷', note: forecast.abstainReason || '目前證據不足或模型分歧過大。' }
-  }
-  return { kind: 'ready', title: RECOMMENDATION_LABELS[forecast.recommendation] || '研究預測已產生', note: '請搭配反對證據與風險區間判讀。' }
-}
-
 function StateMessage({ kind, title, note }) {
   return (
-    <div className={`forecast-state forecast-state-${kind}`} role="status">
+    <div className={`forecast-state forecast-state-${kind}${kind === 'abstain' ? ' forecast-state-neutral' : ''}`} role="status">
       <strong>{title}</strong>
       <span>{note}</span>
     </div>
   )
 }
 
-function EvidenceList({ title, tone, items }) {
+function EvidenceList({ title, tone, items, emptyMessage = '目前沒有相關資訊。' }) {
+  const statusLabels = { passed: '通過', failed: '未通過', warning: '注意', info: '資訊' }
   return (
     <div className={`forecast-evidence forecast-evidence-${tone}`}>
       <h4>{title}</h4>
@@ -147,48 +48,134 @@ function EvidenceList({ title, tone, items }) {
           {items.map(item => (
             <li key={item.id}>
               <span>{item.label}</span>
-              {item.detail && <small>{item.detail}</small>}
+              {(item.status || item.detail) && (
+                <small className={item.status ? `forecast-evidence-status forecast-evidence-status-${item.status}` : ''}>
+                  {item.status && statusLabels[item.status]}
+                  {item.status && item.detail && ' · '}
+                  {item.detail}
+                </small>
+              )}
             </li>
           ))}
         </ul>
-      ) : <p>目前沒有足夠證據。</p>}
+      ) : <p>{emptyMessage}</p>}
     </div>
   )
 }
 
-export default function ForecastDecisionCard({ symbol, refreshKey = '' }) {
-  const [horizon, setHorizon] = useState(5)
-  const [retry, setRetry] = useState(0)
-  const [result, setResult] = useState({ key: '', data: null, error: null })
-  const requestKey = `${symbol}:${horizon}:${refreshKey}:${retry}`
+function DirectionMetrics({ forecast }) {
+  return (
+    <div className="forecast-metrics forecast-direction-metrics" aria-label={`${forecast.horizon} 日類似歷史情境比例`}>
+      <div className="forecast-metric forecast-metric-up">
+        <span>類似情境上漲比例</span>
+        <strong>{pct(forecast.pUp)}</strong>
+      </div>
+      <div className="forecast-metric forecast-metric-down">
+        <span>類似情境下跌比例</span>
+        <strong>{pct(forecast.pDown)}</strong>
+      </div>
+    </div>
+  )
+}
 
-  useEffect(() => {
-    if (!symbol) return undefined
-    const controller = new AbortController()
-    let active = true
+function DownsideRiskMetric({ forecast }) {
+  return (
+    <div className="forecast-metric forecast-risk-summary">
+      <span>下行風險</span>
+      <strong>{pct(forecast.downsideProbability)}</strong>
+      <small>{forecast.downsideThreshold == null ? '門檻未提供' : `歷史報酬 ≤ ${pct(forecast.downsideThreshold)}`}</small>
+    </div>
+  )
+}
 
-    fetchForecast(symbol, horizon, { signal: controller.signal })
-      .then(data => {
-        if (active) setResult({ key: requestKey, data, error: null })
-      })
-      .catch(error => {
-        if (active && error?.name !== 'AbortError') {
-          setResult({ key: requestKey, data: null, error })
-        }
-      })
+function EvidenceAdequacyMetric({ forecast }) {
+  return (
+    <div className="forecast-metric forecast-evidence-adequacy">
+      <span>證據充分度</span>
+      <strong>{forecast.confidenceScore == null ? '—' : `${forecast.confidenceScore.toFixed(0)} 分`}</strong>
+      <small>研究發布門檻 {forecast.confidenceThreshold.toFixed(0)} 分</small>
+    </div>
+  )
+}
 
-    return () => {
-      active = false
-      controller.abort()
-    }
-  }, [symbol, horizon, refreshKey, retry, requestKey])
+function ForecastRange({ forecast }) {
+  return (
+    <div className="forecast-range" aria-label="類似歷史情境報酬分位數">
+      <div className="forecast-range-head">
+        <h3>{forecast.horizon} 日歷史報酬分位數</h3>
+        <span>{REGIME_LABELS[forecast.regime] ?? forecast.regime}</span>
+      </div>
+      <div className="forecast-range-values">
+        <div><span>較低 q10</span><strong>{pct(forecast.q10, { signed: true })}</strong></div>
+        <div><span>中位 q50</span><strong>{pct(forecast.q50, { signed: true })}</strong></div>
+        <div><span>較高 q90</span><strong>{pct(forecast.q90, { signed: true })}</strong></div>
+      </div>
+    </div>
+  )
+}
 
-  const current = result.key === requestKey ? result : null
-  const forecast = current?.data ? normalizeForecast(current.data, horizon) : null
-  const forecastState = forecast ? stateOf(forecast) : null
-  const confidenceLabel = forecast?.confidenceLevel
-    ? ({ low: '低', medium: '中', high: '高' }[forecast.confidenceLevel] ?? forecast.confidenceLevel)
-    : null
+function EvidenceGroups({ forecast, includeGates = true }) {
+  const facts = uniqueEvidence([
+    {
+      id: 'market-regime',
+      code: 'market_regime',
+      label: '目前市場狀態',
+      detail: REGIME_LABELS[forecast.regime] ?? forecast.regime,
+      status: '',
+      polarity: 'neutral',
+      sourceBucket: 'supporting',
+      category: 'observation',
+    },
+    ...forecast.facts,
+  ])
+  const nonScoreGates = forecast.releaseGates.filter(
+    item => item.code !== 'confidence_release_threshold',
+  )
+
+  return (
+    <div className="forecast-evidence-grid forecast-evidence-categories">
+      <EvidenceList title="觀察事實" tone="facts" items={facts} emptyMessage="未提供其他觀察事實。" />
+      <EvidenceList title="支持證據" tone="bullish" items={forecast.supportingEvidence} emptyMessage="目前沒有額外支持證據。" />
+      <EvidenceList title="反對與風險證據" tone="risk" items={forecast.opposingEvidence} emptyMessage="目前沒有額外反對或風險證據。" />
+      {includeGates && (
+        <EvidenceList title="發布門檻檢查" tone="gates" items={nonScoreGates} emptyMessage="目前沒有其他未通過的發布門檻。" />
+      )}
+    </div>
+  )
+}
+
+function handleTabKeyDown(event) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  const tabs = Array.from(event.currentTarget.parentElement?.querySelectorAll('[role="tab"]') ?? [])
+  if (!tabs.length) return
+  const currentIndex = tabs.indexOf(event.currentTarget)
+  let nextIndex = currentIndex
+  if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+  if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
+  if (event.key === 'Home') nextIndex = 0
+  if (event.key === 'End') nextIndex = tabs.length - 1
+  event.preventDefault()
+  tabs[nextIndex]?.focus()
+  tabs[nextIndex]?.click()
+}
+
+export default function ForecastDecisionCard({
+  symbol,
+  horizon,
+  onHorizonChange,
+  forecast,
+  loading,
+  error,
+  onRetry,
+}) {
+  const instanceId = useId()
+  const [expandedResearchKey, setExpandedResearchKey] = useState('')
+  const tabPanelId = `${instanceId}-forecast-panel`
+  const activeTabId = `${instanceId}-forecast-tab-${horizon}`
+  const researchKey = `${symbol}:${horizon}:${forecast?.dataVersion ?? 'pending'}`
+  const researchDetailsId = `${instanceId}-forecast-research-${horizon}`
+  const forecastState = forecast ? stateOfForecast(forecast) : null
+  const researchExpanded = expandedResearchKey === researchKey
 
   return (
     <section className="forecast-card" aria-labelledby="forecast-card-title">
@@ -198,17 +185,21 @@ export default function ForecastDecisionCard({ symbol, refreshKey = '' }) {
             <h2 id="forecast-card-title">未來情境預測</h2>
             <span className="forecast-research-badge">研究模式 · 非交易建議</span>
           </div>
-          <p>以封存資料估計方向機率與可能區間；沒有足夠優勢時，模型會拒絕判斷。</p>
+          <p>以封存資料呈現類似歷史情境比例與可能區間；未通過發布門檻時不形成方向判斷。</p>
         </div>
         <div className="forecast-tabs" role="tablist" aria-label="預測期限">
-          {HORIZONS.map(days => (
+          {FORECAST_HORIZONS.map(days => (
             <button
               key={days}
               type="button"
               role="tab"
+              id={`${instanceId}-forecast-tab-${days}`}
               aria-selected={horizon === days}
+              aria-controls={tabPanelId}
+              tabIndex={horizon === days ? 0 : -1}
               className={horizon === days ? 'active' : ''}
-              onClick={() => setHorizon(days)}
+              onClick={() => onHorizonChange(days)}
+              onKeyDown={handleTabKeyDown}
             >
               {days} 日
             </button>
@@ -216,73 +207,79 @@ export default function ForecastDecisionCard({ symbol, refreshKey = '' }) {
         </div>
       </header>
 
-      {!current && (
-        <div className="forecast-loading" role="status" aria-live="polite">
-          <span className="forecast-spinner" aria-hidden="true" />
-          正在載入 {horizon} 日研究預測…
-        </div>
-      )}
-
-      {current?.error && (
-        <div className="forecast-error" role="alert">
-          <div>
-            <strong>預測服務暫時無法取得</strong>
-            <span>其他市場資料仍可查看；此區不會沿用上一筆結果。</span>
+      <div id={tabPanelId} role="tabpanel" aria-labelledby={activeTabId} className="forecast-tabpanel">
+        {loading && (
+          <div className="forecast-loading" role="status" aria-live="polite">
+            <span className="forecast-spinner" aria-hidden="true" />
+            正在載入 {horizon} 日研究預測…
           </div>
-          <button type="button" onClick={() => setRetry(value => value + 1)}>重新載入</button>
-        </div>
-      )}
+        )}
 
-      {forecast && forecastState && (
-        <div className="forecast-content">
-          <StateMessage {...forecastState} />
-
-          <div className="forecast-metrics" aria-label={`${forecast.horizon} 日預測數據`}>
-            <div className="forecast-metric forecast-metric-up">
-              <span>上漲機率</span>
-              <strong>{pct(forecast.pUp)}</strong>
+        {error && (
+          <div className="forecast-error" role="alert">
+            <div>
+              <strong>預測服務暫時無法取得</strong>
+              <span>其他市場資料仍可查看；此區不會沿用上一筆結果。</span>
             </div>
-            <div className="forecast-metric forecast-metric-down">
-              <span>下跌機率</span>
-              <strong>{pct(forecast.pDown)}</strong>
-            </div>
-            <div className="forecast-metric">
-              <span>下行風險</span>
-              <strong>{pct(forecast.downsideProbability)}</strong>
-              <small>{forecast.downsideThreshold == null ? '門檻未提供' : `跌幅 ≤ ${pct(forecast.downsideThreshold)}`}</small>
-            </div>
-            <div className="forecast-metric">
-              <span>模型信心</span>
-              <strong>{forecast.confidenceScore == null ? '—' : `${forecast.confidenceScore.toFixed(0)}/100`}</strong>
-              {confidenceLabel && <small>{confidenceLabel}信心</small>}
-            </div>
+            <button type="button" onClick={onRetry}>重新載入</button>
           </div>
+        )}
 
-          <div className="forecast-range" aria-label="預測報酬區間">
-            <div className="forecast-range-head">
-              <h3>{forecast.horizon} 日報酬情境</h3>
-              <span>{REGIME_LABELS[forecast.regime] ?? forecast.regime}</span>
-            </div>
-            <div className="forecast-range-values">
-              <div><span>悲觀 q10</span><strong>{pct(forecast.q10, { signed: true })}</strong></div>
-              <div><span>中位 q50</span><strong>{pct(forecast.q50, { signed: true })}</strong></div>
-              <div><span>樂觀 q90</span><strong>{pct(forecast.q90, { signed: true })}</strong></div>
-            </div>
+        {forecast && forecastState && (
+          <div className="forecast-content">
+            <StateMessage {...forecastState} />
+
+            {forecastState.kind === 'abstain' && (
+              <>
+                <div className="forecast-evidence-grid forecast-priority-grid">
+                  <EvidenceList title="發布門檻檢查" tone="gates" items={forecast.releaseGates} emptyMessage="目前沒有可辨識的門檻資訊。" />
+                  <DownsideRiskMetric forecast={forecast} />
+                </div>
+                <button
+                  type="button"
+                  className="detail-toggle forecast-research-toggle"
+                  aria-expanded={researchExpanded}
+                  aria-controls={researchDetailsId}
+                  onClick={() => setExpandedResearchKey(researchExpanded ? '' : researchKey)}
+                >
+                  {researchExpanded ? '▲ 收起研究細節' : '▼ 展開研究細節（類似歷史情境比例與分位數）'}
+                </button>
+                {researchExpanded && (
+                  <div id={researchDetailsId} className="forecast-research-details forecast-content" role="region" aria-label={`${forecast.horizon} 日研究細節`}>
+                    <DirectionMetrics forecast={forecast} />
+                    <ForecastRange forecast={forecast} />
+                    <EvidenceGroups forecast={forecast} includeGates={false} />
+                  </div>
+                )}
+              </>
+            )}
+
+            {forecastState.kind === 'ready' && (
+              <>
+                <div className="forecast-metrics" aria-label={`${forecast.horizon} 日研究預測摘要`}>
+                  <div className="forecast-metric forecast-metric-up"><span>類似情境上漲比例</span><strong>{pct(forecast.pUp)}</strong></div>
+                  <div className="forecast-metric forecast-metric-down"><span>類似情境下跌比例</span><strong>{pct(forecast.pDown)}</strong></div>
+                  <DownsideRiskMetric forecast={forecast} />
+                  <EvidenceAdequacyMetric forecast={forecast} />
+                </div>
+                <ForecastRange forecast={forecast} />
+                <EvidenceGroups forecast={forecast} />
+              </>
+            )}
+
+            {(forecastState.kind === 'stale' || forecastState.kind === 'insufficient') && (
+              <EvidenceList title="發布門檻檢查" tone="gates" items={forecast.releaseGates} emptyMessage="等待取得足夠且最新的資料。" />
+            )}
+
+            <footer className="forecast-meta">
+              <span>模型：{forecast.modelVersion}</span>
+              <span>資料截至：{formatTime(forecast.asOf)}</span>
+              <span>產生時間：{formatTime(forecast.generatedAt)}</span>
+              {forecast.observations != null && <span>可用日線：{forecast.observations.toLocaleString()} 根</span>}
+            </footer>
           </div>
-
-          <div className="forecast-evidence-grid">
-            <EvidenceList title="支持證據" tone="for" items={forecast.supports} />
-            <EvidenceList title="反對證據" tone="against" items={forecast.concerns} />
-          </div>
-
-          <footer className="forecast-meta">
-            <span>模型：{forecast.modelVersion}</span>
-            <span>資料截至：{formatTime(forecast.asOf)}</span>
-            <span>產生時間：{formatTime(forecast.generatedAt)}</span>
-            {forecast.observations != null && <span>樣本：{forecast.observations.toLocaleString()} 筆</span>}
-          </footer>
-        </div>
-      )}
+        )}
+      </div>
     </section>
   )
 }

@@ -19,10 +19,12 @@ GPT 批次標註為下一階段（需金鑰），詞庫版永遠保留作為降�
 """
 import re
 import time
+from datetime import datetime, timezone
 import feedparser
 import requests
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from backend.routers.admin import require_admin   # 寫入型端點的登入保護
+from backend.services.rate_limiter import RATE_LIMITER, enforce_rate_limit
 from backend.services.news_store import (
     save_articles, query_by_date, available_dates, total_count,
     aggregate_daily, load_sentiment_daily,
@@ -329,6 +331,31 @@ def _group_by_category(items: list) -> list:
 
 
 # ── 恐懼貪婪指數 ─────────────────────────────────────────────────────────────
+def _stored_fear_greed(limit: int) -> list[dict]:
+    """Return the newest stored values using the external API response shape."""
+    rows = load_fear_greed_history(days=limit)
+    data = []
+    for row in reversed(rows):
+        date_value = str(row.get("date", ""))
+        try:
+            timestamp = int(
+                datetime.strptime(date_value[:10], "%Y-%m-%d")
+                .replace(tzinfo=timezone.utc)
+                .timestamp()
+            )
+        except ValueError:
+            timestamp = None
+        item = {
+            "value": str(row.get("value", "")),
+            "value_classification": row.get("label", "") or "",
+            "time_until_update": None,
+        }
+        if timestamp is not None:
+            item["timestamp"] = str(timestamp)
+        data.append(item)
+    return data
+
+
 @router.get("/sentiment/fear_greed")
 def fear_greed(limit: int = 30):
     """
@@ -340,11 +367,24 @@ def fear_greed(limit: int = 30):
     key = f"fng_{limit}"
     if key in _cache and now - _cache[key]["ts"] < 3600:  # 1 小時快取
         return _cache[key]["data"]
-    resp = requests.get(
-        f"https://api.alternative.me/fng/?limit={limit}", timeout=10
-    )
-    resp.raise_for_status()
-    data = resp.json().get("data", [])
+
+    try:
+        # Do not inherit an invalid machine/shell proxy for this public endpoint.
+        with requests.Session() as session:
+            session.trust_env = False
+            resp = session.get(
+                f"https://api.alternative.me/fng/?limit={limit}", timeout=10
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+        if not isinstance(data, list):
+            raise ValueError("fear and greed response data is not a list")
+    except (requests.RequestException, ValueError):
+        # A sentiment provider outage must not make the whole dashboard fail.
+        if key in _cache:
+            return _cache[key]["data"]
+        data = _stored_fear_greed(limit)
+
     _cache[key] = {"ts": now, "data": data}
     return data
 
@@ -542,7 +582,12 @@ def _hn_fetch_range(from_date: str, to_date: str) -> int:
 
 # ── 歷史回補 API（2026-07-06 安全修補：掛上後台登入保護，不再對外開放寫入）──
 @router.post("/sentiment/news/backfill")
-def backfill_news(from_date: str, to_date: str, _admin: str = Depends(require_admin)):
+def backfill_news(
+    request: Request,
+    from_date: str,
+    to_date: str,
+    _admin: str = Depends(require_admin),
+):
     """
     回補歷史新聞：從 HackerNews 抓取指定日期範圍的加密幣文章存入資料庫
 
@@ -553,6 +598,20 @@ def backfill_news(from_date: str, to_date: str, _admin: str = Depends(require_ad
     建議一次不超過 1 個月，太長會耗時較久（每個月約 100~500 篇）
     需帶後台 token（Authorization: Bearer …）——這是寫入型端點，避免被外部濫用。
     """
+    enforce_rate_limit(
+        request,
+        scope="news_backfill_hour",
+        limit=2,
+        window_seconds=3600,
+        limiter=RATE_LIMITER,
+    )
+    enforce_rate_limit(
+        request,
+        scope="news_backfill_day",
+        limit=10,
+        window_seconds=24 * 3600,
+        limiter=RATE_LIMITER,
+    )
     try:
         saved, meta = _hn_fetch_range(from_date, to_date)
     except Exception as e:

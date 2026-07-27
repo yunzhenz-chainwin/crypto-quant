@@ -16,7 +16,7 @@
  * Props：
  *   symbol  幣種代號，例如 'BTCUSDT'
  */
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import {
   ResponsiveContainer, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, Legend,
@@ -28,7 +28,7 @@ function EquityCurve({ data }) {
   if (!data || data.length === 0) return null
   return (
     <ResponsiveContainer width="100%" height={200}>
-      <LineChart data={data} margin={{ top: 4, right: 16, bottom: 0, left: 8 }}>
+      <LineChart accessibilityLayer data={data} margin={{ top: 4, right: 16, bottom: 0, left: 8 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
         <XAxis
           dataKey="date"
@@ -67,10 +67,12 @@ function ExitBadge({ reason }) {
 // 交易明細：精簡列一眼掃 → 點任一列展開「完整明細卡」（全部欄位，與後台一致）
 function TradeTable({ trades }) {
   const [open, setOpen] = useState(null)
+  const tableId = useId()
   if (!trades || trades.length === 0) return null
   const rows = [...trades].reverse()             // 最新的排最上面
   const px  = (v) => `$${fmtPrice(v)}`
   const pct = (v) => `${v >= 0 ? '+' : ''}${v}%`
+  const toggleRow = (index) => setOpen(current => (current === index ? null : index))
   return (
     <div className="trade-table-scroll" style={{ marginTop: 12 }}>
       <table className="trade-table tt-rich">
@@ -85,9 +87,23 @@ function TradeTable({ trades }) {
           {rows.map((t, i) => ([
             <tr key={`r${i}`}
                 className={`tt-row ${t.profit ? 'win' : 'loss'} ${open === i ? 'open' : ''}`}
-                onClick={() => setOpen(o => (o === i ? null : i))}
+                onClick={() => toggleRow(i)}
                 title="點一下看這一筆的完整明細">
-              <td className="tt-caret">{open === i ? '▾' : '▸'}</td>
+              <td className="tt-caret">
+                <button
+                  type="button"
+                  aria-label={`${t.entry_date} 交易完整明細`}
+                  aria-expanded={open === i}
+                  aria-controls={`${tableId}-trade-detail-${i}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    toggleRow(i)
+                  }}
+                  style={{ background: 'transparent', border: 0, color: 'inherit', cursor: 'pointer', padding: 0 }}
+                >
+                  {open === i ? '▾' : '▸'}
+                </button>
+              </td>
               <td>{t.entry_date}</td>
               <td>{px(t.entry_price)}</td>
               <td>{t.exit_date}</td>
@@ -97,7 +113,7 @@ function TradeTable({ trades }) {
               <td><ExitBadge reason={t.exit_reason} /></td>
             </tr>,
             open === i && (
-              <tr key={`d${i}`} className="tt-detail-row">
+              <tr key={`d${i}`} id={`${tableId}-trade-detail-${i}`} className="tt-detail-row">
                 <td colSpan={8}>
                   <div className="tt-detail">
                     <div className="tt-detail-hero">
@@ -136,14 +152,14 @@ function TradeTable({ trades }) {
 function ValidationTable({ validation }) {
   if (!validation) return null
   const rows = [
-    ['樣本內', validation.in_sample],
-    ['樣本外', validation.out_of_sample],
+    ['前段 60%', validation.in_sample],
+    ['後段 40%', validation.out_of_sample],
   ]
   return (
     <div className="mini-table-wrap">
       <div className="key-chart-title">
-        樣本切分驗證
-        <Info text="把資料切成前 60%（樣本內）和後 40%（樣本外）。若樣本外也能賺錢，代表策略不是只在歷史上剛好有效，較不容易是過度最佳化。" />
+        前後期穩定性檢查
+        <Info text="依時間順序把資料切成前 60% 與後 40%，用相同固定規則比較不同時期的表現。這不是獨立模型驗證，也不能證明未來有效。" />
       </div>
       <table className="mini-table">
         <thead>
@@ -176,8 +192,8 @@ function SweepTable({ rows }) {
   return (
     <div className="mini-table-wrap">
       <div className="key-chart-title">
-        參數掃描 Top 5
-        <Info text="系統自動試了多種停損／停利組合，依夏普值與超額報酬排序後列出表現最好的前 5 組，方便你挑選參數。" />
+        參數探索 Top 5（事後探索）
+        <Info text="在同一段歷史資料試多種停損／停利組合後排序，只適合觀察參數敏感度；直接挑第一名會高估未來表現。" />
       </div>
       <table className="mini-table">
         <thead>
@@ -198,6 +214,9 @@ function SweepTable({ rows }) {
           ))}
         </tbody>
       </table>
+      <div className="trade-table-note">
+        ※ 這是同一歷史區間的事後探索，不是獨立驗證，也不是建議直接採用的參數。
+      </div>
     </div>
   )
 }
@@ -226,35 +245,57 @@ const EXIT_REASON_LABEL = {
 
 // 滑鼠移上去會顯示說明的小問號，用來解釋專有名詞
 function Info({ text }) {
-  return <span className="info-tip" title={text}>ⓘ</span>
+  return <span className="info-tip" title={text} tabIndex={0} role="note" aria-label={text}>ⓘ</span>
 }
 
-// 白話結論：把一堆數字翻成一句人話，先講「贏還是輸大盤」再講風險
+// 白話結論：陳述歷史報酬差與回撤，不把「少跌」包裝成勝出。
 function VerdictBanner({ data }) {
   const m = data?.metrics
   if (!m || m.error) return null
-  const beat     = m.total_return_pct >= m.buy_hold_return_pct
-  const diffAbs  = Math.abs(m.total_return_pct - m.buy_hold_return_pct).toFixed(1)
+  const returnGap = m.total_return_pct - m.buy_hold_return_pct
+  const gapAbs    = Math.abs(returnGap).toFixed(1)
   const ddBetter = Math.abs(m.max_drawdown_pct) < Math.abs(m.buy_hold_max_drawdown_pct)
+  const ddEqual  = Math.abs(m.max_drawdown_pct) === Math.abs(m.buy_hold_max_drawdown_pct)
   const period   = data.period ? `${data.period.start} ~ ${data.period.end}` : ''
+  const oosReturn = data?.validation?.out_of_sample?.metrics?.total_return_pct
+  const randomPercentile = data?.random_baseline?.strategy_percentile
+
+  const headline = returnGap > 0
+    ? (m.total_return_pct < 0
+        ? '回測結果：策略仍為虧損，但跌幅小於買入持有'
+        : '回測結果：策略報酬高於買入持有')
+    : returnGap < 0
+      ? '回測結果：策略報酬低於買入持有'
+      : '回測結果：策略報酬與買入持有相同'
+
+  const comparison = returnGap === 0
+    ? '策略與買入持有的歷史報酬相同'
+    : `策略報酬較買入持有${returnGap > 0 ? '高' : '低'}約 ${gapAbs} 個百分點`
+
+  const evidence = []
+  if (oosReturn != null) evidence.push(`後段 40% 固定規則報酬 ${fmtPct(oosReturn)}`)
+  if (randomPercentile != null) evidence.push(`隨機進場比較位於第 ${randomPercentile} 百分位`)
 
   return (
-    <div className={`backtest-verdict ${beat ? 'good' : 'warn'}`}>
+    <div className={`backtest-verdict ${returnGap > 0 && m.total_return_pct >= 0 ? 'good' : 'warn'}`}>
       <div className="verdict-head">
-        {beat ? '這段期間「照訊號操作」贏過「買了就放著」' : '注意：這段期間「照訊號操作」輸給「買了就放著」'}
+        {headline}
       </div>
       <p className="verdict-body">
         {period} 共進出場 <b>{m.total_trades}</b> 次：策略總報酬 <b>{fmtPct(m.total_return_pct)}</b>、
-        買入持有 <b>{fmtPct(m.buy_hold_return_pct)}</b>，策略{beat ? '多賺' : '少賺'}約 <b>{diffAbs}%</b>。
+        買入持有 <b>{fmtPct(m.buy_hold_return_pct)}</b>，{comparison}。
         最大回撤（從高點最多跌幅）策略 <b>{fmtPct(m.max_drawdown_pct)}</b>、買入持有 {fmtPct(m.buy_hold_max_drawdown_pct)}，
-        代表策略{ddBetter ? '波動較小、比較抗跌' : '波動較大'}。
+        代表策略的歷史峰值至谷底跌幅{ddEqual ? '相同' : ddBetter ? '較小' : '較大'}。
       </p>
+      {evidence.length > 0 && (
+        <p className="verdict-note"><b>穩定性／基準摘要：</b>{evidence.join('；')}。</p>
+      )}
       <p className="verdict-note">※ 這是已扣手續費與滑價的「歷史模擬」，訊號採日線波段，過去績效不代表未來。</p>
     </div>
   )
 }
 
-// 買賣點規則 + 三基準公正比較 + 驗證方法白話說明
+// 買賣點規則 + 三基準比較 + 驗證方法白話說明
 // 目的：讓決策者分得出「賺錢是選時的功勞，還是市場本來就在漲」，且每一步可稽核
 function MethodologySection({ data, hideRules = false }) {
   const m = data?.metrics
@@ -264,16 +305,16 @@ function MethodologySection({ data, hideRules = false }) {
 
   let verdict = null
   if (pct != null) {
-    if (pct >= 95)      verdict = { cls: 'good', text: `本策略總報酬贏過 ${pct}% 的隨機進場——「選時」很可能有價值（仍受樣本數限制）。` }
-    else if (pct >= 75) verdict = { cls: 'mid',  text: `本策略總報酬贏過 ${pct}% 的隨機進場——略優於亂選日子，但證據還不算強。` }
-    else if (pct >= 40) verdict = { cls: 'warn', text: `本策略總報酬只贏過 ${pct}% 的隨機進場——選時與亂選差不多，賺賠主要來自市場本身的漲跌。` }
-    else                verdict = { cls: 'warn', text: `本策略總報酬只贏過 ${pct}% 的隨機進場——選時比亂選日子還差。` }
+    if (pct >= 95)      verdict = { cls: 'good', text: `策略總報酬位於隨機進場的第 ${pct} 百分位；此歷史樣本中的排名明顯偏高，但交易筆數與單一市場區間仍限制推論。` }
+    else if (pct >= 75) verdict = { cls: 'mid',  text: `策略總報酬位於隨機進場的第 ${pct} 百分位；歷史排名偏高，但證據仍有限。` }
+    else if (pct >= 40) verdict = { cls: 'warn', text: `策略總報酬位於隨機進場的第 ${pct} 百分位；結果接近中段，尚未呈現明確選時優勢。` }
+    else                verdict = { cls: 'warn', text: `策略總報酬位於隨機進場的第 ${pct} 百分位；此歷史樣本中的排名偏低。` }
   }
 
   return (
     <div className="mini-table-wrap methodology">
       <div className="key-chart-title">
-        買賣點規則與公正比較
+        買賣點規則與比較方法
         <Info text="把買賣規則、比較基準、驗證方法攤開講清楚：賺錢要分得出是「選時機的功勞」還是「市場本來就在漲」。" />
       </div>
 
@@ -281,7 +322,7 @@ function MethodologySection({ data, hideRules = false }) {
           hideRules：併入「買賣策略」面板時，規則已在上方「進出場規則」講過，這裡不重複。 */}
       {!hideRules && (
         <div className="method-rules">
-          <div><b>買點</b>：6 因子信心分數 ≥65（訊號翻多）→ <b>隔天開盤</b>買入</div>
+          <div><b>買點</b>：6 因子技術分數 ≥65（技術狀態轉為偏多）→ <b>隔天開盤</b>買入</div>
           <div><b>賣點</b>（先到先賣）：當日跌到停損價／漲到停利價 → 以觸發價賣出；訊號翻空（分數 ≤35）→ 隔天開盤賣出</div>
           <div><b>成本</b>：每筆買賣皆已扣手續費與滑價（雙邊）</div>
           <div className="method-rules-more">完整的 6 因子計分明細與「這顆幣現在幾分」，見上方「進出場規則」。</div>
@@ -326,9 +367,9 @@ function MethodologySection({ data, hideRules = false }) {
       {/* 驗證方法（可稽核的四條）*/}
       <ul className="method-notes">
         <li>沒偷看未來：訊號只用「當天收盤前已知」的資料計算，隔天開盤才成交。</li>
-        <li>樣本內／外切分：前 60% 資料調規則、後 40% 當考試（見下方「樣本切分驗證」表），降低過度最佳化。</li>
+        <li>時間切段穩定性：把相同固定規則分別套在前 60% 與後 40% 資料，比較不同時期是否一致；這不是獨立模型驗證。</li>
         <li>隨機基準用固定亂數種子：任何人重算，數字完全相同（可重現＝可稽核）。</li>
-        <li>誠實局限：共 {m.total_trades} 筆交易、樣本有限；「參數掃描 Top 5」屬事後挑最好、直接採用會偏樂觀；過去績效不代表未來。</li>
+        <li>誠實局限：共 {m.total_trades} 筆交易、樣本有限；「參數探索 Top 5」屬事後挑最好、直接採用會偏樂觀；過去績效不代表未來。</li>
       </ul>
     </div>
   )
@@ -341,13 +382,19 @@ function MethodologySection({ data, hideRules = false }) {
 // hideParams：併入「買賣策略」面板後,停損/停利輸入已移到上方「出場規則」,這裡不再重複顯示。
 export default function BacktestPanel({ data, loading, params, onParamsChange, hideParams = false }) {
   const [showDetail, setShowDetail] = useState(false)   // 交易明細預設收起
-  const [showValidation, setShowValidation] = useState(false)   // 樣本內外/參數掃描深水區,預設收起
+  const [showValidation, setShowValidation] = useState(false)   // 前後期穩定性／參數探索深水區，預設收起
+  const panelId = useId()
+  const validationDetailsId = `${panelId}-validation-details`
+  const tradeDetailsId = `${panelId}-trade-details`
 
   const m = data?.metrics
   // beatsHold=true 表示策略報酬 > 單純買入持有，用來決定顯示綠色還是警告色
   const beatsHold = m && m.total_return_pct > m.buy_hold_return_pct
-  // diff 是策略報酬與買入持有的差距（正數=策略贏、負數=策略輸）
-  const diff = m ? (m.total_return_pct - m.buy_hold_return_pct).toFixed(1) : null
+  // 報酬差使用百分點，避免把兩個百分率相減後仍誤稱為百分比。
+  const diff = m ? m.total_return_pct - m.buy_hold_return_pct : null
+  const comparisonClass = beatsHold && m.total_return_pct >= 0
+    ? 'key-good'
+    : beatsHold ? 'key-neutral' : 'key-warn'
 
   return (
     <section className="backtest-section">
@@ -382,7 +429,7 @@ export default function BacktestPanel({ data, loading, params, onParamsChange, h
       </div>
 
       {loading && (
-        <div className="bt-skeleton" aria-label="回測計算中">
+        <div className="bt-skeleton" role="status" aria-live="polite" aria-label="回測計算中">
           <div className="skeleton" style={{ height: 62, borderRadius: 10 }} />
           <div className="key-metrics">
             <div className="skeleton" style={{ height: 92, borderRadius: 12 }} />
@@ -409,19 +456,21 @@ export default function BacktestPanel({ data, loading, params, onParamsChange, h
           {/* 三個核心數字 */}
           <div className="key-metrics">
             {/* 策略 vs 持有 */}
-            <div className={`key-metric ${beatsHold ? 'key-good' : 'key-warn'}`}>
+            <div className={`key-metric ${comparisonClass}`}>
               <div className="key-metric-top">
                 <span className="key-metric-label">策略報酬</span>
                 <span className="key-metric-badge">
-                  {beatsHold ? `比持有多賺 +${diff}%` : `比持有少賺 ${diff}%`}
+                  {diff === 0
+                    ? '與持有報酬相同'
+                    : `較持有${diff > 0 ? '高' : '低'} ${Math.abs(diff).toFixed(1)} 個百分點`}
                 </span>
               </div>
               <div className="key-metric-value">
                 {m.total_return_pct >= 0 ? '+' : ''}{m.total_return_pct}%
               </div>
               <div className="key-metric-compare">
-                買入持有 {fmtPct(m.buy_hold_return_pct)}，超額 {fmtPct(m.excess_return_pct)}
-                <Info text="超額報酬＝策略報酬－買入持有報酬。正數代表這套策略比單純抱著更划算。" />
+                買入持有 {fmtPct(m.buy_hold_return_pct)}，報酬差 {diff >= 0 ? '+' : ''}{diff.toFixed(1)} 個百分點
+                <Info text="報酬差＝策略報酬率－買入持有報酬率，單位是百分點。正值只代表歷史報酬較高；若兩者都虧損，策略仍然是虧損。" />
               </div>
             </div>
 
@@ -453,24 +502,29 @@ export default function BacktestPanel({ data, loading, params, onParamsChange, h
             </div>
           </div>
 
-          {/* 三基準比較（買入持有／隨機進場）+ 樣本內外 + 參數掃描 = 回測「深水區」。
+          {/* 三基準比較（買入持有／隨機進場）+ 前後期穩定性 + 參數探索 = 回測「深水區」。
               併入「買賣策略」面板時預設收起（規則已在上方講過，這裡 hideRules 不重複）；
               單獨使用時維持全部攤開。 */}
           {hideParams ? (
             <>
-              <button className="detail-toggle" onClick={() => setShowValidation(v => !v)}>
+              <button
+                className="detail-toggle"
+                onClick={() => setShowValidation(v => !v)}
+                aria-expanded={showValidation}
+                aria-controls={validationDetailsId}
+              >
                 {showValidation
                   ? '▲ 收起完整回測驗證'
-                  : '▼ 展開完整回測驗證（三基準比較・樣本內外・參數掃描）'}
+                  : '▼ 展開完整回測驗證（三基準比較・前後期穩定性・參數探索）'}
               </button>
               {showValidation && (
-                <>
+                <div id={validationDetailsId}>
                   <MethodologySection data={data} hideRules />
                   <div className="backtest-grid">
                     <ValidationTable validation={data.validation} />
                     <SweepTable rows={data.parameter_sweep} />
                   </div>
-                </>
+                </div>
               )}
             </>
           ) : (
@@ -492,10 +546,15 @@ export default function BacktestPanel({ data, loading, params, onParamsChange, h
           </div>
 
           {/* 展開更多 */}
-          <button className="detail-toggle" onClick={() => setShowDetail(v => !v)}>
+          <button
+            className="detail-toggle"
+            onClick={() => setShowDetail(v => !v)}
+            aria-expanded={showDetail}
+            aria-controls={tradeDetailsId}
+          >
             {showDetail ? '▲ 收起交易明細' : `▼ 查看交易記錄（全部 ${data.recent_trades?.length ?? 0} 筆，點列看完整明細）`}
           </button>
-          {showDetail && <TradeTable trades={data.recent_trades} />}
+          {showDetail && <div id={tradeDetailsId}><TradeTable trades={data.recent_trades} /></div>}
         </>
       )}
     </section>

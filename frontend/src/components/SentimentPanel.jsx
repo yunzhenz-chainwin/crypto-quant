@@ -351,19 +351,31 @@ export default function SentimentPanel({ symbol }) {
     }).catch(() => {})
 
   useEffect(() => {
-    fetchFearGreed(30).then(setFgData).catch(() => {})
+    const controller = new AbortController()
+    fetchFearGreed(30, { signal: controller.signal }).then(setFgData).catch(error => {
+      if (error?.name !== 'AbortError') setFgData([])
+    })
     reloadDates()
+    return () => controller.abort()
   }, [])
 
   useEffect(() => {
+    const controller = new AbortController()
     setNews(null)
-    fetchNews(symbol).then(setNews).catch(() => {})
+    fetchNews(symbol, { signal: controller.signal }).then(setNews).catch(error => {
+      if (error?.name !== 'AbortError') setNews({ categories: [], error: true })
+    })
+    return () => controller.abort()
   }, [symbol])
 
   useEffect(() => {
     if (!isHistory || !historyDate) return
+    const controller = new AbortController()
     setHistoryData(null)
-    fetchNewsHistory(historyDate).then(setHistoryData).catch(() => {})
+    fetchNewsHistory(historyDate, null, { signal: controller.signal }).then(setHistoryData).catch(error => {
+      if (error?.name !== 'AbortError') setHistoryData({ categories: [], error: true })
+    })
+    return () => controller.abort()
   }, [isHistory, historyDate])
 
   const current = fgData?.[0]
@@ -378,7 +390,7 @@ export default function SentimentPanel({ symbol }) {
       <div className="sentiment-body">
         {/* 左：錶盤 */}
         <div className="fg-panel">
-          <div className="fg-panel-title">恐懼貪婪指數<span className="info-tip" title="0~100 的市場情緒溫度計（綜合波動、動能、社群聲量）：0~25 極度恐慌、75~100 極度貪婪。極端值常被當反向參考——別人恐懼我貪婪，但不是精準擇時工具。">ⓘ</span></div>
+          <div className="fg-panel-title">恐懼貪婪指數<span className="info-tip" tabIndex="0" role="note" aria-label="0 到 100 的市場情緒溫度計；極端值只適合作為反向參考，不是精準擇時工具。" title="0~100 的市場情緒溫度計（綜合波動、動能、社群聲量）：0~25 極度恐慌、75~100 極度貪婪。極端值常被當反向參考——別人恐懼我貪婪，但不是精準擇時工具。">ⓘ</span></div>
           {current
             ? <FearGreedGauge value={current.value} />
             : <div className="chart-empty">載入中…</div>
@@ -396,11 +408,15 @@ export default function SentimentPanel({ symbol }) {
           <button
             className="backfill-toggle"
             onClick={() => setShowBackfill(v => !v)}
+            aria-expanded={showBackfill}
+            aria-controls="news-backfill-panel"
           >
             {showBackfill ? '▲ 收起' : '▼ 匯入更多歷史新聞'}
           </button>
           {showBackfill && (
-            <BackfillPanel onDone={() => { reloadDates(); setShowBackfill(false) }} />
+            <div id="news-backfill-panel">
+              <BackfillPanel onDone={() => { reloadDates(); setShowBackfill(false) }} />
+            </div>
           )}
         </div>
 
@@ -411,12 +427,14 @@ export default function SentimentPanel({ symbol }) {
             <button
               className={`mode-btn ${!isHistory ? 'active' : ''}`}
               onClick={() => setIsHistory(false)}
+              aria-pressed={!isHistory}
             >
               最新新聞
             </button>
             <button
               className={`mode-btn ${isHistory ? 'active' : ''}`}
               onClick={() => setIsHistory(true)}
+              aria-pressed={isHistory}
             >
               歷史查詢
             </button>

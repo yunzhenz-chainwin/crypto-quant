@@ -2,9 +2,39 @@ import { getToken } from './admin'
 
 const BASE = '/api'
 
+export class ApiError extends Error {
+  constructor(message, { status, path, retryAfter = null, body = null } = {}) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.path = path
+    this.retryAfter = retryAfter
+    this.body = body
+  }
+}
+
+function retryAfterSeconds(value) {
+  if (!value) return null
+  const seconds = Number(value)
+  if (Number.isFinite(seconds)) return Math.max(0, seconds)
+  const retryAt = Date.parse(value)
+  return Number.isFinite(retryAt)
+    ? Math.max(0, Math.ceil((retryAt - Date.now()) / 1000))
+    : null
+}
+
 async function get(path, options = {}) {
   const res = await fetch(BASE + path, options)
-  if (!res.ok) throw new Error(`API ${path} 回應 ${res.status}`)
+  if (!res.ok) {
+    const body = await res.json().catch(() => null)
+    const detail = body?.detail || body?.error || body?.message
+    throw new ApiError(detail || `API ${path} 回應 ${res.status}`, {
+      status: res.status,
+      path,
+      retryAfter: retryAfterSeconds(res.headers.get('Retry-After')),
+      body,
+    })
+  }
   return res.json()
 }
 
@@ -15,28 +45,28 @@ export const fetchSymbols = () => get('/symbols')
 export const fetchStatus = () => get('/status')
 
 // 取得指標交叉驗證的完整結果(各幣通過與否),供前台彈窗顯示
-export const fetchVerify = () => get('/verify')
+export const fetchVerify = ({ signal } = {}) => get('/verify', { signal })
 
 // 取得指定幣種最近 N 天的 OHLC 資料，用來畫 K 線 / 折線圖
 export const fetchPrices = (symbol, days = 180) =>
   get(`/prices/${symbol}?days=${days}`)
 
 // 取得原始 OHLCV 資料，供蠟燭圖使用（支援 days 或 start/end 日期；interval 1d/1h）
-export const fetchOHLC = (symbol, { days = 365, start = null, end = null, interval = '1d' } = {}) => {
+export const fetchOHLC = (symbol, { days = 365, start = null, end = null, interval = '1d', signal } = {}) => {
   const p = new URLSearchParams()
   if (start && end) { p.set('start', start); p.set('end', end) }
   else               { p.set('days', days) }
   if (interval !== '1d') p.set('interval', interval)
-  return get(`/prices/${symbol}?${p}`)
+  return get(`/prices/${symbol}?${p}`, { signal })
 }
 
 // 取得指定幣種的技術指標（支援 days 或 start/end 日期；interval 1d/1h）
-export const fetchIndicators = (symbol, { days = 180, start = null, end = null, interval = '1d' } = {}) => {
+export const fetchIndicators = (symbol, { days = 180, start = null, end = null, interval = '1d', signal } = {}) => {
   const p = new URLSearchParams()
   if (start && end) { p.set('start', start); p.set('end', end) }
   else               { p.set('days', days) }
   if (interval !== '1d') p.set('interval', interval)
-  return get(`/indicators/${symbol}?${p}`)
+  return get(`/indicators/${symbol}?${p}`, { signal })
 }
 
 // 各週期有資料的幣種清單，例如 { "1d": [...], "1h": ["BTCUSDT","ETHUSDT"] }
@@ -73,8 +103,8 @@ export const fetchBacktest = (
 export const fetchBacktestSummary = () => get('/backtest/db/summary')
 
 // 取得恐懼貪婪指數（最近 N 天）
-export const fetchFearGreed = (limit = 30) =>
-  get(`/sentiment/fear_greed?limit=${limit}`)
+export const fetchFearGreed = (limit = 30, { signal } = {}) =>
+  get(`/sentiment/fear_greed?limit=${limit}`, { signal })
 
 // 取得信心分數歷史（讀 DB daily_signal，支援 days 或 start/end）
 export const fetchSignalHistory = (symbol, { days = 360, start = null, end = null } = {}) => {
@@ -89,22 +119,22 @@ export const fetchFearGreedHistory = (days = 365) =>
   get(`/sentiment/fear_greed/history?days=${days}`)
 
 // 取得最新新聞（RSS 即時抓取並存入資料庫）
-export const fetchNews = (symbol = null) =>
-  get(`/sentiment/news${symbol ? `?symbol=${symbol}` : ''}`)
+export const fetchNews = (symbol = null, { signal } = {}) =>
+  get(`/sentiment/news${symbol ? `?symbol=${symbol}` : ''}`, { signal })
 
 // 查詢指定日期的歷史新聞
-export const fetchNewsHistory = (date, category = null) => {
+export const fetchNewsHistory = (date, category = null, { signal } = {}) => {
   const params = new URLSearchParams({ date })
   if (category) params.append('category', category)
-  return get(`/sentiment/news/history?${params}`)
+  return get(`/sentiment/news/history?${params}`, { signal })
 }
 
 // 取得有新聞紀錄的日期清單
 export const fetchNewsDates = () => get('/sentiment/news/dates')
 
 // 每日新聞情緒分數（-100 極空 ~ +100 極多）；symbol 給幣種看單幣，不給看全市場
-export const fetchNewsSentiment = (symbol = 'MARKET', days = 14) =>
-  get(`/sentiment/summary?symbol=${symbol}&days=${days}`)
+export const fetchNewsSentiment = (symbol = 'MARKET', days = 14, { signal } = {}) =>
+  get(`/sentiment/summary?symbol=${symbol}&days=${days}`, { signal })
 
 // 回補歷史新聞（從 HackerNews 撈舊資料存入資料庫）
 // 此端點為後台維護型寫入，需帶後台 token；未登入或來源失敗時回清楚訊息（#117 / #118）

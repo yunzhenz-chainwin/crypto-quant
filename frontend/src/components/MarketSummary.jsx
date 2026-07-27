@@ -1,6 +1,6 @@
 /**
  * MarketSummary.jsx — 頂部市場摘要列
- * 顯示：今日日期、多空分布、恐懼貪婪指數、最後更新時間 + 手動刷新
+ * 顯示：今日日期、技術狀態分布、恐懼貪婪指數、最後更新時間 + 手動刷新
  */
 import { useState, useEffect } from 'react'
 
@@ -46,17 +46,21 @@ export default function MarketSummary({ signals, fearGreed, lastUpdated, onRefre
     : `${Math.floor(elapsed / 3600)} 小時前更新`
 
   return (
-    <div className="market-summary">
+    <div className="market-summary" aria-busy={refreshing}>
       {/* 日期 */}
       <span className="ms-date">{dateStr}</span>
 
       <span className="ms-sep">|</span>
 
-      {/* 多空分布 */}
-      <div className="ms-signals">
-        <span className="ms-sig ms-bull">▲ {bull} 多頭</span>
-        <span className="ms-sig ms-neutral">— {neutral} 中立</span>
-        <span className="ms-sig ms-bear">▼ {bear} 空頭</span>
+      {/* 技術狀態分布：描述目前指標，不代表未來方向預測。 */}
+      <div
+        className="ms-signals"
+        role="group"
+        aria-label={`技術狀態分布：偏多 ${bull}，中立 ${neutral}，偏空 ${bear}`}
+      >
+        <span className="ms-sig ms-bull">▲ {bull} 技術偏多</span>
+        <span className="ms-sig ms-neutral">— {neutral} 技術中立</span>
+        <span className="ms-sig ms-bear">▼ {bear} 技術偏空</span>
       </div>
 
       <span className="ms-sep">|</span>
@@ -82,8 +86,9 @@ export default function MarketSummary({ signals, fearGreed, lastUpdated, onRefre
         onClick={onRefresh}
         title="重新整理市場資料"
         disabled={refreshing}
+        aria-label={refreshing ? '正在重新整理市場資料' : '重新整理市場資料'}
       >
-        ↻
+        <span aria-hidden="true">↻</span>
       </button>
     </div>
   )

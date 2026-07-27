@@ -6,17 +6,38 @@ ai.py — AI 分析機器人 API
   POST /api/ai/ask                               針對幣種提問（GPT，無金鑰時降級本地）
   GET  /api/ai/config                            前端探測：GPT 有沒有啟用（不洩漏金鑰）
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from backend.services.reader import available_symbols
 from backend.services import ai_analyst
+from backend.services.rate_limiter import RATE_LIMITER, enforce_rate_limit
 
 router = APIRouter()
 
 
 @router.get("/ai/analysis/{symbol}")
-def get_analysis(symbol: str, gpt: int = 1, force: int = 0):
+def get_analysis(symbol: str, request: Request, gpt: int = 1, force: int = 0):
+    if force:
+        scope, minute_limit, daily_limit = "ai_analysis_force", 3, 30
+    elif gpt:
+        scope, minute_limit, daily_limit = "ai_analysis_gpt", 20, 300
+    else:
+        scope, minute_limit, daily_limit = "ai_analysis_local", 60, 1000
+    enforce_rate_limit(
+        request,
+        scope=f"{scope}_minute",
+        limit=minute_limit,
+        window_seconds=60,
+        limiter=RATE_LIMITER,
+    )
+    enforce_rate_limit(
+        request,
+        scope=f"{scope}_day",
+        limit=daily_limit,
+        window_seconds=24 * 3600,
+        limiter=RATE_LIMITER,
+    )
     symbol = symbol.upper()
     if symbol not in available_symbols():
         raise HTTPException(status_code=404, detail=f"{symbol} 無資料")
@@ -31,7 +52,21 @@ class AskReq(BaseModel):
 
 
 @router.post("/ai/ask")
-def post_ask(body: AskReq):
+def post_ask(body: AskReq, request: Request):
+    enforce_rate_limit(
+        request,
+        scope="ai_ask_minute",
+        limit=10,
+        window_seconds=60,
+        limiter=RATE_LIMITER,
+    )
+    enforce_rate_limit(
+        request,
+        scope="ai_ask_day",
+        limit=120,
+        window_seconds=24 * 3600,
+        limiter=RATE_LIMITER,
+    )
     q = (body.question or "").strip()
     if not q:
         raise HTTPException(status_code=400, detail="請輸入問題")

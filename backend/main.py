@@ -1,8 +1,9 @@
 """
 main.py — FastAPI 應用程式進入點
 
-啟動方式：
-  uvicorn backend.main:app --port 8000 --reload
+啟動方式（會設定本機安全環境變數）：
+  cd frontend
+  npm run start
 
 API 前綴一律為 /api，例如：
   /api/symbols          可用幣種清單
@@ -22,6 +23,7 @@ from pathlib import Path
 from backend.routers import meta, prices, indicators, correlation, signals, backtest, sentiment, admin, ai, macro, forecast
 from backend.scheduler import start_scheduler
 from backend.services import app_db
+from backend.services.security_hardening import SecurityHeadersMiddleware
 
 # React build 輸出目錄（npm run build 產生）
 DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
@@ -44,10 +46,16 @@ app = FastAPI(title="Crypto Quant API", lifespan=lifespan)
 # 允許本地開發時的跨域請求；正式環境前後端同源，CORS 不影響
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:3000",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # ── 使用紀錄 middleware（access_log）─────────────────────────────────────────

@@ -26,6 +26,100 @@ MIN_OUTCOMES = 30
 MIN_READY_CONFIDENCE = 40
 
 
+def _evidence_item(
+    code: str,
+    label: str,
+    *,
+    source_bucket: str,
+    polarity: str = "neutral",
+    category: str = "evidence",
+    status: str = "info",
+    detail: str = "",
+) -> dict[str, str]:
+    """Build one stable, presentation-independent evidence record.
+
+    ``source_bucket`` preserves whether the model originally treated the item
+    as supporting or opposing evidence.  ``polarity`` describes directional
+    meaning and must not be inferred from the localized label by clients.
+    """
+    if source_bucket not in {"supporting", "opposing"}:
+        raise ValueError("source_bucket must be supporting or opposing")
+    if polarity not in {"bullish", "bearish", "neutral"}:
+        raise ValueError("polarity must be bullish, bearish, or neutral")
+    if category not in {"directional", "risk", "release_gate", "observation", "notice", "evidence"}:
+        raise ValueError("unsupported evidence category")
+    if status not in {"info", "passed", "warning", "failed"}:
+        raise ValueError("unsupported evidence status")
+    return {
+        "code": code,
+        "polarity": polarity,
+        "source_bucket": source_bucket,
+        "category": category,
+        "status": status,
+        "label": label,
+        "detail": detail,
+    }
+
+
+def _legacy_evidence_items(
+    values: Iterable[Any],
+    source_bucket: str,
+) -> list[dict[str, str]]:
+    """Wrap immutable legacy string evidence without guessing its meaning."""
+    items: list[dict[str, str]] = []
+    for index, value in enumerate(values):
+        if isinstance(value, dict):
+            item = dict(value)
+            item.setdefault("code", f"legacy_{source_bucket}_{index}")
+            item.setdefault("polarity", "neutral")
+            item.setdefault("source_bucket", source_bucket)
+            item.setdefault("category", "evidence")
+            item.setdefault("status", "info")
+            item.setdefault("label", str(item.get("detail") or "模型證據"))
+            item.setdefault("detail", "")
+            items.append(item)
+        else:
+            items.append(_evidence_item(
+                f"legacy_{source_bucket}_{index}",
+                str(value),
+                source_bucket=source_bucket,
+            ))
+    return items
+
+
+def _evidence_contract(
+    supporting: Iterable[dict[str, str]],
+    opposing: Iterable[dict[str, str]],
+) -> dict[str, Any]:
+    """Return v2 structured evidence plus the legacy string aliases."""
+    supporting_items = [dict(item) for item in supporting]
+    opposing_items = [dict(item) for item in opposing]
+    return {
+        "schema_version": 2,
+        "items": [*supporting_items, *opposing_items],
+        "supporting": supporting_items,
+        "opposing": opposing_items,
+        # Backward-compatible aliases retain the historical response limits.
+        "for": [item["label"] for item in supporting_items[:3]],
+        "against": [item["label"] for item in opposing_items[:4]],
+    }
+
+
+def _normalize_evidence_contract(evidence: dict[str, Any] | None) -> dict[str, Any]:
+    """Upgrade cached v1 evidence at delivery time without text classification."""
+    source = dict(evidence or {})
+    supporting_values = source.get("supporting")
+    if not isinstance(supporting_values, list):
+        supporting_values = list(source.get("for") or [])
+    opposing_values = source.get("opposing")
+    if not isinstance(opposing_values, list):
+        opposing_values = list(source.get("against") or [])
+    return _evidence_contract(
+        _legacy_evidence_items(supporting_values, "supporting"),
+        _legacy_evidence_items(opposing_values, "opposing"),
+    )
+
+
 def model_metadata() -> dict[str, Any]:
     """Serializable registry metadata for the baseline model."""
     return {
@@ -130,6 +224,7 @@ def _empty_contract(
     observations: int,
     stale: bool,
     reason: str,
+    reason_code: str,
     regime: str = "unknown",
     input_hash: str | None = None,
     reference_close: float | None = None,
@@ -155,13 +250,31 @@ def _empty_contract(
             "probability": None,
         },
         "regime": regime,
-        "confidence": {"score": 0, "level": "low"},
+        "confidence": {
+            "score": 0,
+            "level": "low",
+            "threshold": MIN_READY_CONFIDENCE,
+        },
         "recommendation": "wait",
         "abstain_reason": reason,
-        "evidence": {
-            "for": [],
-            "against": [reason, "研究基準不構成交易建議"],
-        },
+        "evidence": _evidence_contract(
+            [],
+            [
+                _evidence_item(
+                    reason_code,
+                    reason,
+                    source_bucket="opposing",
+                    category="release_gate",
+                    status="failed",
+                ),
+                _evidence_item(
+                    "research_only_notice",
+                    "研究基準不構成交易建議",
+                    source_bucket="opposing",
+                    category="notice",
+                ),
+            ],
+        ),
         "data_quality": {"stale": stale, "observations": observations},
     }
 
@@ -206,6 +319,7 @@ def generate_forecast(
         return _empty_contract(
             symbol, horizon_days, resolved_as_of, generated_at, observations, True,
             "沒有可用的已完成日線資料",
+            "no_completed_daily_data",
             input_hash=input_hash,
             reference_close=reference_close,
         )
@@ -215,6 +329,7 @@ def generate_forecast(
         return _empty_contract(
             symbol, horizon_days, resolved_as_of, generated_at, observations, stale,
             f"樣本不足：需要至少 {MIN_OBSERVATIONS} 根日線",
+            "insufficient_observations",
             regime,
             input_hash,
             reference_close,
@@ -225,6 +340,7 @@ def generate_forecast(
         return _empty_contract(
             symbol, horizon_days, resolved_as_of, generated_at, observations, stale,
             f"成熟歷史結果不足：需要至少 {MIN_OUTCOMES} 筆",
+            "insufficient_mature_outcomes",
             regime,
             input_hash,
             reference_close,
@@ -244,19 +360,44 @@ def generate_forecast(
     confidence_score = int(round(100.0 * edge * sample_strength * interval_width_penalty))
     confidence_level = "high" if confidence_score >= 70 else "medium" if confidence_score >= 40 else "low"
 
-    reasons: list[str] = []
+    release_gates: list[dict[str, str]] = []
     if stale:
-        reasons.append(f"資料已過期：最後完成日線為 {resolved_as_of}")
+        release_gates.append(_evidence_item(
+            "data_stale",
+            f"資料已過期：最後完成日線為 {resolved_as_of}",
+            source_bucket="opposing",
+            category="release_gate",
+            status="failed",
+        ))
     if abs(up_probability - 0.5) < 0.07:
-        reasons.append("歷史上漲機率太接近 50%，方向優勢不足")
+        release_gates.append(_evidence_item(
+            "directional_edge_insufficient",
+            "歷史上漲機率太接近 50%，方向優勢不足",
+            source_bucket="opposing",
+            category="release_gate",
+            status="failed",
+        ))
     if confidence_score < MIN_READY_CONFIDENCE:
-        reasons.append(
-            f"模型信心低於研究發布門檻（{confidence_score} < {MIN_READY_CONFIDENCE}）"
-        )
+        release_gates.append(_evidence_item(
+            "confidence_release_threshold",
+            f"模型信心低於研究發布門檻（{confidence_score} < {MIN_READY_CONFIDENCE}）",
+            source_bucket="opposing",
+            category="release_gate",
+            status="failed",
+            detail=f"目前 {confidence_score} 分；門檻 {MIN_READY_CONFIDENCE} 分",
+        ))
     if q90 - q10 > 35.0:
-        reasons.append("預測區間過寬，市場不確定性高")
+        release_gates.append(_evidence_item(
+            "prediction_interval_too_wide",
+            "預測區間過寬，市場不確定性高",
+            source_bucket="opposing",
+            category="release_gate",
+            status="failed",
+            detail=f"q90 − q10 = {q90 - q10:.1f} 個百分點",
+        ))
 
-    status = "abstain" if reasons else "ready"
+    reasons = [item["label"] for item in release_gates]
+    status = "abstain" if release_gates else "ready"
     if status == "abstain":
         recommendation = "wait"
     elif up_probability >= 0.57:
@@ -266,23 +407,62 @@ def generate_forecast(
     else:
         recommendation = "wait"
 
-    supporting: list[str] = []
-    opposing: list[str] = []
+    supporting: list[dict[str, str]] = []
+    opposing: list[dict[str, str]] = []
     if up_probability >= 0.5:
-        supporting.append(f"相同市場狀態的歷史上漲率為 {up_probability * 100:.1f}%")
+        supporting.append(_evidence_item(
+            "historical_up_rate",
+            f"相同市場狀態的歷史上漲率為 {up_probability * 100:.1f}%",
+            source_bucket="supporting",
+            polarity="bullish",
+            category="directional",
+        ))
     else:
-        opposing.append(f"相同市場狀態的歷史下跌率為 {down_probability * 100:.1f}%")
+        opposing.append(_evidence_item(
+            "historical_down_rate",
+            f"相同市場狀態的歷史下跌率為 {down_probability * 100:.1f}%",
+            source_bucket="opposing",
+            polarity="bearish",
+            category="directional",
+        ))
     ret20 = regime_facts["return_20d_pct"]
     if ret20 is not None:
         message = f"近 20 日報酬為 {ret20:+.1f}%"
-        (supporting if ret20 > 0 else opposing).append(message)
+        bucket = supporting if ret20 > 0 else opposing
+        source_bucket = "supporting" if ret20 > 0 else "opposing"
+        bucket.append(_evidence_item(
+            "trailing_20d_return_positive" if ret20 > 0 else "trailing_20d_return_nonpositive",
+            message,
+            source_bucket=source_bucket,
+            polarity="bullish" if ret20 > 0 else "bearish",
+            category="directional",
+        ))
     risk_message = f"跌逾 {abs(threshold_pct):.0f}% 的歷史機率為 {downside_probability * 100:.1f}%"
-    (opposing if downside_probability >= 0.25 else supporting).append(risk_message)
+    elevated_downside = downside_probability >= 0.25
+    risk_bucket = opposing if elevated_downside else supporting
+    risk_bucket.append(_evidence_item(
+        "downside_risk_elevated" if elevated_downside else "downside_risk_below_warning",
+        risk_message,
+        source_bucket="opposing" if elevated_downside else "supporting",
+        polarity="bearish" if elevated_downside else "neutral",
+        category="risk",
+        status="warning" if elevated_downside else "passed",
+    ))
     if used_fallback:
-        opposing.append("相同狀態樣本不足，已退回全市場歷史基準")
-    if reasons:
-        opposing.extend(reason for reason in reasons if reason not in opposing)
-    opposing.append("研究基準不構成交易建議")
+        opposing.append(_evidence_item(
+            "regime_sample_fallback",
+            "相同狀態樣本不足，已退回全市場歷史基準",
+            source_bucket="opposing",
+            category="release_gate",
+            status="warning",
+        ))
+    opposing.extend(release_gates)
+    opposing.append(_evidence_item(
+        "research_only_notice",
+        "研究基準不構成交易建議",
+        source_bucket="opposing",
+        category="notice",
+    ))
 
     return {
         "forecast_id": _forecast_id(symbol, horizon_days, resolved_as_of, input_hash),
@@ -310,10 +490,14 @@ def generate_forecast(
             "probability": round(downside_probability, 4),
         },
         "regime": regime,
-        "confidence": {"score": confidence_score, "level": confidence_level},
+        "confidence": {
+            "score": confidence_score,
+            "level": confidence_level,
+            "threshold": MIN_READY_CONFIDENCE,
+        },
         "recommendation": recommendation,
         "abstain_reason": "; ".join(reasons) if reasons else None,
-        "evidence": {"for": supporting[:3], "against": opposing[:4]},
+        "evidence": _evidence_contract(supporting, opposing),
         "data_quality": {"stale": stale, "observations": observations},
     }
 
@@ -322,6 +506,10 @@ def apply_freshness_guard(snapshot: dict[str, Any], now: datetime | None = None)
     """Gate delivery of an immutable snapshot if its source has since gone stale."""
     guarded = {**snapshot}
     guarded["data_quality"] = dict(snapshot.get("data_quality") or {})
+    # Old immutable rows remain untouched in storage, but every delivery uses
+    # the same structured evidence envelope.  Legacy strings keep their source
+    # bucket and are deliberately not reclassified from localized text.
+    guarded["evidence"] = _normalize_evidence_contract(snapshot.get("evidence"))
     as_of = snapshot.get("as_of")
     if not as_of:
         return guarded
@@ -332,10 +520,22 @@ def apply_freshness_guard(snapshot: dict[str, Any], now: datetime | None = None)
         guarded["status"] = "abstain"
         guarded["recommendation"] = "wait"
         guarded["abstain_reason"] = reason
-        evidence = dict(snapshot.get("evidence") or {})
-        evidence["for"] = list(evidence.get("for") or [])
-        evidence["against"] = [reason, *[x for x in evidence.get("against") or [] if x != reason]][:4]
-        guarded["evidence"] = evidence
+        evidence = guarded["evidence"]
+        stale_item = _evidence_item(
+            "data_stale",
+            reason,
+            source_bucket="opposing",
+            category="release_gate",
+            status="failed",
+        )
+        opposing = [
+            stale_item,
+            *[
+                item for item in evidence["opposing"]
+                if item.get("code") != stale_item["code"]
+            ],
+        ]
+        guarded["evidence"] = _evidence_contract(evidence["supporting"], opposing)
     return guarded
 
 
