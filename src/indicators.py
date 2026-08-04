@@ -17,6 +17,7 @@ indicators.py
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -129,7 +130,10 @@ def main():
     # 存一份含指標的 CSV，方便後續使用
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     csv_out = REPORT_DIR / f"indicators_{symbol}_{interval}.csv"
-    df.to_csv(csv_out, index=False)
+    # 原子寫入，理由同 fetch_binance.save_clean（防兩個行程並發寫出撕裂行）
+    tmp_out = csv_out.with_suffix(".csv.tmp")
+    df.to_csv(tmp_out, index=False)
+    os.replace(tmp_out, csv_out)
 
     png_out = None if args.no_plot else plot(df, symbol, interval)
 

@@ -20,6 +20,7 @@ fetch_binance.py  (多幣 + 長歷史 + 多週期版)
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -129,7 +130,12 @@ def last_saved_ms(symbol: str, interval: str) -> int | None:
 def save_clean(symbol: str, interval: str, df: pd.DataFrame) -> Path:
     CLEAN_DIR.mkdir(parents=True, exist_ok=True)
     path = clean_path(symbol, interval)
-    df.to_csv(path, index=False)
+    # 原子寫入：先寫暫存檔再 os.replace()。直接 to_csv() 覆寫不是原子操作，
+    # 兩個行程同時跑同一支排程時會互相截斷，產生欄數不對的撕裂行
+    # （2026-08-04 事故：BTCUSDT_1h.csv 出現 `301.99,...` 4 欄殘列，癱瘓日線與時線管線 6 天）。
+    tmp = path.with_suffix(".csv.tmp")
+    df.to_csv(tmp, index=False)
+    os.replace(tmp, path)
     return path
 
 

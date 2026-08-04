@@ -560,6 +560,27 @@ def _f(v):
         return None
 
 
+def _ts(v):
+    """
+    CSV date 欄轉 ts 字串；格式不符回 None，讓呼叫端跳過該列。
+
+    ts 是 prices / indicators 的主鍵之一。價格欄有 _f() 擋著壞值，但主鍵原本
+    無條件信任 CSV，於是 CSV 一出現殘列就會被 INSERT OR REPLACE 永久寫進資料庫，
+    而且汙染 MAX(ts) 之類的查詢（2026-08-04 事故：ts='301.99' 讓日線與時線管線
+    連續失敗 6 天）。這裡補上主鍵的那道防線。
+    """
+    if not isinstance(v, str):
+        return None
+    ts = v[:19]
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            datetime.strptime(ts, fmt)
+            return ts
+        except ValueError:
+            continue
+    return None
+
+
 def ingest_market_data(interval: str = "1d") -> dict:
     """
     把 data/clean/*_<interval>.csv（K 線）與 reports/indicators_*_<interval>.csv（指標）
@@ -569,18 +590,20 @@ def ingest_market_data(interval: str = "1d") -> dict:
     root    = DB_PATH.parent.parent
     clean   = root / "data" / "clean"
     reports = root / "reports"
-    p_rows = i_rows = syms = 0
+    p_rows = i_rows = syms = skipped = 0
 
     with _connect() as conn:
         for csv_path in sorted(clean.glob(f"*_{interval}.csv")):
             symbol = csv_path.stem.replace(f"_{interval}", "")
             syms += 1
             with open(csv_path, newline="", encoding="utf-8") as f:
-                batch = [
-                    (symbol, interval, r["date"][:19], _f(r.get("open")), _f(r.get("high")),
-                     _f(r.get("low")), _f(r.get("close")), _f(r.get("volume")))
-                    for r in csv.DictReader(f)
-                ]
+                rows = [(r, _ts(r.get("date"))) for r in csv.DictReader(f)]
+            skipped += sum(1 for _, ts in rows if ts is None)
+            batch = [
+                (symbol, interval, ts, _f(r.get("open")), _f(r.get("high")),
+                 _f(r.get("low")), _f(r.get("close")), _f(r.get("volume")))
+                for r, ts in rows if ts is not None
+            ]
             conn.executemany(
                 "INSERT OR REPLACE INTO prices "
                 "(symbol, interval, ts, open, high, low, close, volume) "
@@ -590,13 +613,15 @@ def ingest_market_data(interval: str = "1d") -> dict:
             ind_path = reports / f"indicators_{symbol}_{interval}.csv"
             if ind_path.exists():
                 with open(ind_path, newline="", encoding="utf-8") as f:
-                    ibatch = [
-                        (symbol, interval, r["date"][:19], _f(r.get("close")), _f(r.get("MA20")),
-                         _f(r.get("MA60")), _f(r.get("MA200")), _f(r.get("RSI")),
-                         _f(r.get("MACD")), _f(r.get("SIGNAL")), _f(r.get("HIST")),
-                         _f(r.get("BB_UPPER")), _f(r.get("BB_LOWER")), _f(r.get("VOL_MA20")))
-                        for r in csv.DictReader(f)
-                    ]
+                    irows = [(r, _ts(r.get("date"))) for r in csv.DictReader(f)]
+                skipped += sum(1 for _, ts in irows if ts is None)
+                ibatch = [
+                    (symbol, interval, ts, _f(r.get("close")), _f(r.get("MA20")),
+                     _f(r.get("MA60")), _f(r.get("MA200")), _f(r.get("RSI")),
+                     _f(r.get("MACD")), _f(r.get("SIGNAL")), _f(r.get("HIST")),
+                     _f(r.get("BB_UPPER")), _f(r.get("BB_LOWER")), _f(r.get("VOL_MA20")))
+                    for r, ts in irows if ts is not None
+                ]
                 conn.executemany(
                     "INSERT OR REPLACE INTO indicators "
                     "(symbol, interval, ts, close, ma20, ma60, ma200, rsi, macd, signal, hist, "
@@ -604,7 +629,10 @@ def ingest_market_data(interval: str = "1d") -> dict:
                     ibatch)
                 i_rows += len(ibatch)
         conn.commit()
-    return {"interval": interval, "symbols": syms, "prices": p_rows, "indicators": i_rows}
+    if skipped:
+        print(f"[app_db] ingest_market_data({interval}) 跳過 {skipped} 列 date 格式不合法的資料")
+    return {"interval": interval, "symbols": syms, "prices": p_rows,
+            "indicators": i_rows, "skipped": skipped}
 
 
 # 專案根目錄與 venv Python（給後台「新增幣種」觸發抓取管線用，與排程同一套）
@@ -643,9 +671,14 @@ def market_stats() -> dict:
         span = conn.execute("SELECT MIN(ts), MAX(ts) FROM prices").fetchone()
         by_int = conn.execute(
             "SELECT interval, COUNT(*) FROM prices GROUP BY interval").fetchall()
+        # 分 interval 的最新日期。date_max 是跨 interval 的總覽（給後台資料庫頁看），
+        # 拿它當「日線是否夠新」的依據會被時線資料牽連，所以另外給一份分開的。
+        max_by_int = conn.execute(
+            "SELECT interval, MAX(ts) FROM prices GROUP BY interval").fetchall()
     return {"prices": p, "indicators": i, "symbols": syms,
             "date_min": (span[0] or "")[:10], "date_max": (span[1] or "")[:10],
-            "by_interval": {r[0]: r[1] for r in by_int}}
+            "by_interval": {r[0]: r[1] for r in by_int},
+            "date_max_by_interval": {r[0]: (r[1] or "")[:10] for r in max_by_int}}
 
 
 def backfill_daily_signals() -> int:

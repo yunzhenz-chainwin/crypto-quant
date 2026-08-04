@@ -109,11 +109,18 @@ def _assert_data_fresh():
     這道防線能抓到「子流程結束碼 0、卻沒帶回新資料」（例如 API 回空）的隱性失敗。
     回傳 (最新日期字串, 落後天數)。
     """
-    date_max = (market_stats().get("date_max") or "")[:10]
+    # 只看日線。原本用跨 interval 的 date_max，時線一有髒資料就會讓這裡的 strptime
+    # 直接炸掉，把「日線其實抓得好好的」也一併標成失敗（2026-08-04 事故）。
+    stats = market_stats()
+    date_max = (stats.get("date_max_by_interval", {}).get("1d") or "")[:10]
     if not date_max:
         raise RuntimeError("資料庫沒有任何日線資料")
     today = datetime.now(timezone.utc).date()
-    lag = (today - datetime.strptime(date_max, "%Y-%m-%d").date()).days
+    try:
+        latest = datetime.strptime(date_max, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise RuntimeError(f"日線最新日期格式異常：{date_max!r}（資料庫可能有髒資料）") from exc
+    lag = (today - latest).days
     if lag > MAX_DATA_LAG_DAYS:
         raise RuntimeError(f"資料未更新：最新只到 {date_max}（落後 {lag} 天），fetch 可能失敗")
     return date_max, lag
