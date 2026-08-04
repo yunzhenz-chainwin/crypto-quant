@@ -356,6 +356,30 @@ def compute_metrics(trades: list[dict], df: pd.DataFrame, include_curve: bool = 
     bh_dd = (bh_equity - bh_peak) / bh_peak
     bh_max_dd = float(bh_dd.min() * 100)
 
+    # 買入持有的 Sharpe，用與策略 Sharpe 完全相同的算法，兩個數字才可直接對照。
+    # 少了這根柱子，策略 Sharpe 0.08 會被讀成「還行」，而同期買入持有其實是 0.49。
+    bh_daily = bh_equity.pct_change(fill_method=None).dropna()
+    bh_std = float(bh_daily.std(ddof=1)) if len(bh_daily) > 1 else 0.0
+    if len(bh_daily) > 1 and np.isfinite(bh_std) and bh_std > 0:
+        bh_sharpe = float(bh_daily.mean()) / bh_std * math.sqrt(365.0)
+    else:
+        bh_sharpe = 0.0
+
+    # 曝險比例＝實際持倉天數 / 期間總天數。策略多數時間空手時，「贏過大盤」
+    # 有可能只是因為沒參與到下跌，而不是選時有效；沒有這個數字看不出差別。
+    span_days = (ordered_dates.iloc[-1] - ordered_dates.iloc[0]).days
+    exposure = min(100.0, sum(hold_days) / span_days * 100.0) if span_days > 0 else 0.0
+
+    # 每筆報酬的 t 統計量：平均報酬是否顯著不為零（慣例 |t| > 2 才算有統計證據）。
+    # 只看勝率與總報酬無法判斷樣本數夠不夠，交易次數少時很容易只是運氣。
+    trade_rets = np.array([t["return_pct"] for t in trades], dtype=float)
+    if len(trade_rets) > 1:
+        tr_std = float(trade_rets.std(ddof=1))
+        tstat = (float(trade_rets.mean()) / (tr_std / math.sqrt(len(trade_rets)))
+                 if tr_std > 0 else 0.0)
+    else:
+        tstat = 0.0
+
     # 全部轉成 Python 原生型別，避免 FastAPI 序列化 numpy 類型失敗
     def f(v): return float(round(float(v), 4))
 
@@ -372,7 +396,10 @@ def compute_metrics(trades: list[dict], df: pd.DataFrame, include_curve: bool = 
         "avg_hold_days":       f(avg_hold),
         "buy_hold_return_pct": f(bh_return),
         "buy_hold_max_drawdown_pct": f(bh_max_dd),
+        "buy_hold_sharpe_ratio": f(bh_sharpe),
         "excess_return_pct":   f(total_return - bh_return),
+        "exposure_pct":        f(exposure),
+        "mean_trade_return_tstat": f(tstat),
         "avg_cost_pct":        f(float(np.mean([t.get("cost_pct", 0.0) for t in trades]))),
         "stop_loss_exits":     int(sum(1 for t in trades if t["exit_reason"] == "stop_loss")),
         "take_profit_exits":   int(sum(1 for t in trades if t["exit_reason"] == "take_profit")),
