@@ -582,6 +582,8 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .collapse-toggle:hover { background: rgba(255,255,255,0.04); }
 .collapse-arrow { font-size: 11px; color: var(--muted); }
 .correlation-body { padding: 0 16px 16px; }
+/* 詳細資訊收合區內容：兩張決策卡直向堆疊（脫離 .main-content 的 gap，改自己給間距） */
+.details-panel-body { display: flex; flex-direction: column; gap: 14px; padding: 0 16px 16px; }
 
 /* ── 回測面板 ──────────────────────────────────────── */
 .backtest-section {

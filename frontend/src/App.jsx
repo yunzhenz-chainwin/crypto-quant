@@ -105,6 +105,7 @@ export default function App() {
   // const [correlation, setCorrelation] = useState(null)                  // 2026-07-06 暫停幣種相關性分析
   const [dataVersion, setDataVersion] = useState('')        // 後端資料版本（變了=有新資料）
   // const [showCorrelation, setShowCorrelation] = useState(false)         // 2026-07-06 暫停幣種相關性分析
+  const [showDetails,     setShowDetails]     = useState(false)  // 詳細資訊（決策摘要＋研究預測；內容長，預設收合，要看再展開）
   const [showSentiment,   setShowSentiment]   = useState(true)   // 市場情緒/新聞（預設展開，讓它一眼可見）
   const [chartZoom,       setChartZoom]       = useState(false)  // 蠟燭圖「放大」全螢幕彈窗
   const [detailView,      setDetailView]      = useState(null)   // 「詳細資訊」彈窗內容：null / 'score' / 'indicators' / 'backtest'
@@ -424,28 +425,6 @@ export default function App() {
 
             <HeroSignal signal={activeSignal} symbol={active} live={livePrices[active]} slim />
 
-            <DecisionSummary
-              signal={activeSignal}
-              backtest={backtest}
-              backtestStatus={btLoading ? 'loading' : btError ? 'error' : backtest ? 'ready' : 'idle'}
-              horizon={forecastHorizon}
-              onHorizonChange={setForecastHorizon}
-              forecast={forecast}
-              loading={forecastLoading}
-              error={forecastError}
-              onRetry={retryForecast}
-            />
-
-            <ForecastDecisionCard
-              symbol={active}
-              horizon={forecastHorizon}
-              onHorizonChange={setForecastHorizon}
-              forecast={forecast}
-              loading={forecastLoading}
-              error={forecastError}
-              onRetry={retryForecast}
-            />
-
             {/* 儀表板主區：左＝蠟燭圖（縮小、點🔍放大看大圖），右＝分數＋指標即時解讀 */}
             <div className="detail-main">
             <section className="chart-section detail-chart-col">
@@ -573,6 +552,39 @@ export default function App() {
             </div>
 
             {/* 策略明細面板已依需求移除（買賣策略結論已放上方右欄；停損停利固定用預設值） */}
+
+            {/* 詳細資訊：決策摘要＋研究預測（內容長，預設收合；圖表優先看得到，要細節再展開） */}
+            <section className="collapsible-section">
+              <button type="button" className="collapse-toggle" onClick={() => setShowDetails(v => !v)} aria-expanded={showDetails} aria-controls="details-panel-content">
+                <span>詳細資訊（決策摘要 / 研究預測）</span>
+                <span className="collapse-arrow" aria-hidden="true">{showDetails ? '▲' : '▼'}</span>
+              </button>
+              {showDetails && (
+                <div id="details-panel-content" className="details-panel-body">
+                  <DecisionSummary
+                    signal={activeSignal}
+                    backtest={backtest}
+                    backtestStatus={btLoading ? 'loading' : btError ? 'error' : backtest ? 'ready' : 'idle'}
+                    horizon={forecastHorizon}
+                    onHorizonChange={setForecastHorizon}
+                    forecast={forecast}
+                    loading={forecastLoading}
+                    error={forecastError}
+                    onRetry={retryForecast}
+                  />
+
+                  <ForecastDecisionCard
+                    symbol={active}
+                    horizon={forecastHorizon}
+                    onHorizonChange={setForecastHorizon}
+                    forecast={forecast}
+                    loading={forecastLoading}
+                    error={forecastError}
+                    onRetry={retryForecast}
+                  />
+                </div>
+              )}
+            </section>
 
             {/* 2026-07-06 暫停 AI 智能分析
             <section className="collapsible-section">
