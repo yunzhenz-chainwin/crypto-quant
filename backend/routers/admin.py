@@ -310,20 +310,18 @@ def ops_run(job: str, request: Request, _: str = Depends(require_admin)):
         window_seconds=3600,
         limiter=RATE_LIMITER,
     )
-    # 防重複：同型任務還在 running（且 2 小時內開始）就不疊加——並發抓 Binance 易觸發 429
-    last = _last_job(_OPS_JOB_TYPE[job])
-    if last and last.get("status") == "running":
-        try:
-            started = datetime.strptime(last["started_at"], "%Y-%m-%d %H:%M:%S")
-            if datetime.utcnow() - started < timedelta(hours=2):
-                raise HTTPException(status_code=409, detail=f"上一輪還在執行中（{last['started_at']} 開始），請稍候")
-        except HTTPException:
-            raise
-        except Exception:
-            pass  # started_at 解析失敗＝視為殭屍紀錄，放行
-
     import threading
     from backend import scheduler as _sched   # 函式內 import，避免啟動期循環相依
+
+    # 防重複：直接問排程模組的鎖，不再查 job_runs。
+    # 舊做法有三個洞：(1) _last_job 只掃最近 50 筆，日線每天下午就會掉出視窗，
+    # 於是「有沒有在跑」查不到；(2) 殭屍 running 紀錄（行程被砍、finished_at 永遠
+    # 是 NULL）會永久誤擋；(3)「查詢→啟動」之間是 TOCTOU 空窗，兩個請求可以同時
+    # 通過。鎖反映的是真實執行狀態，而且與排程觸發共用，兩條路徑才真正互斥。
+    job_type = _OPS_JOB_TYPE[job]
+    if _sched.job_is_running(job_type):
+        raise HTTPException(status_code=409, detail="上一輪還在執行中，請稍候")
+
     fn = {"daily": _sched.run_pipeline,
           "hourly": _sched.run_hourly_pipeline,
           "news": _sched.fetch_news_job}[job]

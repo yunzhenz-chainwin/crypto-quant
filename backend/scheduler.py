@@ -10,8 +10,11 @@ scheduler.py — 背景排程任務
 
 使用 APScheduler 的 BackgroundScheduler，在 FastAPI 啟動時一起跑（非阻塞）
 """
+import functools
 import os
 import subprocess
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -101,6 +104,61 @@ def _run_step(name: str, args: list, env: dict):
         tail = "\n".join((proc.stderr or proc.stdout or "").strip().splitlines()[-8:])
         raise RuntimeError(f"{name} 失敗 (exit {proc.returncode})：\n{tail}")
     return proc
+
+
+# ── 同型工作互斥（排程觸發與後台手動觸發共用同一把鎖）──────────────────────
+# APScheduler 的 max_instances=1 只擋得住排程自己重入，擋不掉後台 /admin/ops/run
+# 的手動觸發。兩條路徑同時跑同一支 fetch 腳本會並發讀寫同一份 CSV，寫出欄數不對
+# 的殘列（2026-08-04 事故：癱瘓日線與時線管線 6 天）。這裡讓兩者共用同一把鎖。
+_JOB_LOCKS = {
+    "daily_pipeline":  threading.Lock(),
+    "hourly_pipeline": threading.Lock(),
+    "news_fetch":      threading.Lock(),
+}
+
+
+def job_is_running(job_type: str) -> bool:
+    """該型工作目前是否有人在跑。只探詢不取鎖，給後台 API 先擋掉明顯的重複觸發。"""
+    lock = _JOB_LOCKS.get(job_type)
+    return bool(lock and lock.locked())
+
+
+@contextmanager
+def _job_slot(job_type: str):
+    """取得同型工作的獨占槽位；取不到就 yield False。
+
+    刻意非阻塞：寧可跳過這一輪，也不要讓請求排隊堆在同一份 CSV 上。
+    """
+    lock = _JOB_LOCKS.get(job_type)
+    if lock is None:
+        yield True
+        return
+    acquired = lock.acquire(blocking=False)
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            lock.release()
+
+
+def _exclusive(job_type: str):
+    """同型工作互斥裝飾器。已有人在跑就跳過本輪，不疊加。
+
+    擋的是「同一個行程內」的並發（排程執行緒 + 後台手動觸發執行緒），這正是
+    ops_run 用 job_runs 查詢擋不住的 TOCTOU 空窗。跨行程的重複實例不在守備
+    範圍內，那要靠只跑單一實例的部署紀律。
+    """
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            with _job_slot(job_type) as acquired:
+                if not acquired:
+                    print(f"[scheduler] {job_type} 上一輪尚未結束，跳過本輪"
+                          f"（避免並發讀寫同一份 CSV）")
+                    return None
+                return fn(*args, **kwargs)
+        return wrapper
+    return deco
 
 
 def _assert_data_fresh():
@@ -241,6 +299,7 @@ def run_forecast_pipeline():
         return {"status": "failed", "error": str(exc)}
 
 
+@_exclusive("daily_pipeline")
 def run_pipeline():
     """
     每日資料更新流程（每天 09:00 執行；日線 K 棒 UTC 00:00＝台灣 08:00 收盤後才抓）
@@ -363,6 +422,7 @@ def run_pipeline():
         print(f"[scheduler] daily pipeline failed: {e}")
 
 
+@_exclusive("hourly_pipeline")
 def run_hourly_pipeline():
     """
     小時線資料更新（每小時 :06 執行，等 Binance 收完整點 K 棒）
@@ -400,6 +460,7 @@ def run_hourly_pipeline():
         print(f"[scheduler] hourly pipeline failed: {e}")
 
 
+@_exclusive("news_fetch")
 def fetch_news_job():
     """
     新聞抓取任務（每 30 分鐘執行一次）
