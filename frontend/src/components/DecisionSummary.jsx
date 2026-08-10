@@ -163,28 +163,29 @@ function macroState(macro) {
     return { available: false, label: '總體環境未取得', detail: '宏觀資料暫時無法取得，不影響上方三項判斷。' }
   }
   const verdict = macro.verdict
-  const weak = macro.evidence?.level !== 'SUPPORTED'
-  // verdict_zh 本身已含「（風險偏好）」等括號，這裡取短標籤才不會變成雙層括號
-  const label = `總體環境${MACRO_VERDICT_ZH[verdict] ?? '未知'}${weak ? '（背景，未達統計顯著）' : ''}`
-
-  // 用結構化欄位重新組句，而不是把三段現成句子接起來：
-  // 那些句子各自為面板寫的，串起來會重複講「只作背景」並疊出多餘句號。
-  const parts = []
-  if (macro.summary_zh) parts.push(macro.summary_zh)
-
   const link = macro.linkage
-  if (link?.level_zh) {
-    const top = link.series?.find(s => s.key === link.top_key)
-    parts.push(top
-      ? `連動強度${link.level_zh}（最貼著${top.label_zh}走，${link.window_days} 日相關 ${signedCorr(top.corr)}、近五年第 ${top.percentile.toFixed(0)} 百分位）`
-      : `連動強度${link.level_zh}`)
-  }
+  const top = link?.series?.find(s => s.key === link.top_key)
 
+  // 主標放「相關性」而不是「順風/逆風」，是刻意的：
+  //   相關性是事實（BTC 現在跟什麼一起動，量得出來、不需要顯著性背書）；
+  //   順風/逆風是我們自訂規則的推論，而且主檢定 t=0.72 測不到效果。
+  // 把測不到的那個當標題，等於用版面位置給它權威感——正是 README §9 記載的老毛病。
+  const label = top
+    ? `BTC 目前最貼著${top.label_zh}走（${link.window_days} 日相關 ${signedCorr(top.corr)}，近五年第 ${top.percentile.toFixed(0)} 百分位）`
+    : `總體環境${MACRO_VERDICT_ZH[verdict] ?? '未知'}（背景參考）`
+
+  const parts = []
+  if (link?.level_zh) {
+    parts.push(`連動強度${link.level_zh}${link.level === 'LOW' ? '，加密目前走自己的邏輯' : ''}`)
+  }
+  // summary_zh 本身就以「順風：…／逆風：…」開頭，前面再冠一次判讀詞會變成「順風（順風：…）」
+  if (macro.summary_zh) {
+    parts.push(`環境判讀 — ${macro.summary_zh.replace(/。$/, '')}`)
+  }
   const ev = macro.evidence
   if (ev?.diff_pct != null) {
-    parts.push(`歷史檢定：順風之後 5 日平均比逆風高 ${ev.diff_pct >= 0 ? '+' : ''}${ev.diff_pct.toFixed(2)}%、t=${ev.t_hac}，${ev.level_zh}`)
+    parts.push(`此判讀的歷史檢定：順風之後 5 日平均比逆風高 ${ev.diff_pct >= 0 ? '+' : ''}${ev.diff_pct.toFixed(2)}%、t=${ev.t_hac}，${ev.level_zh}，不列為方向投票`)
   }
-  parts.push('不列為方向投票，只作背景脈絡')
 
   return {
     available: true,
@@ -355,7 +356,7 @@ export default function DecisionSummary({
             <EvidenceBlock title="① 當前技術方向" label={technical.label} detail={technical.detail} />
             <EvidenceBlock title={`② ${horizon} 日研究預測方向`} label={gate.label} detail={gate.detail} />
             <EvidenceBlock title="③ 歷史策略品質" label={historical.label} detail={historical.detail} />
-            <EvidenceBlock title="④ 總體環境（背景）" label={macroSummary.label} detail={macroSummary.detail} />
+            <EvidenceBlock title="④ 目前的總經連動" label={macroSummary.label} detail={macroSummary.detail} />
           </div>
 
           <div className="forecast-range">

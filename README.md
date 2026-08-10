@@ -158,6 +158,7 @@ src/
   verify_backtest.py     回測驗證器（改訊號/回測後必跑）
   macro_regime.py        ★宏觀規則單一真相來源（即時面板與歷史檢定共用；門檻已凍結，見檔頭）
   macro_eval.py          宏觀預測力檢定（HAC t 值/不重疊對照/區段數）→ reports/macro_evidence.json
+  macro_longrun.py       宏觀檢定的長樣本旁路（2017 起 8 年；已否定「樣本不夠」的退路，不動正式資料）
   cross_sectional*.py …  跨幣動量研究血脈（收斂成 momentum_signal.py，見 docs/archive/訊號研究記錄.md）
 frontend/src/
   App.jsx                根元件：總覽/詳細切換、60 秒輪詢自動更新、時線切換
@@ -254,6 +255,7 @@ CryptoSlate、Blockworks、BitcoinMagazine、動區、鏈新聞 + Google News �
 - 目前前台 6 因子「信心分數」經成績單檢驗**無預測力**（5 日勝率 45.2% vs 隨機 47.4%），屬教學性質。
 - 已驗證有效的是後台**防禦型跨幣動量策略**（動量選幣+BTC>100MA regime+波動目標）；研究血脈見 `src/cross_sectional*`、`docs/archive/訊號研究記錄.md`。
 - 宏觀環境（`/api/macro`）**已上架但刻意不進買賣分數**：事先指定的主檢定「等權籃子・持有 5 日・順風減逆風＝ **+0.66%，HAC t=0.72**」**未達統計顯著**（1/5/20 日方向排序一致，但都測不到證據）。面板照實標示不顯著，只當背景脈絡。重跑：`.venv\Scripts\python.exe src\macro_eval.py`。
+- 「樣本不夠才測不出來」這條退路**已經走過並否定**：把加密歷史拉到 2017（同 15 幣、8 年、327 區段，`src/macro_longrun.py`）重測，順風減逆風從 +0.81% 掉到 **+0.29%**、HAC t 從 0.90 掉到 **0.32**。樣本量幾乎翻倍而 t 值反向縮小，是沒有效果的典型指紋——不是資料不夠，是規則本身沒有 edge。
 - 宏觀真正可用的是**連動強度**（`linkage`）：BTC 對標普/美元/VIX/黃金的 60 日滾動相關＋歷史百分位——描述性事實，回答「此刻宏觀該給多少權重」，不做預測宣稱。
 
 > 改善方向（把動量策略請上前台、訊號增準、ML 研究）見 **§12 未來規劃**。
