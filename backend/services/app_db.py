@@ -10,6 +10,7 @@ app_db.py — 後台 / 系統用的 SQLite（data/app.db）
   app_config   集中設定（幣種清單、因子權重、回測預設…），後台可改
   daily_signal 每日各幣訊號快照（讓前台能畫「信心分數歷史」）
   fear_greed   恐懼貪婪指數歷史（自有，不必每次跟外部 API 還原）
+  macro_daily  宏觀日資料（DXY / VIX / 美債 10Y / 標普 / 黃金），供宏觀環境歷史重建與驗證
 
 設計與 news_store.py 一致：模組載入時自動建表，任何環境下都已就緒。
 """
@@ -120,6 +121,20 @@ def init_db():
                 date  TEXT PRIMARY KEY,
                 value INTEGER,
                 label TEXT
+            )
+        """)
+        # 宏觀市場日資料（美元指數 / VIX / 美債 10Y / 標普 / 黃金）。
+        # 即時面板只看得到「現在」，沒有歷史就無法檢驗這套宏觀規則有沒有預測力；
+        # 這張表就是為了讓 src/macro_eval.py 能逐日重建環境並驗證（見 #187）。
+        # 只存收盤原始值，不存判讀：規則在 src/macro_regime.py，改規則不必重抓資料。
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS macro_daily (
+                date  TEXT PRIMARY KEY,
+                dxy   REAL,
+                vix   REAL,
+                us10y REAL,
+                spx   REAL,
+                gold  REAL
             )
         """)
         # 工作項目 / 進度追蹤（後台記錄做了什麼、預計做什麼、何時做）
@@ -1205,6 +1220,72 @@ def fetch_fear_greed_history(limit: int = 0) -> int:
             "INSERT OR REPLACE INTO fear_greed (date, value, label) VALUES (?,?,?)", rows)
         conn.commit()
     return len(rows)
+
+
+# 宏觀日資料：欄位 → Yahoo Finance 代號（免金鑰、與即時面板同一組來源）
+MACRO_SERIES = {
+    "dxy":   "DX-Y.NYB",   # 美元指數
+    "vix":   "^VIX",       # 恐慌指數
+    "us10y": "^TNX",       # 美債 10 年殖利率
+    "spx":   "^GSPC",      # 標普 500
+    "gold":  "GC=F",       # 黃金
+}
+
+
+def fetch_macro_history(range_: str = "10y") -> dict:
+    """
+    從 Yahoo Finance 抓宏觀日線收盤填入 macro_daily（預設 10 年，覆蓋現有加密資料期間）。
+
+    寫入用 per-column upsert 而非 INSERT OR REPLACE：各序列的交易日不完全一致
+    （期貨與現貨假期不同），整列覆蓋會把同一天已存在的其他序列洗成 NULL。
+
+    單一序列失敗不影響其他序列（與即時面板同樣的容錯）；全部失敗才丟例外，
+    讓排程能如實記成失敗而不是假性成功。回傳 {序列: 寫入天數}。
+    """
+    import datetime as dt
+    from urllib.parse import quote
+    import requests
+
+    by_date: dict[str, dict] = {}
+    counts: dict[str, int] = {}
+    errors: list[str] = []
+    for col, sym in MACRO_SERIES.items():
+        try:
+            resp = requests.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(sym, safe='')}",
+                params={"interval": "1d", "range": range_},
+                headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+            resp.raise_for_status()
+            result = resp.json()["chart"]["result"][0]
+            stamps = result["timestamp"]
+            closes = result["indicators"]["quote"][0]["close"]
+            n = 0
+            for ts, close in zip(stamps, closes):
+                if close is None:
+                    continue
+                date = dt.datetime.fromtimestamp(int(ts), dt.timezone.utc).strftime("%Y-%m-%d")
+                by_date.setdefault(date, {})[col] = float(close)
+                n += 1
+            counts[col] = n
+        except Exception as exc:            # noqa: BLE001 — 單一來源失敗不該拖垮其他序列
+            errors.append(f"{col}: {exc}")
+            counts[col] = 0
+
+    if not by_date:
+        raise RuntimeError("宏觀資料全部來源皆失敗：" + "; ".join(errors))
+
+    cols = list(MACRO_SERIES)
+    sql = (f"INSERT INTO macro_daily (date, {', '.join(cols)}) "
+           f"VALUES (?{', ?' * len(cols)}) ON CONFLICT(date) DO UPDATE SET " +
+           ", ".join(f"{c}=COALESCE(excluded.{c}, macro_daily.{c})" for c in cols))
+    rows = [(date, *(vals.get(c) for c in cols)) for date, vals in sorted(by_date.items())]
+    with _connect() as conn:
+        conn.executemany(sql, rows)
+        conn.commit()
+    counts["days"] = len(rows)
+    if errors:
+        counts["errors"] = "; ".join(errors)
+    return counts
 
 
 # ── AI 分析快取 / 對話紀錄 / 用量（ai_analyst.py 用）─────────────────────────

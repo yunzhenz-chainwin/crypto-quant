@@ -373,6 +373,18 @@ def run_pipeline():
         except Exception as e:
             print(f"[scheduler] fear_greed history skip: {e}")
 
+        # 7b) 宏觀日資料 + 重跑預測力檢定。前台的宏觀說法（順風/逆風值多少錢）
+        #     直接引用 reports/macro_evidence.json，資料進來了就要讓證據跟著更新，
+        #     否則畫面會拿舊檢定替新環境背書。非關鍵，失敗只記錄。
+        try:
+            from backend.services.app_db import fetch_macro_history
+            from src.macro_eval import save_evidence
+            macro_counts = fetch_macro_history("1y")
+            save_evidence()
+            print(f"[scheduler] macro {macro_counts.get('days')} days · evidence updated")
+        except Exception as e:
+            print(f"[scheduler] macro history skip: {e}")
+
         # 8) 幣種級新聞（Google News 逐幣查詢）+ 重算近 3 天每日情緒彙總（非關鍵）
         try:
             from backend.routers.sentiment import fetch_coin_news_google

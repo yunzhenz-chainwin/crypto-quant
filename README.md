@@ -1,7 +1,7 @@
 # crypto-quant — 加密貨幣量化分析平台
 
 > **這份文件是專案的入口**：接手開發、回顧架構、或讓 AI 助手了解專案之前，先讀這一份。
-> 最後更新：2026-07-21
+> 最後更新：2026-08-10
 
 一句話介紹：一個自架的加密貨幣分析網站 — 自動抓行情與新聞、算技術指標與訊號、
 保留「規則引擎 + GPT」雙 AI 解讀能力，新增可拒答、可稽核的研究預測，附**即時報價**，配有管理後台，前台資料自動更新。
@@ -41,7 +41,9 @@
 | 自動更新 | 前端每 60 秒輪詢資料版本，有新資料才重拉 — 不用手動重整 |
 | 管理後台 `/admin` | 監控儀表板、幣種管理、工作項目追蹤、資料庫檢視、訊號成績單、策略現況、AI 設定（金鑰/用量） |
 
-> **暫時下架但程式保留**（取消 `App.jsx` 對應註解即可恢復）：`AIAnalystPanel`、相關性熱圖 `CorrelationHeatmap`、吉祥物小Q 漂浮聊天小幫手 `BotWidget`（2026-07-06，使用者為主管/老闆）、新手導覽 `OnboardingTour`、宏觀面板 `MacroPanel`（2026-07-07，價值待議）。
+> **暫時下架但程式保留**（取消 `App.jsx` 對應註解即可恢復）：`AIAnalystPanel`、相關性熱圖 `CorrelationHeatmap`、吉祥物小Q 漂浮聊天小幫手 `BotWidget`（2026-07-06，使用者為主管/老闆）、新手導覽 `OnboardingTour`。
+>
+> **宏觀面板 `MacroPanel` 已於 2026-08-10 重新上架**：補上十年宏觀歷史、預測力檢定與「以 BTC 為主的相關性溫度計」後，不再只是即時數字（見 §9-F）。
 
 ## 2. 快速啟動
 
@@ -90,13 +92,16 @@ flowchart TD
     API --> FRO["React frontend<br/>build 後由 FastAPI 服務"]
     BNWS["Binance WebSocket"] -.->|"旁路·即時報價"| FRO
     YH["Yahoo + CoinGecko"] -.->|"/api/macro·快取15分"| API
+    YHD["Yahoo 宏觀日線<br/>DXY/VIX/US10Y/SPX/GOLD"] --> ING
 ```
 
 原則：**CSV 是中繼/備援，前後台一律讀 SQLite**；所有排程都記錄到 `job_runs` 表（後台監控頁可看成功/失敗）。
 
 **旁路即時資料（不進排程管線、即時取用）**：
 - 即時報價：前端**直連 Binance WebSocket**（`lib/useLivePrices.js`），免經後端。
-- 宏觀環境：前端打 `/api/macro`，後端**當下**抓 Yahoo Finance + CoinGecko（快取 15 分），不落 DB。
+- 宏觀環境（即時面板）：前端打 `/api/macro`，後端**當下**抓 Yahoo Finance + CoinGecko（快取 15 分）。
+  這條旁路只負責「現在的數字」；**歷史**另由每日排程寫入 `macro_daily` 表（下方管線步驟 7b），
+  兩邊共用 `src/macro_regime.py` 的同一套規則，所以面板今天的判斷與歷史檢定是同一個定義。
 
 ### 設計決策（為什麼這樣做）
 
@@ -124,7 +129,7 @@ backend/
     correlation.py       /correlation
     sentiment.py         新聞抓取+情緒詞庫(中英)+幣種標記；/sentiment/*（news、summary、fear_greed）
     ai.py                /ai/analysis /ai/ask /ai/config（AI 機器人）
-    macro.py             /macro（規則式宏觀環境，免金鑰、快取15分）
+    macro.py             /macro（規則式宏觀環境＋證據＋連動強度）/macro/history（逐日環境標籤）
     admin.py             /admin/*（登入、監控、幣種、任務、DB 檢視、AI 設定、成績單、策略、操作）
   services/
     app_db.py            data/app.db 全部表與存取（設定/任務/K線/指標/訊號/預測/AI 快取…）
@@ -134,7 +139,8 @@ backend/
     ai_analyst.py        ★AI 雙引擎：build_context→規則分析→GPT(固定提示詞)→交叉檢核
     news_store.py        news.db 存取＋news_sentiment_daily 每日情緒彙總
     backtest_engine.py   回測引擎
-    macro.py             ★宏觀環境規則引擎（Yahoo+CoinGecko，英文邏輯/中文顯示）
+    macro.py             ★宏觀環境引擎（Yahoo+CoinGecko；規則核心在 src/macro_regime.py）
+                         另供 macro_snapshot_for_analysis()：把環境+證據+連動強度餵進 AI 判讀
     coin_facts.py        幣種基本資料（含 MATIC→POL 等歷史脈絡）
     canned_qa.py         AI 固定問答庫
 src/
@@ -150,6 +156,8 @@ src/
   verify_indicators.py   指標交叉驗證（前台信任徽章；後台即時）
   correlation.py         相關性矩陣（手動分析；排程已不再呼叫）
   verify_backtest.py     回測驗證器（改訊號/回測後必跑）
+  macro_regime.py        ★宏觀規則單一真相來源（即時面板與歷史檢定共用；門檻已凍結，見檔頭）
+  macro_eval.py          宏觀預測力檢定（HAC t 值/不重疊對照/區段數）→ reports/macro_evidence.json
   cross_sectional*.py …  跨幣動量研究血脈（收斂成 momentum_signal.py，見 docs/archive/訊號研究記錄.md）
 frontend/src/
   App.jsx                根元件：總覽/詳細切換、60 秒輪詢自動更新、時線切換
@@ -160,7 +168,7 @@ frontend/src/
     CandlestickChart.jsx 主圖（lightweight-charts，多週期時間軸）
     AIAnalystPanel.jsx   AI 分析面板（雙引擎+提問；現暫停掛載）
     MarketOverview.jsx   總覽卡片牆；MarketSummary.jsx 市場摘要列
-    MacroPanel.jsx       宏觀環境面板（現隱藏保留，見 §9）
+    MacroPanel.jsx       宏觀環境面板（因子格＋連動強度＋歷史證據＋環境時間軸）
     SentimentPanel.jsx   情緒面板（恐懼貪婪+新聞情緒溫度+新聞牆）
     BotMascot.jsx / BotWidget.jsx  小Q吉祥物（暫時下架，保留可恢復）
     ForecastDecisionCard 1/5/10 日機率、區間、風險、證據與拒答狀態
@@ -192,7 +200,7 @@ reports/ indicators_*.csv backtest_*（json/csv；圖 png 不追蹤）
 
 | 時間 | 工作 | 內容 |
 |---|---|---|
-| 每日 09:00（台灣，=UTC 01:00） | daily_pipeline | 抓各啟用幣日線→算指標→入庫 `prices`/`indicators`→重算 `daily_signal`→重產回測報表並入庫→新鮮度檢查→封存 1/5/10 日研究預測與成熟 outcome→恐懼貪婪→幣種級新聞+情緒彙總→清理 |
+| 每日 09:00（台灣，=UTC 01:00） | daily_pipeline | 抓各啟用幣日線→算指標→入庫 `prices`/`indicators`→重算 `daily_signal`→重產回測報表並入庫→新鮮度檢查→封存 1/5/10 日研究預測與成熟 outcome→恐懼貪婪→**宏觀日資料+預測力檢定**→幣種級新聞+情緒彙總→清理 |
 | 每小時 :06 | hourly_pipeline | BTC/ETH 1h 增量抓取→指標→入庫（幣種清單在 `app_config.hourly_symbols`） |
 | 每 30 分 | news_fetch | 9 家 RSS + Google News 中文 → 詞庫標註 → 去重入庫 → 滾動更新今日情緒彙總 |
 | 每日 03:30 | sqlite_backup | 以 SQLite online backup API 備份 `app.db` / `news.db`，驗證完整性後原子發布並輪替 |
@@ -203,7 +211,7 @@ reports/ indicators_*.csv backtest_*（json/csv；圖 png 不追蹤）
 flowchart LR
     S["09:00 觸發"] --> F["抓日線"] --> I["算指標"] --> IN["入庫"]
     IN --> DS["重算訊號"] --> BT["重產回測+入庫"] --> FR{"資料夠新?"}
-    FR -->|"是"| FC["封存預測+解析outcome"] --> FG["恐懼貪婪"] --> NW["幣種新聞+情緒"] --> CL["清理AI/raw"] --> OK["job=success"]
+    FR -->|"是"| FC["封存預測+解析outcome"] --> FG["恐懼貪婪"] --> MA["宏觀日資料<br/>+重跑預測力檢定"] --> NW["幣種新聞+情緒"] --> CL["清理AI/raw"] --> OK["job=success"]
     FR -->|"否/任一步失敗"| FAIL["job=failed<br/>不假性成功"]
 ```
 
@@ -245,7 +253,8 @@ CryptoSlate、Blockworks、BitcoinMagazine、動區、鏈新聞 + Google News �
 
 - 目前前台 6 因子「信心分數」經成績單檢驗**無預測力**（5 日勝率 45.2% vs 隨機 47.4%），屬教學性質。
 - 已驗證有效的是後台**防禦型跨幣動量策略**（動量選幣+BTC>100MA regime+波動目標）；研究血脈見 `src/cross_sectional*`、`docs/archive/訊號研究記錄.md`。
-- 宏觀環境引擎（`/api/macro`）已完成但**前端面板先隱藏**（價值待議，程式與 API 保留）。
+- 宏觀環境（`/api/macro`）**已上架但刻意不進買賣分數**：事先指定的主檢定「等權籃子・持有 5 日・順風減逆風＝ **+0.66%，HAC t=0.72**」**未達統計顯著**（1/5/20 日方向排序一致，但都測不到證據）。面板照實標示不顯著，只當背景脈絡。重跑：`.venv\Scripts\python.exe src\macro_eval.py`。
+- 宏觀真正可用的是**連動強度**（`linkage`）：BTC 對標普/美元/VIX/黃金的 60 日滾動相關＋歷史百分位——描述性事實，回答「此刻宏觀該給多少權重」，不做預測宣稱。
 
 > 改善方向（把動量策略請上前台、訊號增準、ML 研究）見 **§12 未來規劃**。
 
@@ -354,5 +363,9 @@ flowchart LR
 - 新手導覽 + 名詞辭典、API 失敗錯誤橫幅、載入骨架。
 - 圖表指標與時線擴充（4h / 更多幣，架構已參數化）。
 
-**F. 宏觀面板重新定位**
-- `MacroPanel` 現隱藏保留；未來或改為「**以 BTC 為主的相關性溫度計**」版本再上架（價值待議，程式與 `/api/macro` 已備）。
+**F. 宏觀面板重新定位 — 2026-08-10 完成**
+- 已依此構想重新上架：`macro_daily` 補十年歷史、規則核心抽成 `src/macro_regime.py`（面板與檢定同一套定義）、
+  `src/macro_eval.py` 逐日重建環境做預測力檢定，面板加上「**以 BTC 為主的相關性溫度計**」與證據強度標示。
+- 檢定結論是**不顯著**，因此宏觀只做背景脈絡層、不寫進 `scoring.py`；措辭一律標示證據不足（見 §9）。
+- 紀律：`src/macro_regime.py` 的門檻訂於檢定之前且**不得依檢定結果回頭調整**，否則證據從「事先規則的檢定」
+  退化成事後配適（同 #133 被攔阻的理由），必須重新宣告 holdout。

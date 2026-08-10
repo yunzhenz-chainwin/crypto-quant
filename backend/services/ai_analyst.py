@@ -396,6 +396,17 @@ def build_context(symbol: str) -> dict:
     except Exception:
         pass
 
+    # 宏觀環境（全市場背景，非單幣訊號）：帶上「證據強度」與「此刻連動強度」，
+    # 讓 GPT 與規則引擎都拿得到「這個宏觀讀值該給多少權重」，而不是只看到順風/逆風
+    # 兩個字就當成方向依據（見 reports/macro_evidence.json：主檢定並不顯著）。
+    try:
+        from backend.services.macro import macro_snapshot_for_analysis
+        macro = macro_snapshot_for_analysis()
+        if macro:
+            ctx["macro"] = macro
+    except Exception:
+        pass
+
     # 近 3 天新聞：優先取「標記到這顆幣」的新聞（coins 欄），不足再補全市場頭條
     try:
         ticker = symbol.replace("USDT", "")
@@ -476,6 +487,20 @@ def local_analysis(ctx: dict) -> dict:
     if s_bits:
         points.append({"tag": "情緒", "emoji": "🌡", "text": "；".join(s_bits) + "。"})
 
+    # 宏觀環境：講「現在是什麼環境」之外，一定要接著講「這件事有多少份量」，
+    # 否則讀的人會把一個未達統計顯著的背景讀值，當成跟技術面同級的方向依據。
+    macro = ctx.get("macro")
+    if macro:
+        m_bits = [f"總體環境{macro['verdict_zh']}"]
+        if macro.get("summary_zh"):
+            m_bits.append(macro["summary_zh"])
+        if macro.get("linkage_zh"):
+            m_bits.append(macro["linkage_zh"].rstrip("。"))
+        text = "；".join(m_bits) + "。"
+        if macro.get("evidence_zh"):
+            text += f"（{macro['evidence_zh']}）"
+        points.append({"tag": "宏觀", "emoji": "🌍", "text": text})
+
     # 風險提醒：找「與立場相反 / 可疑」的訊號
     risks = []
     if stance == "偏多":
@@ -499,6 +524,13 @@ def local_analysis(ctx: dict) -> dict:
             risks.append("日線偏空但 1h 短線反彈中，空單短線有軋空風險")
     if ns and ns.get("bearish", 0) > ns.get("bullish", 0) and stance == "偏多":
         risks.append("近期新聞偏空訊息較多，留意消息面逆風")
+    # 技術面與總體環境相反時提醒；連動強度低（加密自己走自己的）就不必拿宏觀嚇人，
+    # 措辭也刻意保守——這個環境標籤的歷史檢定並未達統計顯著。
+    if macro and macro.get("linkage_level") != "LOW":
+        if stance == "偏多" and macro["verdict"] == "RISK_OFF":
+            risks.append("技術面偏多，但總體環境逆風，反彈可能較不持久（宏觀僅供背景參考）")
+        if stance == "偏空" and macro["verdict"] == "RISK_ON":
+            risks.append("技術面偏空，但總體環境順風，留意跌深反彈（宏觀僅供背景參考）")
     if not risks:
         risks.append("多空訊號互見，方向未明時倉位宜保守")
 

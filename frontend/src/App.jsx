@@ -19,7 +19,9 @@ import IndicatorCards   from './components/IndicatorCards'
 import RecommendationCard from './components/RecommendationCard'
 import ForecastDecisionCard from './components/ForecastDecisionCard'
 import DecisionSummary from './components/DecisionSummary'
-// import MacroPanel    from './components/MacroPanel'   // 2026-07-07 先隱藏（價值待議；程式碼＋/api/macro 保留，未來或改「以 BTC 為主的相關性溫度計」版）
+// MacroPanel 2026-07-07 曾因「價值待議」下架；2026-08-10 依 §9-F 的重新定位上架：
+// 補上歷史檢定（reports/macro_evidence.json）與「以 BTC 為主的相關性溫度計」（linkage），
+// 面板不再只有即時數字，會一併講證據強度與此刻宏觀該給多少權重。
 import MarketSummary    from './components/MarketSummary'
 // import BotWidget     from './components/BotWidget'   // 2026-07-06 暫時下架：使用者確定為主管/老闆，聊天小幫手先隱藏（要恢復連同底部掛載一起取消註解）
 // import OnboardingTour   from './components/OnboardingTour' // 2026-07-06 暫停新手導覽
@@ -32,6 +34,7 @@ import { coinName, coinCat, catInfo, CATEGORIES } from './constants/coins'
 // 折疊面板動態載入（code splitting #29）：首屏不下載 recharts 等重依賴，
 // 進入詳細頁/展開面板時才抓對應 chunk（Suspense 顯示輕量載入字樣）。
 // const CorrelationHeatmap = lazy(() => import('./components/CorrelationHeatmap'))  // 2026-07-06 暫停幣種相關性分析
+const MacroPanel         = lazy(() => import('./components/MacroPanel'))
 const SentimentPanel     = lazy(() => import('./components/SentimentPanel'))
 const StrategyPanel      = lazy(() => import('./components/StrategyPanel'))   // 詳細資訊彈窗用（計分明細＋回測表格＋實驗室）
 // const AIAnalystPanel     = lazy(() => import('./components/AIAnalystPanel')) // 2026-07-06 暫停 AI 智能分析
@@ -65,6 +68,7 @@ const POLL_INTERVAL = 60 * 1000  // 資料版本輪詢：每 60 秒
 
 // 詳細頁可自由開關的區塊（預設全開；偏好存 localStorage，取代固定塞滿的版面）
 const PANELS = [
+  { key: 'macro', label: '宏觀環境' },
   { key: 'sentiment', label: '市場情緒/新聞' },
   // { key: 'correlation', label: '幣種相關性' },  // 2026-07-06 暫停幣種相關性分析
 ]
@@ -595,6 +599,12 @@ export default function App() {
               {showAI && <Suspense fallback={panelFallback}><AIAnalystPanel symbol={active} refreshKey={dataVersion} /></Suspense>}
             </section>
             */}
+
+            {/* 宏觀環境：市場整體背景（非單幣訊號）。自帶標題與「展開證據」，
+                故不再多包一層折疊按鈕，避免兩個同名標題疊在一起。 */}
+            {panelOn('macro') && (
+              <Suspense fallback={panelFallback}><MacroPanel /></Suspense>
+            )}
 
             {/* 市場情緒 / 新聞：依需求移到最後面 */}
             {panelOn('sentiment') && (

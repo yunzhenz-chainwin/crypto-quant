@@ -5,6 +5,13 @@ macro.py — 宏觀環境引擎（規則式，無需 GPT）
 抓「會影響加密貨幣的宏觀數字」→ 用規則判斷對加密是「順風/逆風」→ 彙總整體風險偏好：
   DXY 美元指數、VIX 恐慌指數、US10Y 美債殖利率、S&P500、黃金、BTC 主導率、加密總市值
 
+2026-08 起這一層不再只是「現在的數字」，補上三件讓它有分析價值的東西：
+  1. 規則核心抽到 src/macro_regime.py — 面板顯示的環境與被回頭驗證的環境是同一套定義
+  2. evidence  — src/macro_eval.py 的歷史檢定結果（含「其實不顯著」也照實回傳）
+  3. linkage   — 加密與各宏觀序列的 60 日滾動相關，回答「此刻宏觀該不該當一回事」
+說白話：面板不只講「現在順風還逆風」，還講「這個判斷有多少證據」與「現在總經
+對加密的影響力有多大」。沒有證據的部分一律照實說沒有，不靠措辭撐場面。
+
 設計原則（依使用者要求）：分析邏輯/標籤用「英文」（key、impact、verdict），
 對外顯示欄位一律轉「中文」（*_zh）。政治/事件的「文字解讀」需 LLM，待 GPT 開通後另接加值層。
 
@@ -13,15 +20,29 @@ macro.py — 宏觀環境引擎（規則式，無需 GPT）
 """
 from __future__ import annotations
 import json
+import sys
 import time
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import quote
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT))
+
+from src.macro_regime import (       # noqa: E402 — 需先設定 sys.path 才能 import src/
+    DRIVER_KEYS, IMPACT_ZH, LABEL_ZH, aggregate, build_factor, summary_zh,
+)
 
 _CACHE: dict = {"ts": 0.0, "data": None}
 _TTL = 900  # 15 分鐘
 
-_IMPACT_ZH = {"TAILWIND": "順風", "HEADWIND": "逆風", "NEUTRAL": "中性"}
+EVIDENCE_PATH = ROOT / "reports" / "macro_evidence.json"
+_EVIDENCE_CACHE: dict = {"mtime": None, "data": None}
+
+# 連動強度的中文標籤（linkage 的 key 來自 macro_eval.LINK_SERIES）
+_LINK_LABEL_ZH = {"SPX": "美股標普 500", "DXY": "美元指數",
+                  "VIX": "恐慌指數 VIX", "GOLD": "黃金"}
 
 
 def _get(url: str) -> dict:
@@ -58,97 +79,191 @@ def _coingecko_global():
         return None
 
 
-def _factor(key, label_zh, value, change_pct, impact, note_zh, unit=""):
+def _extra_factor(key, label_zh, value, change_pct, impact, note_zh, unit=""):
+    """情境參考因子（BTC 主導率 / 總市值）：不在 macro_regime 的規則內，不參與彙總。"""
     return {
         "key": key, "label_zh": label_zh,
         "value": round(value, 2), "unit": unit,
         "change_pct": round(change_pct, 2) if change_pct is not None else None,
-        "impact": impact, "impact_zh": _IMPACT_ZH[impact], "note_zh": note_zh,
+        "impact": impact, "impact_zh": IMPACT_ZH[impact], "note_zh": note_zh,
     }
 
 
+# ── 歷史檢定結果（src/macro_eval.py 產出）─────────────────────────────────
+def load_evidence() -> dict | None:
+    """
+    讀 reports/macro_evidence.json（排程每日重產）。依檔案 mtime 快取，改檔即生效。
+
+    刻意連「不顯著」也原樣帶出：這份的用途是替面板的說法定調，
+    證據弱的時候前台必須跟著把話講輕，而不是隱藏證據只留結論。
+    """
+    try:
+        mtime = EVIDENCE_PATH.stat().st_mtime
+    except OSError:
+        return None
+    if _EVIDENCE_CACHE["mtime"] != mtime:
+        try:
+            with open(EVIDENCE_PATH, encoding="utf-8") as f:
+                _EVIDENCE_CACHE["data"] = json.load(f)
+            _EVIDENCE_CACHE["mtime"] = mtime
+        except Exception:
+            return None
+    return _EVIDENCE_CACHE["data"]
+
+
+def _evidence_summary(ev: dict | None) -> dict | None:
+    """把檢定結果壓成前台可直接顯示的一句話 + 可信度等級。"""
+    if not ev:
+        return None
+    primary = ev.get("primary_test") or {}
+    if not primary.get("available"):
+        return None
+    diff, t = primary.get("diff_pct"), primary.get("t_hac")
+    strong = primary.get("significant")
+    period = ev.get("period") or {}
+    eps = ev.get("regime_episodes") or {}
+    n_eps = eps.get("RISK_ON", 0) + eps.get("RISK_OFF", 0)
+    if strong:
+        level, level_zh = "SUPPORTED", "有統計證據"
+        text = (f"歷史上「順風」之後 5 日的平均報酬比「逆風」高 {diff:+.2f}%"
+                f"（t={t}，達統計顯著）。")
+    else:
+        level, level_zh = "DIRECTIONAL_ONLY", "方向一致但未達顯著"
+        text = (f"歷史上「順風」之後 5 日的平均報酬比「逆風」高 {diff:+.2f}%，"
+                f"但統計上不顯著（t={t}）。方向合理、強度不足，"
+                f"僅供背景參考，不足以當買賣依據。")
+    return {
+        "level": level, "level_zh": level_zh,
+        "diff_pct": diff, "t_hac": t,
+        "sample_zh": f"樣本 {period.get('start')}~{period.get('end')}，"
+                     f"順風/逆風共 {n_eps} 個獨立區段",
+        "text_zh": text,
+    }
+
+
+# ── 連動強度：此刻宏觀對加密的影響力 ─────────────────────────────────────
+_LINK_CACHE: dict = {"ts": 0.0, "data": None}
+
+
+def _compute_linkage() -> dict | None:
+    """
+    BTC 與各宏觀序列的 60 日滾動相關（讀 DB，與研究腳本同一個函式）。
+    資料不足或出錯回 None——這是加值資訊，不該讓主面板一起壞掉。
+
+    自己快取 15 分鐘：它只跟每日收盤有關，但判讀路徑（每次 AI 分析）也會用到，
+    不快取等於每次分析都重算 1200 列滾動相關。
+    """
+    now = time.time()
+    if _LINK_CACHE["data"] is not None and now - _LINK_CACHE["ts"] <= _TTL:
+        return _LINK_CACHE["data"]
+    data = _compute_linkage_uncached()
+    if data is not None:
+        _LINK_CACHE["data"], _LINK_CACHE["ts"] = data, now
+    return data
+
+
+def _compute_linkage_uncached() -> dict | None:
+    try:
+        import pandas as pd
+        from backend.services.reader import load_macro_history, load_prices
+        from src.macro_eval import linkage
+
+        macro_rows = load_macro_history()
+        price_rows = load_prices("BTCUSDT")
+        if len(macro_rows) < 200 or len(price_rows) < 200:
+            return None
+        macro = pd.DataFrame(macro_rows)
+        macro.index = pd.DatetimeIndex(pd.to_datetime(macro["date"]))
+        prices = pd.DataFrame(price_rows)
+        close = pd.Series(
+            prices["close"].astype(float).to_numpy(),
+            index=pd.DatetimeIndex(pd.to_datetime(prices["date"], utc=True)).tz_convert(None).normalize(),
+        )
+        out = linkage(close, macro)
+        if not out.get("series"):
+            return None
+        for s in out["series"]:
+            s["label_zh"] = _LINK_LABEL_ZH.get(s["key"], s["key"])
+        out.update(_linkage_reading(out["series"]))
+        return out
+    except Exception:
+        return None
+
+
+def _linkage_reading(series: list[dict]) -> dict:
+    """
+    連動強度 → 白話判讀（純規則）。
+
+    回答兩個實際問題：現在加密最貼著哪一個總經變數走？宏觀讀值該給多少權重？
+    強度用最大 |相關|：>=0.5 高、>=0.3 中等、否則低。
+    """
+    top = max(series, key=lambda s: abs(s["corr"]))
+    strength = abs(top["corr"])
+    if strength >= 0.5:
+        level, level_zh, weight_zh = "HIGH", "高", "宏觀讀值值得看重"
+    elif strength >= 0.3:
+        level, level_zh, weight_zh = "MEDIUM", "中等", "宏觀可當背景，別當主因"
+    else:
+        level, level_zh, weight_zh = "LOW", "低", "加密目前走自己的邏輯，宏觀影響有限"
+
+    direction = "同向" if top["corr"] > 0 else "反向"
+    extreme = ""
+    if top["percentile"] >= 80:
+        extreme = "，為近五年偏高水準"
+    elif top["percentile"] <= 20:
+        extreme = "，為近五年偏低水準"
+    return {
+        "level": level, "level_zh": level_zh,
+        "top_key": top["key"], "top_corr": top["corr"],
+        "text_zh": (f"目前 BTC 與{top['label_zh']}的 60 日相關性為 {top['corr']:+.2f}"
+                    f"（{direction}{extreme}），整體連動強度{level_zh}；{weight_zh}。"),
+    }
+
+
+# ── 即時面板 ──────────────────────────────────────────────────────────────
 def _compute() -> dict:
     factors = []
-    drivers = []   # 4 個主要風險驅動（DXY/VIX/US10Y/SPX）的 impact，決定整體 verdict
+    impacts = {}     # 4 個主要風險驅動（DXY/VIX/US10Y/SPX）的 impact，決定整體 verdict
 
-    # DXY 美元指數：走強→逆風（加密以美元計價，強美元＝風險趨避）
-    dxy = _yahoo("DX-Y.NYB")
-    if dxy:
-        v, c = dxy
-        if c > 0.5:    imp, note = "HEADWIND", "美元走強 → 加密（以美元計價）承壓"
-        elif c < -0.5: imp, note = "TAILWIND", "美元走弱 → 資金外溢至風險資產，利加密"
-        else:          imp, note = "NEUTRAL",  "美元指數持平，影響有限"
-        factors.append(_factor("DXY", "美元指數", v, c, imp, note))
-        drivers.append(imp)
-
-    # VIX 恐慌指數：高→逆風
-    vix = _yahoo("^VIX")
-    if vix:
-        v, c = vix
-        if v >= 25:   imp, note = "HEADWIND", f"恐慌偏高（{v:.0f}）→ 市場避險，壓抑風險資產"
-        elif v <= 16: imp, note = "TAILWIND", f"波動平靜（{v:.0f}）→ 風險偏好高，利加密"
-        else:         imp, note = "NEUTRAL",  f"恐慌中性（{v:.0f}）"
-        factors.append(_factor("VIX", "恐慌指數 VIX", v, c, imp, note))
-        drivers.append(imp)
-
-    # US10Y 美債 10 年殖利率：上行→逆風（無風險報酬升，資金離開風險資產）
-    ty = _yahoo("^TNX")
-    if ty:
-        v, c = ty
-        if c > 2:    imp, note = "HEADWIND", "殖利率上行 → 無風險報酬升、資金離開風險資產"
-        elif c < -2: imp, note = "TAILWIND", "殖利率下行 → 利風險資產"
-        else:        imp, note = "NEUTRAL",  "殖利率持平"
-        factors.append(_factor("US10Y", "美債 10Y 殖利率", v, c, imp, note, unit="%"))
-        drivers.append(imp)
-
-    # S&P500：上漲→順風（加密與美股風險同向，近年高相關）
-    spx = _yahoo("^GSPC")
-    if spx:
-        v, c = spx
-        if c > 1:    imp, note = "TAILWIND", "美股偏多 → 風險偏好上升，加密同向受惠"
-        elif c < -1: imp, note = "HEADWIND", "美股走弱 → 風險趨避，加密同向承壓"
-        else:        imp, note = "NEUTRAL",  "美股持平"
-        factors.append(_factor("SPX", "標普 500", v, c, imp, note))
-        drivers.append(imp)
-
-    # 黃金：情境參考（不計入 verdict）——與 BTC 同屬「價值儲存」敘事
-    gold = _yahoo("GC=F")
-    if gold:
-        v, c = gold
-        factors.append(_factor("GOLD", "黃金", v, c, "NEUTRAL",
-                               "避險情緒參考；與 BTC 同屬『價值儲存』敘事"))
+    # 規則一律走 src/macro_regime，與歷史重建同一套定義（改門檻只改那一份）
+    for key, sym, unit in (("DXY", "DX-Y.NYB", ""), ("VIX", "^VIX", ""),
+                           ("US10Y", "^TNX", "%"), ("SPX", "^GSPC", ""),
+                           ("GOLD", "GC=F", "")):
+        quote_ = _yahoo(sym)
+        if not quote_:
+            continue
+        value, change = quote_
+        factor = build_factor(key, value, change, unit=unit)
+        if not factor:
+            continue
+        factors.append(factor)
+        if key in DRIVER_KEYS:
+            impacts[key] = factor["impact"]
 
     # CoinGecko：BTC 主導率 + 加密總市值（山寨輪動 / 整體動能，情境參考）
     g = _coingecko_global()
     if g:
-        dom = g["btc_dom"]
-        factors.append(_factor("BTC_DOM", "BTC 主導率", dom, None, "NEUTRAL",
-                               f"上升＝資金集中 BTC（山寨承壓），下降＝轉進山寨（山寨季）", unit="%"))
+        factors.append(_extra_factor("BTC_DOM", "BTC 主導率", g["btc_dom"], None, "NEUTRAL",
+                                     "上升＝資金集中 BTC（山寨承壓），下降＝轉進山寨（山寨季）",
+                                     unit="%"))
         mc = g["mcap_24h"]
         imp = "TAILWIND" if mc > 1 else "HEADWIND" if mc < -1 else "NEUTRAL"
-        factors.append(_factor("TOTAL_MCAP", "加密總市值", g["total_mcap"] / 1e12, mc, imp,
-                               "全加密市值 24h 動能", unit="兆"))
+        factors.append(_extra_factor("TOTAL_MCAP", "加密總市值", g["total_mcap"] / 1e12, mc, imp,
+                                     "全加密市值 24h 動能", unit="兆"))
 
-    # ── 彙總：4 個主要驅動的（順風 − 逆風）淨值 → 整體風險偏好 ──
-    net = drivers.count("TAILWIND") - drivers.count("HEADWIND")
-    if net >= 2:    verdict, verdict_zh, tone = "RISK_ON",  "順風（風險偏好）", "good"
-    elif net <= -2: verdict, verdict_zh, tone = "RISK_OFF", "逆風（風險趨避）", "bad"
-    else:           verdict, verdict_zh, tone = "NEUTRAL",  "中性（多空拉鋸）", "warn"
-
-    tw = [f["label_zh"] for f in factors if f["impact"] == "TAILWIND"]
-    hw = [f["label_zh"] for f in factors if f["impact"] == "HEADWIND"]
-    parts = []
-    if hw: parts.append("逆風：" + "、".join(hw))
-    if tw: parts.append("順風：" + "、".join(tw))
-    summary_zh = "；".join(parts) if parts else "宏觀因子多為中性，方向不明。"
+    verdict = aggregate(impacts)
+    evidence = _evidence_summary(load_evidence())
+    link = _compute_linkage()
 
     return {
         "ok": True,
         "as_of": datetime.now(timezone.utc).isoformat(timespec="minutes"),
-        "verdict": verdict, "verdict_zh": verdict_zh, "tone": tone, "net": net,
-        "summary_zh": summary_zh,
+        **verdict,
+        "summary_zh": summary_zh(factors),
         "note_zh": "宏觀因子為市場整體背景（非單一幣訊號），依歷史相關性的經驗法則，非保證。",
         "factors": factors,
+        "evidence": evidence,
+        "linkage": link,
     }
 
 
@@ -165,6 +280,105 @@ def get_macro() -> dict:
             if _CACHE["data"] is None:
                 return {"ok": False, "error": str(e), "factors": []}
     return _CACHE["data"]
+
+
+# ── 歷史環境（前台時間軸 / 研究用）────────────────────────────────────────
+def get_macro_history(days: int = 365) -> dict:
+    """
+    逐日的宏觀環境標籤（DB 的 macro_daily → src/macro_regime 重算）。
+
+    給前台畫「這一年多數時間是順風還是逆風」的時間軸；也讓任何人能自己核對
+    面板今天的判斷與歷史是同一套規則算出來的。
+    """
+    try:
+        import pandas as pd
+        from backend.services.reader import load_macro_history
+        from src.macro_regime import regime_series
+
+        rows = load_macro_history()
+        if len(rows) < 10:
+            return {"ok": False, "error": "宏觀歷史資料不足", "points": []}
+        frame = pd.DataFrame(rows)
+        frame.index = pd.DatetimeIndex(pd.to_datetime(frame["date"]))
+        reg = regime_series(frame).tail(max(1, days))
+        points = [
+            {"date": str(idx.date()), "verdict": row["verdict"], "net": int(row["net"])}
+            for idx, row in reg.iterrows()
+        ]
+        counts = {}
+        for p in points:
+            counts[p["verdict"]] = counts.get(p["verdict"], 0) + 1
+        return {"ok": True, "points": points, "counts": counts,
+                "days": len(points), "labels_zh": LABEL_ZH}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "points": []}
+
+
+def _daily_regime_snapshot() -> dict | None:
+    """
+    只讀 DB 的「最新一天環境」：verdict + 逐因子順逆風摘要，完全不連外網。
+    供判讀路徑在面板快取是冷的時候使用（寧可用昨天收盤，也不要卡在外部 API）。
+    """
+    try:
+        import pandas as pd
+        from backend.services.reader import load_macro_history
+        from src.macro_regime import VERDICT_ZH, regime_series
+
+        rows = load_macro_history()
+        if len(rows) < 10:
+            return None
+        frame = pd.DataFrame(rows)
+        frame.index = pd.DatetimeIndex(pd.to_datetime(frame["date"]))
+        last = regime_series(frame).iloc[-1]
+        factors = [
+            {"label_zh": LABEL_ZH[key], "impact": last.get(f"{key}_impact")}
+            for key in DRIVER_KEYS if last.get(f"{key}_impact")
+        ]
+        verdict = str(last["verdict"])
+        return {
+            "date": str(frame.index[-1].date()),
+            "verdict": verdict,
+            "verdict_zh": VERDICT_ZH.get(verdict, verdict),
+            "summary_zh": summary_zh(factors),
+        }
+    except Exception:
+        return None
+
+
+def macro_snapshot_for_analysis() -> dict | None:
+    """
+    給判讀層（AI 分析 / 白話解讀）用的宏觀摘要。
+
+    優先用面板的 15 分鐘快取，讓「畫面上的宏觀」與「分析文字裡的宏觀」是同一個判斷；
+    快取是冷的就退回 DB 歷史重算——判讀路徑不該為了宏觀去等 6 個外部 API，
+    寧可用昨天收盤的環境，也不要讓分析卡住或整個失敗。
+    """
+    cached = _CACHE.get("data")
+    if cached and cached.get("ok"):
+        source = "live"
+        verdict, verdict_zh = cached["verdict"], cached["verdict_zh"]
+        summary = cached.get("summary_zh")
+        as_of = cached.get("as_of", "")[:10]
+    else:
+        daily = _daily_regime_snapshot()
+        if not daily:
+            return None
+        source = "daily"
+        verdict, verdict_zh = daily["verdict"], daily["verdict_zh"]
+        summary, as_of = daily["summary_zh"], daily["date"]
+
+    # 連動強度只讀 DB，兩條路徑都補得上（快取過的話幾乎零成本）
+    link = _compute_linkage()
+    evidence = _evidence_summary(load_evidence())
+    return {
+        "source": source, "as_of": as_of,
+        "verdict": verdict, "verdict_zh": verdict_zh,
+        "summary_zh": summary,
+        "evidence_level": (evidence or {}).get("level"),
+        "evidence_zh": (evidence or {}).get("text_zh"),
+        "linkage_zh": (link or {}).get("text_zh"),
+        "linkage_level": (link or {}).get("level"),
+    }
 
 
 if __name__ == "__main__":

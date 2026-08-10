@@ -200,6 +200,22 @@ def load_signal_history(symbol: str, days: int = None,
     return [dict(r) for r in rows]
 
 
+def load_macro_history(days: int = None,
+                       start: str = None, end: str = None) -> list[dict]:
+    """
+    宏觀日資料歷史(美元指數/VIX/美債10Y/標普/黃金),全市場單一序列。
+    來源:macro_daily 表(排程每日從 Yahoo Finance 回補,可追溯 10 年)。
+    只回原始收盤值,不含判讀;regime 標籤由 src/macro_regime.py 依這些值重算。
+    """
+    tail, rparams, reverse = _range_clause(days, start, end, tscol="date")
+    sql = "SELECT date, dxy, vix, us10y, spx, gold FROM macro_daily WHERE 1=1" + tail
+    with _connect() as conn:
+        rows = conn.execute(sql, rparams).fetchall()
+    if reverse:
+        rows = rows[::-1]
+    return [dict(r) for r in rows]
+
+
 def load_fear_greed_history(days: int = None,
                             start: str = None, end: str = None) -> list[dict]:
     """

@@ -76,7 +76,11 @@ export const fetchIntervals = () => get('/intervals')
 export const fetchCorrelation = () => get('/correlation')
 
 // 宏觀環境（規則式）：DXY/VIX/美債/標普/黃金/BTC主導率/總市值 → 對加密順風/逆風
+// 另含 evidence（這套判斷的歷史檢定結果）與 linkage（此刻宏觀對加密的影響力）
 export const fetchMacro = () => get('/macro')
+
+// 宏觀環境的逐日標籤時間軸（與面板同一套規則重算）；展開詳細時才載入
+export const fetchMacroHistory = (days = 365) => get(`/macro/history?days=${days}`)
 
 // 取得所有幣種的當前訊號（BULL / BEAR / NEUTRAL）
 export const fetchAllSignals = () => get('/signals')
