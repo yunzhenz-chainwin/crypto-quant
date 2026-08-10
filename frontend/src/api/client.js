@@ -85,6 +85,9 @@ export const fetchMacroHistory = (days = 365) => get(`/macro/history?days=${days
 // 新聞的實際來源分布（直接訂閱的 RSS + Google News 聚合帶進來的第三方媒體）
 export const fetchNewsSources = () => get('/sentiment/sources')
 
+// 研究預測的累積狀態（已結算筆數、是否曾通過門檻、與最笨對照組的實測比較）
+export const fetchForecastLedgerStatus = () => get('/forecast/ledger-status')
+
 // 取得所有幣種的當前訊號（BULL / BEAR / NEUTRAL）
 export const fetchAllSignals = () => get('/signals')
 

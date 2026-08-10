@@ -19,6 +19,34 @@ from src.forecasting import (
 
 router = APIRouter()
 
+# 累積狀態的快取：只隨每日封存變動，但前台每次載入都會問，不快取等於每次重算 1200+ 列
+_LEDGER_CACHE: dict = {"ts": 0.0, "data": None}
+_LEDGER_TTL = 600
+
+
+@router.get("/forecast/ledger-status")
+def get_forecast_ledger_status():
+    """
+    研究預測的累積狀態（公開、唯讀、只有彙總數字，不含任何單筆預測內容）。
+
+    給前台「統一判斷摘要」的第②格用。這一格原本寫「研究預測未通過門檻」，
+    但那句話沒講出真相：自上線以來從未通過過一次，而且實測連「完全不用模型、
+    一律猜較常出現方向」的對照組都贏不了（見 src/forecast_diagnose.py）。
+    數字由該診斷模組計算，畫面與診斷永遠是同一組數。
+    """
+    import time
+    from src.forecast_diagnose import ledger_status
+
+    now = time.time()
+    if _LEDGER_CACHE["data"] is None or now - _LEDGER_CACHE["ts"] > _LEDGER_TTL:
+        try:
+            _LEDGER_CACHE["data"] = ledger_status()
+            _LEDGER_CACHE["ts"] = now
+        except Exception as exc:            # noqa: BLE001 — 加值資訊，不該讓主畫面壞掉
+            if _LEDGER_CACHE["data"] is None:
+                return {"ok": False, "error": str(exc)}
+    return {"ok": True, **_LEDGER_CACHE["data"]}
+
 
 @router.get("/forecast/scorecard")
 def get_forecast_scorecard(

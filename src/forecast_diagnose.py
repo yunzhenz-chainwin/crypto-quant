@@ -135,6 +135,57 @@ def report_skill(resolved: list[dict]) -> None:
             print(f"    ⚠ 預測日彼此重疊 {h} 天，實質獨立樣本遠少於 {len(sub)} 筆")
 
 
+def ledger_status() -> dict:
+    """
+    給前台用的「研究預測累積狀態」摘要（唯讀）。
+
+    刻意跟診斷 CLI 共用同一組載入與計算：畫面上講的數字，必須跟重跑診斷得到的
+    一模一樣。若哪天模型真的贏過對照組，這裡的措辭會自己跟著變，不必改前端。
+    """
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    snaps = load_snapshots(conn)
+    resolved = load_resolved(conn)
+    since = conn.execute("SELECT MIN(as_of) FROM forecast_snapshot_v2").fetchone()[0]
+
+    scores = [s["score"] for s in snaps if s["score"] is not None]
+    released = sum(1 for s in snaps if s.get("status") == "ready")
+
+    horizons = []
+    for h in sorted({r["h"] for r in resolved}):
+        sub = [r for r in resolved if r["h"] == h]
+        y = np.array([r["up"] for r in sub])
+        p = np.array([r["p_up"] for r in sub])
+        model_hit = float(((p > 0.5) == (y == 1)).mean() * 100)
+        baseline_hit = float(max(y.mean(), 1 - y.mean()) * 100)
+        horizons.append({
+            "horizon_days": int(h), "n": len(sub),
+            "model_hit_pct": round(model_hit, 1),
+            "baseline_hit_pct": round(baseline_hit, 1),
+            "beats_baseline": model_hit > baseline_hit,
+        })
+
+    beats_any = any(x["beats_baseline"] for x in horizons)
+    parts = [f"已結算 {len(resolved)} 筆"]
+    if released == 0 and snaps:
+        parts.append(f"{len(snaps)} 次全部未達發布門檻"
+                     f"（門檻 {RELEASE_THRESHOLD}，最高 {max(scores) if scores else 0}）")
+    if horizons:
+        parts.append("目前實測" + ("已有天期勝過" if beats_any else "仍輸給")
+                     + "「完全不用模型、一律猜較常出現方向」的對照組")
+    return {
+        "total": len(snaps),
+        "resolved": len(resolved),
+        "released": released,
+        "since": since[:10] if since else None,
+        "threshold": RELEASE_THRESHOLD,
+        "best_confidence": max(scores) if scores else None,
+        "horizons": horizons,
+        "beats_baseline_any": beats_any,
+        "summary_zh": "；".join(parts) + "。",
+    }
+
+
 def main() -> None:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row

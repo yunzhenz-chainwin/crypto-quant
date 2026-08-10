@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+import { fetchForecastLedgerStatus } from '../api/client'
 import { FORECAST_HORIZONS, stateOfForecast } from '../lib/forecastViewModel'
 
 const MIN_HISTORY_TRADES = 20
@@ -214,13 +216,32 @@ function macroContext(macro, direction) {
     : `另註：總體環境與目前方向相反，可能讓走勢較不順；宏觀證據未達顯著，不足以推翻上方判斷。`
 }
 
+/**
+ * 第②格：研究預測「累積中」的誠實呈現。
+ *
+ * 這一格原本叫「N 日研究預測方向」，但它從上線至今 723 次全部拒答，
+ * 從來沒有給過方向——整張卡「① 技術 vs ② 預測」的比較前提根本沒成立過。
+ * 與其每天顯示同一句「未通過門檻」（聽起來像暫時性小狀況），不如把真相攤開：
+ * 累積了多少、一次都沒通過、而且實測連最笨的對照組都贏不了。
+ * 數字全部來自 /api/forecast/ledger-status（與 src/forecast_diagnose.py 同一組計算），
+ * 不寫死在畫面上——哪天模型真的變好，這裡會自己改口。
+ */
+function accrualState(gate, ledger) {
+  if (!ledger?.ok) {
+    return { label: '研究預測（累積中）', detail: gate?.detail ?? '研究預測尚未通過發布門檻，未列入方向依據。' }
+  }
+  const detail = ledger.summary_zh
+    + '（研究紀錄持續累積，資料越久越有判斷價值；目前不列為方向依據。）'
+  return { label: '研究預測（累積中）', detail }
+}
+
 function historyContext(history) {
   if (history.kind === 'favorable') return '歷史策略品質較有利，但它只描述策略可靠度，不是第三個方向訊號。'
   if (history.kind === 'weak') return `${history.label}，不能把方向一致升級為成功或買賣訊號。`
   return `${history.label}，目前只能視為有限的可靠度背景。`
 }
 
-function combinedJudgement(technical, gate, history) {
+function combinedJudgement(technical, gate, history, ledger) {
   if (gate.kind === 'stale') {
     return {
       kind: 'stale',
@@ -230,11 +251,21 @@ function combinedJudgement(technical, gate, history) {
     }
   }
   if (gate.kind === 'insufficient' || gate.kind === 'abstain') {
+    // 舊文案「研究預測未通過門檻，暫不整合方向」把結構性事實講成暫時性小狀況：
+    // 它其實從上線以來一次都沒通過。改由「技術現況」帶頭，並把累積事實講明。
+    const neverReleased = ledger?.ok && ledger.released === 0 && ledger.total > 0
+    const accrual = neverReleased
+      ? `研究預測自上線以來 ${ledger.total} 次全部未達發布門檻`
+      : '研究預測尚未通過發布門檻'
     return {
       kind: 'insufficient',
-      label: '研究預測未通過門檻，暫不整合方向',
-      detail: `不把目前技術偏向當成未來方向。${historyContext(history)}`,
-      next: '等待樣本、方向優勢與證據充分度通過門檻；歷史策略品質只用來評估可靠度。',
+      label: technical.direction
+        ? `${technical.label}，但沒有獨立佐證`
+        : `${technical.label}，方向未明`,
+      detail: `${accrual}，${historyContext(history)}目前不形成方向結論。`,
+      next: neverReleased && ledger.beats_baseline_any === false
+        ? '預測模型目前連「完全不用模型、一律猜較常出現方向」都贏不了，發布門檻不會為了讓畫面有結論而調低；請以技術現況與歷史品質為主。'
+        : '等待樣本、方向優勢與證據充分度通過門檻；歷史策略品質只用來評估可靠度。',
     }
   }
   if (!technical.direction || !gate.direction) {
@@ -290,7 +321,13 @@ export default function DecisionSummary({
   const gate = forecast ? forecastGate(forecast) : null
   const technical = technicalState(signal)
   const historical = backtestState(backtest, backtestStatus)
-  const judgement = gate ? combinedJudgement(technical, gate, historical) : null
+  const [ledger, setLedger] = useState(null)
+  useEffect(() => {
+    let alive = true
+    fetchForecastLedgerStatus().then(d => { if (alive) setLedger(d) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  const judgement = gate ? combinedJudgement(technical, gate, historical, ledger) : null
   const macroSummary = macroState(macro)
   // 只有技術與預測「同向」時才有一個明確方向可拿來跟宏觀對照；
   // 宏觀不進 combinedJudgement，所以結論的 kind / label 完全不受它影響。
@@ -311,7 +348,7 @@ export default function DecisionSummary({
             <span className="forecast-research-badge">輔助判讀 · 不提供買賣指令</span>
           </div>
           <p>
-            技術方向、研究預測方向、歷史策略品質與總體環境分開呈現；
+            技術現況、歷史策略品質與總體環境並列；研究預測仍在累積，未列入方向依據。
             回測品質與宏觀都不會被當成方向投票（宏觀的歷史檢定未達統計顯著，只作背景脈絡）。
           </p>
         </div>
@@ -356,7 +393,10 @@ export default function DecisionSummary({
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 9 }}>
             <EvidenceBlock title="① 當前技術方向" label={technical.label} detail={technical.detail} />
-            <EvidenceBlock title={`② ${horizon} 日研究預測方向`} label={gate.label} detail={gate.detail} />
+            {gate.kind === 'ready'
+              ? <EvidenceBlock title={`② ${horizon} 日研究預測方向`} label={gate.label} detail={gate.detail} />
+              : (() => { const a = accrualState(gate, ledger)
+                  return <EvidenceBlock title="② 研究預測（累積中）" label={a.label} detail={a.detail} /> })()}
             <EvidenceBlock title="③ 歷史策略品質" label={historical.label} detail={historical.detail} />
             <EvidenceBlock title="④ 目前的總經連動" label={macroSummary.label} detail={macroSummary.detail} />
           </div>
