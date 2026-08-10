@@ -44,6 +44,44 @@ _EVIDENCE_CACHE: dict = {"mtime": None, "data": None}
 _LINK_LABEL_ZH = {"SPX": "美股標普 500", "DXY": "美元指數",
                   "VIX": "恐慌指數 VIX", "GOLD": "黃金"}
 
+# ── 資料出處（每個數字都要能被讀者自己追回原始頁面查證）──────────────────────
+# 標的代號是查證的關鍵：光寫「Yahoo Finance」沒辦法核對，寫 ^VIX 才能自己去對收盤價。
+_YAHOO_QUOTE = "https://finance.yahoo.com/quote/"
+_FACTOR_SOURCE = {
+    "DXY":   {"provider": "Yahoo Finance", "symbol": "DX-Y.NYB"},
+    "VIX":   {"provider": "Yahoo Finance", "symbol": "^VIX"},
+    "US10Y": {"provider": "Yahoo Finance", "symbol": "^TNX"},
+    "SPX":   {"provider": "Yahoo Finance", "symbol": "^GSPC"},
+    "GOLD":  {"provider": "Yahoo Finance", "symbol": "GC=F"},
+    "BTC_DOM":    {"provider": "CoinGecko", "symbol": "/api/v3/global",
+                   "url": "https://www.coingecko.com/en/global-charts"},
+    "TOTAL_MCAP": {"provider": "CoinGecko", "symbol": "/api/v3/global",
+                   "url": "https://www.coingecko.com/en/global-charts"},
+}
+
+# 面板底部的來源清單（誰提供了什麼、免金鑰、可自行查證）
+SOURCES = [
+    {"provider": "Yahoo Finance", "url": "https://finance.yahoo.com",
+     "detail_zh": "美元指數、VIX、美債 10Y、標普 500、黃金的日線收盤"},
+    {"provider": "CoinGecko", "url": "https://www.coingecko.com/en/global-charts",
+     "detail_zh": "BTC 主導率、加密總市值（24h 動能）"},
+    {"provider": "Binance", "url": "https://www.binance.com",
+     "detail_zh": "BTC 日線收盤（計算與宏觀的連動強度用）"},
+]
+
+
+def _with_source(factor: dict, as_of: str | None = None) -> dict:
+    """替因子附上「哪裡來的、哪個代號、哪一天的收盤」。"""
+    src = _FACTOR_SOURCE.get(factor["key"])
+    if src:
+        factor["source"] = {
+            "provider": src["provider"],
+            "symbol": src["symbol"],
+            "url": src.get("url") or (_YAHOO_QUOTE + quote(src["symbol"], safe="")),
+            "as_of": as_of,
+        }
+    return factor
+
 
 def _get(url: str) -> dict:
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -52,17 +90,28 @@ def _get(url: str) -> dict:
 
 
 def _yahoo(sym: str):
-    """回傳 (最新收盤, 近 5 交易日變動%)；失敗回 None。"""
+    """
+    回傳 (最新收盤, 近 5 交易日變動%, 該收盤的日期)；失敗回 None。
+
+    一併帶回日期是為了讓前台能標出「這個數字是哪一天的收盤」：
+    各序列的交易日並不一致（例如美股休市當天黃金與美元照常交易），
+    不標日期的話，畫面會讓人以為七個數字都是同一時點的，那才是真正的失真。
+    """
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(sym, safe='')}?interval=1d&range=1mo"
         d = _get(url)
-        closes = [c for c in d["chart"]["result"][0]["indicators"]["quote"][0]["close"] if c is not None]
-        if len(closes) < 2:
+        result = d["chart"]["result"][0]
+        stamps = result["timestamp"]
+        raw = result["indicators"]["quote"][0]["close"]
+        pairs = [(t, c) for t, c in zip(stamps, raw) if c is not None]
+        if len(pairs) < 2:
             return None
+        closes = [c for _, c in pairs]
         last = closes[-1]
         ref = closes[-6] if len(closes) >= 6 else closes[0]
         chg = (last / ref - 1.0) * 100 if ref else 0.0
-        return last, chg
+        as_of = datetime.fromtimestamp(pairs[-1][0], timezone.utc).strftime("%Y-%m-%d")
+        return last, chg, as_of
     except Exception:
         return None
 
@@ -138,6 +187,10 @@ def _evidence_summary(ev: dict | None) -> dict | None:
         "sample_zh": f"樣本 {period.get('start')}~{period.get('end')}，"
                      f"順風/逆風共 {n_eps} 個獨立區段",
         "text_zh": text,
+        # 讓讀者知道這個結論是「誰的資料、用哪支程式、怎麼算」算出來的，能自己重跑核對
+        "basis_zh": "算法：src/macro_eval.py（隔日開盤進場、Newey-West 修正重疊視窗）；"
+                    "資料：Yahoo Finance 宏觀日線 + Binance 日線收盤。"
+                    "重跑：python src/macro_eval.py",
     }
 
 
@@ -217,6 +270,8 @@ def _linkage_reading(series: list[dict]) -> dict:
         "top_key": top["key"], "top_corr": top["corr"],
         "text_zh": (f"目前 BTC 與{top['label_zh']}的 60 日相關性為 {top['corr']:+.2f}"
                     f"（{direction}{extreme}），整體連動強度{level_zh}；{weight_zh}。"),
+        "basis_zh": "以 BTC（Binance 日線收盤）對各宏觀序列（Yahoo Finance 日線收盤）"
+                    "取 60 個交易日的滾動相關；百分位＝目前值在近十年所有滾動值中的位置。",
     }
 
 
@@ -226,30 +281,32 @@ def _compute() -> dict:
     impacts = {}     # 4 個主要風險驅動（DXY/VIX/US10Y/SPX）的 impact，決定整體 verdict
 
     # 規則一律走 src/macro_regime，與歷史重建同一套定義（改門檻只改那一份）
-    for key, sym, unit in (("DXY", "DX-Y.NYB", ""), ("VIX", "^VIX", ""),
-                           ("US10Y", "^TNX", "%"), ("SPX", "^GSPC", ""),
-                           ("GOLD", "GC=F", "")):
-        quote_ = _yahoo(sym)
+    for key, unit in (("DXY", ""), ("VIX", ""), ("US10Y", "%"), ("SPX", ""), ("GOLD", "")):
+        quote_ = _yahoo(_FACTOR_SOURCE[key]["symbol"])
         if not quote_:
             continue
-        value, change = quote_
+        value, change, as_of = quote_
         factor = build_factor(key, value, change, unit=unit)
         if not factor:
             continue
-        factors.append(factor)
+        factors.append(_with_source(factor, as_of))
         if key in DRIVER_KEYS:
             impacts[key] = factor["impact"]
 
     # CoinGecko：BTC 主導率 + 加密總市值（山寨輪動 / 整體動能，情境參考）
     g = _coingecko_global()
     if g:
-        factors.append(_extra_factor("BTC_DOM", "BTC 主導率", g["btc_dom"], None, "NEUTRAL",
-                                     "上升＝資金集中 BTC（山寨承壓），下降＝轉進山寨（山寨季）",
-                                     unit="%"))
+        # CoinGecko global 是即時快照（非日線收盤），as_of 用取得當下的日期
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        factors.append(_with_source(
+            _extra_factor("BTC_DOM", "BTC 主導率", g["btc_dom"], None, "NEUTRAL",
+                          "上升＝資金集中 BTC（山寨承壓），下降＝轉進山寨（山寨季）",
+                          unit="%"), today))
         mc = g["mcap_24h"]
         imp = "TAILWIND" if mc > 1 else "HEADWIND" if mc < -1 else "NEUTRAL"
-        factors.append(_extra_factor("TOTAL_MCAP", "加密總市值", g["total_mcap"] / 1e12, mc, imp,
-                                     "全加密市值 24h 動能", unit="兆"))
+        factors.append(_with_source(
+            _extra_factor("TOTAL_MCAP", "加密總市值", g["total_mcap"] / 1e12, mc, imp,
+                          "全加密市值 24h 動能", unit="兆"), today))
 
     verdict = aggregate(impacts)
     evidence = _evidence_summary(load_evidence())
@@ -264,6 +321,7 @@ def _compute() -> dict:
         "factors": factors,
         "evidence": evidence,
         "linkage": link,
+        "sources": SOURCES,
     }
 
 

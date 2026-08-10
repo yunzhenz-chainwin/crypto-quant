@@ -248,6 +248,18 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .macro-cell-tag[data-impact="NEUTRAL"]  { color: var(--muted); }
 .macro-cell-chg { font-size: 11px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .macro-foot { font-size: 11px; color: var(--muted); margin-top: 13px; }
+/* 逐格出處：標的代號可點去原始頁面查證，日期是「這一格是哪天的收盤」 */
+.macro-cell-src { display: flex; align-items: baseline; gap: 4px; margin-top: 5px; font-size: 10.5px; line-height: 1.3; }
+.macro-cell-src a { color: var(--muted); text-decoration: none; border-bottom: 1px dotted var(--border); font-variant-numeric: tabular-nums; }
+.macro-cell-src a:hover { color: var(--text); border-bottom-color: currentColor; }
+.macro-cell-src-date { color: var(--muted); opacity: .75; font-variant-numeric: tabular-nums; }
+.macro-srcs { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.macro-srcs-lbl { font-weight: 700; }
+.macro-srcs-item { display: inline-flex; align-items: baseline; gap: 6px; }
+.macro-srcs-sep { opacity: .5; }
+.macro-srcs a { color: var(--muted); text-decoration: none; border-bottom: 1px dotted var(--border); }
+.macro-srcs a:hover { color: var(--text); border-bottom-color: currentColor; }
+.macro-srcs-detail { opacity: .75; }
 /* 連動強度的白話結論：決定上面那些宏觀數字現在值不值得看，故留在主畫面 */
 .macro-reading { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--text); opacity: .85; margin-top: 13px; padding: 9px 11px; background: rgba(148,163,184,.05); border: 1px solid var(--border); border-radius: 8px; }
 .macro-reading-tag { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: var(--muted); background: rgba(148,163,184,.12); }
@@ -792,6 +804,9 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 /* 新聞區 */
 .fg-news { min-width: 0; }
 /* 資料庫統計 */
+.fg-source { font-size: 10.5px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+.fg-source a { color: var(--muted); text-decoration: none; border-bottom: 1px dotted var(--border); }
+.fg-source a:hover { color: var(--text); border-bottom-color: currentColor; }
 .db-stat { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
 .db-stat strong { color: var(--text); }
 

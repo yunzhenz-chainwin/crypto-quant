@@ -397,6 +397,16 @@ export default function SentimentPanel({ symbol }) {
           }
           <div className="fg-chart-label">近 30 天趨勢</div>
           <FearGreedChart history={fgData} />
+          {/* 出處：這個指數不是我們算的，是外部提供的，標清楚才知道數字真不真實 */}
+          <div className="fg-source">
+            資料來源：
+            <a href="https://alternative.me/crypto/fear-and-greed-index/"
+               target="_blank" rel="noopener noreferrer"
+               title="Crypto Fear &amp; Greed Index，由 alternative.me 提供；本站每日回補歷史值">
+              alternative.me
+            </a>
+            （Crypto Fear &amp; Greed Index，每日更新）
+          </div>
 
           {/* 新聞情緒溫度（全市場 + 這顆幣，來自每日彙總表） */}
           <NewsSentimentStrip symbol={symbol} />

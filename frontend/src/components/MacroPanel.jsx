@@ -27,6 +27,28 @@ function fmtVal(f) {
   return f.unit === '%' ? `${s}%` : s
 }
 
+/**
+ * 每個數字的出處：標的代號 + 該筆收盤日期，代號本身連到原始頁面。
+ *
+ * 為什麼收盤日要逐格標而不是共用一個「更新時間」：各序列交易日並不一致
+ * （美股休市當天黃金與美元照常交易），共用一個時間會讓人以為七個數字同時點，
+ * 那才是真正的失真。標了代號，任何人都能自己去原始頁面對一次收盤價。
+ */
+function SourceTag({ source }) {
+  if (!source?.symbol) return null
+  const shortDate = source.as_of ? source.as_of.slice(5) : null
+  const title = `資料來源：${source.provider}／${source.symbol}`
+    + (source.as_of ? `，收盤日 ${source.as_of}（點擊開啟原始頁面查證）` : '')
+  return (
+    <div className="macro-cell-src">
+      <a href={source.url} target="_blank" rel="noopener noreferrer" title={title}>
+        {source.symbol}
+      </a>
+      {shortDate && <span className="macro-cell-src-date">· {shortDate}</span>}
+    </div>
+  )
+}
+
 // 逐日標籤 → 連續同標籤的區段，讓時間軸只畫數十個色塊而不是 365 個 div
 function toRuns(points) {
   const runs = []
@@ -146,6 +168,7 @@ export default function MacroPanel({ data = null }) {
                 </span>
               )}
             </div>
+            <SourceTag source={f.source} />
           </div>
         ))}
       </div>
@@ -202,6 +225,7 @@ export default function MacroPanel({ data = null }) {
                       </div>
                     ))}
                   </div>
+                  {link.basis_zh && <div className="macro-ev-sample">{link.basis_zh}</div>}
                 </div>
               )}
 
@@ -215,6 +239,7 @@ export default function MacroPanel({ data = null }) {
                   </div>
                   <div className="macro-ev-text">{ev.text_zh}</div>
                   <div className="macro-ev-sample">{ev.sample_zh}</div>
+                  {ev.basis_zh && <div className="macro-ev-sample">{ev.basis_zh}</div>}
                 </div>
               )}
 
@@ -225,6 +250,20 @@ export default function MacroPanel({ data = null }) {
       )}
 
       {m.note_zh && <div className="macro-foot">ⓘ {m.note_zh}</div>}
+
+      {/* 資料來源：每一格的代號可直接點去原始頁面查證，這裡再列一次「誰提供了什麼」 */}
+      {m.sources?.length > 0 && (
+        <div className="macro-foot macro-srcs">
+          <span className="macro-srcs-lbl">資料來源</span>
+          {m.sources.map((s, i) => (
+            <span key={s.provider} className="macro-srcs-item">
+              {i > 0 && <span className="macro-srcs-sep">·</span>}
+              <a href={s.url} target="_blank" rel="noopener noreferrer">{s.provider}</a>
+              <span className="macro-srcs-detail">（{s.detail_zh}）</span>
+            </span>
+          ))}
+        </div>
+      )}
     </section>
   )
 }

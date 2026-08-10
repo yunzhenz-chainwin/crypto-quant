@@ -186,6 +186,8 @@ function macroState(macro) {
   if (ev?.diff_pct != null) {
     parts.push(`此判讀的歷史檢定：順風之後 5 日平均比逆風高 ${ev.diff_pct >= 0 ? '+' : ''}${ev.diff_pct.toFixed(2)}%、t=${ev.t_hac}，${ev.level_zh}，不列為方向投票`)
   }
+  // 摘要是很多人唯一會讀到的地方，出處要在這裡就講，不能只留在下方面板
+  parts.push('資料來源：Yahoo Finance（宏觀日線）、Binance（BTC 日線），逐項代號與收盤日見下方宏觀環境面板')
 
   return {
     available: true,
