@@ -138,6 +138,79 @@ function backtestState(backtest, status) {
   return { kind: 'favorable', label: '歷史策略品質較有利', detail }
 }
 
+/**
+ * 宏觀環境「彙整」：把 /api/macro 的一堆數字收成一則可直接讀的結論。
+ *
+ * 刻意設計成「有內容但沒有方向票」：
+ *   src/macro_eval.py 事先指定的主檢定（籃子×5日×順風減逆風）是 +0.66%、HAC t=0.72，
+ *   未達統計顯著。既然沒有統計證據，就不能讓它和技術方向、研究預測平起平坐去投票，
+ *   否則畫面等於用一個測不到 edge 的東西去改結論——這正是六因子分數犯過的錯。
+ * 因此這裡只回 label / detail / align（給對照用），不回 direction。
+ */
+const MACRO_VERDICT_ZH = { RISK_ON: '順風', NEUTRAL: '中性', RISK_OFF: '逆風' }
+
+function signedCorr(value) {
+  return `${value >= 0 ? '+' : '−'}${Math.abs(value).toFixed(2)}`
+}
+
+function macroState(macro) {
+  // null＝還在抓（App 失敗時會寫入 {ok:false}）；兩者措辭必須分開，
+  // 否則剛開頁面就會看到「未取得」，把載入中誤講成拿不到資料。
+  if (macro == null) {
+    return { available: false, label: '總體環境載入中', detail: '正在取得宏觀環境與其歷史檢定結果。' }
+  }
+  if (!macro.ok) {
+    return { available: false, label: '總體環境未取得', detail: '宏觀資料暫時無法取得，不影響上方三項判斷。' }
+  }
+  const verdict = macro.verdict
+  const weak = macro.evidence?.level !== 'SUPPORTED'
+  // verdict_zh 本身已含「（風險偏好）」等括號，這裡取短標籤才不會變成雙層括號
+  const label = `總體環境${MACRO_VERDICT_ZH[verdict] ?? '未知'}${weak ? '（背景，未達統計顯著）' : ''}`
+
+  // 用結構化欄位重新組句，而不是把三段現成句子接起來：
+  // 那些句子各自為面板寫的，串起來會重複講「只作背景」並疊出多餘句號。
+  const parts = []
+  if (macro.summary_zh) parts.push(macro.summary_zh)
+
+  const link = macro.linkage
+  if (link?.level_zh) {
+    const top = link.series?.find(s => s.key === link.top_key)
+    parts.push(top
+      ? `連動強度${link.level_zh}（最貼著${top.label_zh}走，${link.window_days} 日相關 ${signedCorr(top.corr)}、近五年第 ${top.percentile.toFixed(0)} 百分位）`
+      : `連動強度${link.level_zh}`)
+  }
+
+  const ev = macro.evidence
+  if (ev?.diff_pct != null) {
+    parts.push(`歷史檢定：順風之後 5 日平均比逆風高 ${ev.diff_pct >= 0 ? '+' : ''}${ev.diff_pct.toFixed(2)}%、t=${ev.t_hac}，${ev.level_zh}`)
+  }
+  parts.push('不列為方向投票，只作背景脈絡')
+
+  return {
+    available: true,
+    verdict,
+    // 只用來和上方方向「對照」，不參與 combinedJudgement 的結論判定
+    align: verdict === 'RISK_ON' ? 'up' : verdict === 'RISK_OFF' ? 'down' : null,
+    linkageLevel: link?.level ?? null,
+    label,
+    detail: `${parts.join('；')}。`,
+  }
+}
+
+/**
+ * 把宏觀接到結論文字上（而不是讓它自己在旁邊當一塊孤立卡片）。
+ * 連動強度低＝加密目前走自己的邏輯，這時連提都不必提，免得拿無關的總經嚇人。
+ */
+function macroContext(macro, direction) {
+  if (!macro.available || !macro.align || macro.linkageLevel === 'LOW') return null
+  if (!direction) {
+    return `另註：總體環境目前${macro.align === 'up' ? '順風' : '逆風'}（背景參考，未列為方向依據）。`
+  }
+  return macro.align === direction
+    ? `另註：總體環境與目前方向同向，但宏觀證據未達顯著，不足以加強結論。`
+    : `另註：總體環境與目前方向相反，可能讓走勢較不順；宏觀證據未達顯著，不足以推翻上方判斷。`
+}
+
 function historyContext(history) {
   if (history.kind === 'favorable') return '歷史策略品質較有利，但它只描述策略可靠度，不是第三個方向訊號。'
   if (history.kind === 'weak') return `${history.label}，不能把方向一致升級為成功或買賣訊號。`
@@ -202,6 +275,7 @@ function EvidenceBlock({ title, label, detail }) {
 export default function DecisionSummary({
   signal,
   backtest,
+  macro,
   backtestStatus = 'idle',
   horizon,
   onHorizonChange,
@@ -214,6 +288,13 @@ export default function DecisionSummary({
   const technical = technicalState(signal)
   const historical = backtestState(backtest, backtestStatus)
   const judgement = gate ? combinedJudgement(technical, gate, historical) : null
+  const macroSummary = macroState(macro)
+  // 只有技術與預測「同向」時才有一個明確方向可拿來跟宏觀對照；
+  // 宏觀不進 combinedJudgement，所以結論的 kind / label 完全不受它影響。
+  const agreedDirection = technical.direction && gate?.direction && technical.direction === gate.direction
+    ? technical.direction
+    : null
+  const macroNote = judgement ? macroContext(macroSummary, agreedDirection) : null
   const stateClass = judgement?.kind === 'aligned' ? 'forecast-state-ready'
     : judgement?.kind === 'conflict' || judgement?.kind === 'stale' ? 'forecast-state-stale'
       : 'forecast-state-insufficient'
@@ -226,7 +307,10 @@ export default function DecisionSummary({
             <h2 id="decision-summary-title">統一判斷摘要</h2>
             <span className="forecast-research-badge">輔助判讀 · 不提供買賣指令</span>
           </div>
-          <p>技術方向、研究預測方向與歷史策略品質分開呈現；回測品質不會被當成第三個方向投票。</p>
+          <p>
+            技術方向、研究預測方向、歷史策略品質與總體環境分開呈現；
+            回測品質與宏觀都不會被當成方向投票（宏觀的歷史檢定未達統計顯著，只作背景脈絡）。
+          </p>
         </div>
         <div className="forecast-tabs" role="group" aria-label="摘要預測期限">
           {FORECAST_HORIZONS.map(days => (
@@ -264,13 +348,14 @@ export default function DecisionSummary({
         <div className="forecast-content">
           <div className={`forecast-state ${stateClass}`} role="status">
             <strong>{judgement.label}</strong>
-            <span>{judgement.detail}</span>
+            <span>{judgement.detail}{macroNote ? ` ${macroNote}` : ''}</span>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 9 }}>
             <EvidenceBlock title="① 當前技術方向" label={technical.label} detail={technical.detail} />
             <EvidenceBlock title={`② ${horizon} 日研究預測方向`} label={gate.label} detail={gate.detail} />
             <EvidenceBlock title="③ 歷史策略品質" label={historical.label} detail={historical.detail} />
+            <EvidenceBlock title="④ 總體環境（背景）" label={macroSummary.label} detail={macroSummary.detail} />
           </div>
 
           <div className="forecast-range">

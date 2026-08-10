@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import {
   fetchSymbols, fetchAllSignals, fetchOHLC, fetchStatus, fetchIntervals,
-  fetchIndicators, fetchBacktest, fetchFearGreed, fetchForecast,   // fetchCorrelation 暫停（幣種相關性分析）
+  fetchIndicators, fetchBacktest, fetchFearGreed, fetchForecast, fetchMacro,   // fetchCorrelation 暫停（幣種相關性分析）
 } from './api/client'
 import StatusBar        from './components/StatusBar'
 import CandlestickChart from './components/CandlestickChart'
@@ -99,6 +99,7 @@ export default function App() {
   const [ohlc,        setOhlc]        = useState([])
   const [indicators,  setIndicators]  = useState([])
   const [backtest,    setBacktest]    = useState(null)
+  const [macro,       setMacro]       = useState(null)   // 宏觀環境（全市場背景，不隨幣種變）
   // 停損/停利參數（可在「詳細資訊」彈窗調整；供回測、右欄綜合建議、圖上箭頭用）
   const [btParams, setBtParams] = useState({ stopLoss: -0.06, takeProfit: 0.20, feeRate: 0.001, slippage: 0.0005 })
   const [btLoading,   setBtLoading]   = useState(false)
@@ -187,6 +188,10 @@ export default function App() {
     fetchSymbols().then(setSymbols).catch(() => {})
     fetchIntervals().then(setIntervals).catch(() => {})
     // fetchCorrelation().then(setCorrelation).catch(() => {})   // 2026-07-06 暫停幣種相關性分析
+    // 宏觀是全市場背景（與幣種無關），在這裡抓一次就好：
+    // 判斷摘要的第④格與下方宏觀面板共用同一份，兩處講的環境保證一致，也不會重複打 API。
+    // 失敗也要寫入 {ok:false}，讓 null 專門代表「還在載入」——否則畫面會把載入中講成取不到。
+    fetchMacro().then(d => setMacro(d ?? { ok: false })).catch(() => setMacro({ ok: false }))
     refreshMarket(false)
   }, [refreshMarket])
 
@@ -568,6 +573,7 @@ export default function App() {
                   <DecisionSummary
                     signal={activeSignal}
                     backtest={backtest}
+                    macro={macro}
                     backtestStatus={btLoading ? 'loading' : btError ? 'error' : backtest ? 'ready' : 'idle'}
                     horizon={forecastHorizon}
                     onHorizonChange={setForecastHorizon}
@@ -603,7 +609,7 @@ export default function App() {
             {/* 宏觀環境：市場整體背景（非單幣訊號）。自帶標題與「展開證據」，
                 故不再多包一層折疊按鈕，避免兩個同名標題疊在一起。 */}
             {panelOn('macro') && (
-              <Suspense fallback={panelFallback}><MacroPanel /></Suspense>
+              <Suspense fallback={panelFallback}><MacroPanel data={macro} /></Suspense>
             )}
 
             {/* 市場情緒 / 新聞：依需求移到最後面 */}

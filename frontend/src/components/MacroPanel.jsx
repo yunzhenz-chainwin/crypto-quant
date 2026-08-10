@@ -73,18 +73,25 @@ function RegimeTimeline({ history }) {
   )
 }
 
-export default function MacroPanel() {
-  const [m, setM] = useState(null)
+/**
+ * data：由 App 統一抓好的 /api/macro。判斷摘要的第④格與這塊面板共用同一份，
+ *       畫面上兩處講的環境才不會出現「摘要說順風、面板說逆風」。
+ *       沒給時自行抓（元件仍可獨立使用，例如日後被其他頁面掛載）。
+ */
+export default function MacroPanel({ data = null }) {
+  const [fetched, setFetched] = useState(null)
   const [err, setErr] = useState(false)
   const [open, setOpen] = useState(false)
   const [history, setHistory] = useState(null)
   const detailId = useId()
+  const m = data ?? fetched
 
   useEffect(() => {
+    if (data) return
     let alive = true
-    fetchMacro().then(d => { if (alive) setM(d) }).catch(() => { if (alive) setErr(true) })
+    fetchMacro().then(d => { if (alive) setFetched(d) }).catch(() => { if (alive) setErr(true) })
     return () => { alive = false }
-  }, [])
+  }, [data])
 
   // 時間軸只在使用者展開時才抓，主畫面載入不多打一支 API
   useEffect(() => {
