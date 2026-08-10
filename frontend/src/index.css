@@ -693,6 +693,18 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 /* 三個核心指標 */
 .key-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 @media (max-width: 700px) { .key-metrics { grid-template-columns: 1fr; } }
+/* 風險調整後的對照：夏普對照／曝險／t 統計量（後端早有、畫面原本沒顯示） */
+.risk-reality { margin-top: 10px; padding: 11px 13px; background: rgba(148,163,184,.05); border: 1px solid var(--border); border-radius: 10px; }
+.risk-reality-title { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--text); margin-bottom: 9px; }
+.risk-reality-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.risk-reality-item { border-left: 3px solid #475569; padding-left: 10px; }
+.risk-reality-item[data-tone="warn"] { border-left-color: #eab308; }
+.risk-reality-item[data-tone="ok"]   { border-left-color: #22c55e; }
+.risk-reality-lbl { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.risk-reality-val { font-size: 14px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.risk-reality-vs { font-size: 11px; font-weight: 400; color: var(--muted); margin: 0 3px; }
+.risk-reality-note { font-size: 11px; color: var(--muted); line-height: 1.55; margin-top: 4px; }
+@media (max-width: 700px) { .risk-reality-grid { grid-template-columns: 1fr; } }
 
 .key-metric {
   background: var(--bg); border: 1px solid var(--border);

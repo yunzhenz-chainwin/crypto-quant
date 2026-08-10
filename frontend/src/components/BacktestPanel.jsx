@@ -248,6 +248,79 @@ function Info({ text }) {
   return <span className="info-tip" title={text} tabIndex={0} role="note" aria-label={text}>ⓘ</span>
 }
 
+/**
+ * 風險與統計對照：把三個「後端早就算好、但畫面從沒顯示」的數字接上來。
+ *
+ * 少了這三根柱子，使用者只看得到總報酬，很容易把下面三種情況誤讀成策略有效：
+ *   夏普對照 — 策略 0.08 看起來「還行」，但同期買入持有是 0.49，其實輸很多。
+ *   曝險比例 — 策略多數時間空手時，「贏過大盤」可能只是沒參與到下跌，不是選時準。
+ *   t 統計量 — 交易次數少時，賺賠很可能只是運氣；|t|>2 才算有統計證據。
+ */
+function tstatReading(t, meanPositive) {
+  if (t == null) return null
+  if (Math.abs(t) < 2) {
+    return '與 0 沒有明顯差別 —— 目前的賺賠可能只是運氣，交易次數還不足以證明策略有效'
+  }
+  return meanPositive
+    ? '顯著大於 0 —— 在統計上站得住腳（仍不保證未來）'
+    : '顯著小於 0 —— 這不是運氣不好，是穩定在賠錢'
+}
+
+function RiskReality({ m }) {
+  const bhSharpe = m?.buy_hold_sharpe_ratio
+  const exposure = m?.exposure_pct
+  const tstat = m?.mean_trade_return_tstat
+  if (bhSharpe == null && exposure == null && tstat == null) return null
+
+  // API 為了可稽核保留 4 位小數（0.0777 / 36.1782），畫面要收斂成讀得下去的位數
+  const f2 = v => (v == null ? '-' : Number(v).toFixed(2))
+  const sharpeWorse = bhSharpe != null && m.sharpe_ratio != null && m.sharpe_ratio < bhSharpe
+  const tText = tstatReading(tstat, (m.total_return_pct ?? 0) >= 0)
+
+  return (
+    <div className="risk-reality">
+      <div className="risk-reality-title">
+        風險調整後的對照
+        <Info text="只看總報酬會漏掉三件事：承擔了多少波動、有多少時間真的在場上、以及這個結果有沒有統計意義。" />
+      </div>
+      <div className="risk-reality-grid">
+        {bhSharpe != null && (
+          <div className="risk-reality-item" data-tone={sharpeWorse ? 'warn' : 'ok'}>
+            <div className="risk-reality-lbl">夏普比率對照</div>
+            <div className="risk-reality-val">
+              策略 {f2(m.sharpe_ratio)} <span className="risk-reality-vs">vs</span> 買入持有 {f2(bhSharpe)}
+            </div>
+            <div className="risk-reality-note">
+              {sharpeWorse
+                ? '每承擔一單位波動換到的報酬，策略比單純買了放著更差'
+                : '每承擔一單位波動換到的報酬，策略優於單純買了放著'}
+            </div>
+          </div>
+        )}
+
+        {exposure != null && (
+          <div className="risk-reality-item" data-tone={exposure < 40 ? 'warn' : 'ok'}>
+            <div className="risk-reality-lbl">曝險比例</div>
+            <div className="risk-reality-val">{Number(exposure).toFixed(0)}%</div>
+            <div className="risk-reality-note">
+              期間內只有這麼多時間真的持有部位；空手時既沒參與下跌、也沒參與上漲。
+              {exposure < 40 && ' 曝險偏低時「少賠」可能只是因為多半不在場上，不代表選時準。'}
+            </div>
+          </div>
+        )}
+
+        {tText && (
+          <div className="risk-reality-item" data-tone={Math.abs(tstat) >= 2 ? 'ok' : 'warn'}>
+            <div className="risk-reality-lbl">每筆報酬的統計檢定</div>
+            <div className="risk-reality-val">t = {f2(tstat)}</div>
+            <div className="risk-reality-note">{tText}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // 白話結論：陳述歷史報酬差與回撤，不把「少跌」包裝成勝出。
 function VerdictBanner({ data }) {
   const m = data?.metrics
@@ -501,6 +574,8 @@ export default function BacktestPanel({ data, loading, params, onParamsChange, h
               </div>
             </div>
           </div>
+
+          <RiskReality m={m} />
 
           {/* 三基準比較（買入持有／隨機進場）+ 前後期穩定性 + 參數探索 = 回測「深水區」。
               併入「買賣策略」面板時預設收起（規則已在上方講過，這裡 hideRules 不重複）；
