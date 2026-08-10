@@ -256,12 +256,14 @@ function Info({ text }) {
  *   曝險比例 — 策略多數時間空手時，「贏過大盤」可能只是沒參與到下跌，不是選時準。
  *   t 統計量 — 交易次數少時，賺賠很可能只是運氣；|t|>2 才算有統計證據。
  */
-function tstatReading(t, meanPositive) {
+function tstatReading(t) {
   if (t == null) return null
   if (Math.abs(t) < 2) {
     return '與 0 沒有明顯差別 —— 目前的賺賠可能只是運氣，交易次數還不足以證明策略有效'
   }
-  return meanPositive
+  // 直接看 t 的正負，不要用「總報酬是否為正」去猜方向：
+  // 兩者可能不一致（複利路徑 vs 每筆平均），猜錯就會把賠錢講成賺錢。
+  return t > 0
     ? '顯著大於 0 —— 在統計上站得住腳（仍不保證未來）'
     : '顯著小於 0 —— 這不是運氣不好，是穩定在賠錢'
 }
@@ -274,8 +276,12 @@ function RiskReality({ m }) {
 
   // API 為了可稽核保留 4 位小數（0.0777 / 36.1782），畫面要收斂成讀得下去的位數
   const f2 = v => (v == null ? '-' : Number(v).toFixed(2))
-  const sharpeWorse = bhSharpe != null && m.sharpe_ratio != null && m.sharpe_ratio < bhSharpe
-  const tText = tstatReading(tstat, (m.total_return_pct ?? 0) >= 0)
+  // 比較要用「顯示後的精度」判斷：ETH 是 0.3146 vs 0.3074，四捨五入後畫面兩個都是 0.31，
+  // 若還宣稱「策略優於」，讀者會看到兩個一樣的數字配上有優劣的結論。
+  const sharpeGap = (bhSharpe != null && m.sharpe_ratio != null) ? m.sharpe_ratio - bhSharpe : null
+  const sharpeTied = sharpeGap != null && Math.abs(sharpeGap) < 0.005
+  const sharpeWorse = sharpeGap != null && !sharpeTied && sharpeGap < 0
+  const tText = tstatReading(tstat)
 
   return (
     <div className="risk-reality">
@@ -285,15 +291,17 @@ function RiskReality({ m }) {
       </div>
       <div className="risk-reality-grid">
         {bhSharpe != null && (
-          <div className="risk-reality-item" data-tone={sharpeWorse ? 'warn' : 'ok'}>
+          <div className="risk-reality-item" data-tone={sharpeTied ? 'warn' : sharpeWorse ? 'bad' : 'ok'}>
             <div className="risk-reality-lbl">夏普比率對照</div>
             <div className="risk-reality-val">
               策略 {f2(m.sharpe_ratio)} <span className="risk-reality-vs">vs</span> 買入持有 {f2(bhSharpe)}
             </div>
             <div className="risk-reality-note">
-              {sharpeWorse
-                ? '每承擔一單位波動換到的報酬，策略比單純買了放著更差'
-                : '每承擔一單位波動換到的報酬，策略優於單純買了放著'}
+              {sharpeTied
+                ? '兩者接近，看不出差別：每承擔一單位波動換到的報酬與單純買了放著相當'
+                : sharpeWorse
+                  ? '每承擔一單位波動換到的報酬，策略比單純買了放著更差'
+                  : '每承擔一單位波動換到的報酬，策略優於單純買了放著'}
             </div>
           </div>
         )}
@@ -310,7 +318,10 @@ function RiskReality({ m }) {
         )}
 
         {tText && (
-          <div className="risk-reality-item" data-tone={Math.abs(tstat) >= 2 ? 'ok' : 'warn'}>
+          // 色條必須看 t 的「正負」而不只是「顯不顯著」：
+          // ATOM t=-3.57／UNI t=-2.96 這種是「顯著地穩定賠錢」，塗綠會把最壞的情況講成最好的。
+          <div className="risk-reality-item"
+               data-tone={tstat >= 2 ? 'ok' : tstat <= -2 ? 'bad' : 'warn'}>
             <div className="risk-reality-lbl">每筆報酬的統計檢定</div>
             <div className="risk-reality-val">t = {f2(tstat)}</div>
             <div className="risk-reality-note">{tText}</div>
@@ -568,9 +579,10 @@ export default function BacktestPanel({ data, loading, params, onParamsChange, h
               <div className="key-metric-value" style={{ color: '#ef4444' }}>
                 {m.max_drawdown_pct}%
               </div>
+              {/* 夏普原本在這裡以 4 位小數再講一次（0.0777），與下方「風險調整後的對照」
+                  的 0.08 上下相鄰、格式還不同。夏普改為只在下方講一次。 */}
               <div className="key-metric-compare">
-                策略回撤 vs 持有回撤 {fmtPct(m.buy_hold_max_drawdown_pct)}，夏普比率 {m.sharpe_ratio}
-                <Info text="夏普比率＝每承擔一單位波動換到的報酬。數字越高代表報酬相對風險越划算，一般 >1 算不錯。" />
+                策略回撤 vs 持有回撤 {fmtPct(m.buy_hold_max_drawdown_pct)}
               </div>
             </div>
           </div>

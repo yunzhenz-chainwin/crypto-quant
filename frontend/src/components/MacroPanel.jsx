@@ -37,12 +37,14 @@ function fmtVal(f) {
 function SourceTag({ source }) {
   if (!source?.symbol) return null
   const shortDate = source.as_of ? source.as_of.slice(5) : null
+  // 代號若不是真的交易代號（例如 API 路徑），改印提供者，免得畫面出現 /api/v3/global
+  const label = source.symbol.startsWith('/') ? source.provider : source.symbol
   const title = `資料來源：${source.provider}／${source.symbol}`
     + (source.as_of ? `，收盤日 ${source.as_of}（點擊開啟原始頁面查證）` : '')
   return (
     <div className="macro-cell-src">
       <a href={source.url} target="_blank" rel="noopener noreferrer" title={title}>
-        {source.symbol}
+        {label}
       </a>
       {shortDate && <span className="macro-cell-src-date">· {shortDate}</span>}
     </div>
@@ -65,7 +67,24 @@ function toRuns(points) {
 }
 
 function RegimeTimeline({ history }) {
-  if (!history?.points?.length) return null
+  // 按鈕文案承諾了「近一年環境變化」，資料還沒到就整塊不畫，使用者只會看到承諾沒兌現；
+  // 也會在資料抵達時突然插入造成版面跳動。載入中先佔位、失敗給一行說明。
+  if (history === null) {
+    return (
+      <div className="macro-block">
+        <div className="macro-block-title">近一年的環境變化</div>
+        <div className="skeleton" style={{ height: 22, borderRadius: 4 }} />
+      </div>
+    )
+  }
+  if (!history?.points?.length) {
+    return (
+      <div className="macro-block">
+        <div className="macro-block-title">近一年的環境變化</div>
+        <div className="macro-ev-sample">環境時間軸暫時無法取得，不影響上方的因子與證據。</div>
+      </div>
+    )
+  }
   const runs = toRuns(history.points)
   const counts = history.counts || {}
   return (
@@ -76,11 +95,16 @@ function RegimeTimeline({ history }) {
           順風 {counts.RISK_ON ?? 0} 天 · 中性 {counts.NEUTRAL ?? 0} 天 · 逆風 {counts.RISK_OFF ?? 0} 天
         </span>
       </div>
-      <div className="macro-timeline">
+      <div
+        className="macro-timeline"
+        role="img"
+        aria-label={`近 ${history.days} 天：順風 ${counts.RISK_ON ?? 0} 天、中性 ${counts.NEUTRAL ?? 0} 天、逆風 ${counts.RISK_OFF ?? 0} 天`}
+      >
         {runs.map((r, i) => (
           <div
             key={`${r.start}-${i}`}
             className="macro-timeline-seg"
+            aria-hidden="true"
             data-verdict={r.verdict}
             style={{ flexGrow: r.days }}
             title={`${r.start} ~ ${r.end}：${VERDICT_ZH[r.verdict] ?? r.verdict}（${r.days} 天）`}
@@ -119,7 +143,9 @@ export default function MacroPanel({ data = null }) {
   useEffect(() => {
     if (!open || history) return
     let alive = true
-    fetchMacroHistory(365).then(d => { if (alive && d?.ok) setHistory(d) }).catch(() => {})
+    fetchMacroHistory(365)
+      .then(d => { if (alive) setHistory(d?.ok ? d : {}) })
+      .catch(() => { if (alive) setHistory({}) })
     return () => { alive = false }
   }, [open, history])
 
@@ -176,7 +202,7 @@ export default function MacroPanel({ data = null }) {
       {/* 連動強度的白話結論放在主畫面：它決定上面那些數字現在值不值得看 */}
       {link?.text_zh && (
         <div className="macro-reading" data-level={link.level}>
-          <span className="macro-reading-tag">影響力{link.level_zh}</span>
+          <span className="macro-reading-tag">連動{link.level_zh}</span>
           {link.text_zh}
         </div>
       )}
@@ -184,6 +210,7 @@ export default function MacroPanel({ data = null }) {
       {(link?.series?.length || ev) && (
         <>
           <button
+            type="button"
             className="detail-toggle"
             onClick={() => setOpen(v => !v)}
             aria-expanded={open}

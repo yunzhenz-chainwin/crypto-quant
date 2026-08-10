@@ -173,23 +173,20 @@ function macroState(macro) {
   //   順風/逆風是我們自訂規則的推論，而且主檢定 t=0.72 測不到效果。
   // 把測不到的那個當標題，等於用版面位置給它權威感——正是 README §9 記載的老毛病。
   const label = top
-    ? `BTC 目前最貼著${top.label_zh}走（${link.window_days} 日相關 ${signedCorr(top.corr)}，近五年第 ${top.percentile.toFixed(0)} 百分位）`
+    ? `BTC 目前最貼著「${top.label_zh}」走（${link.window_days} 日相關 ${signedCorr(top.corr)}，近五年第 ${top.percentile.toFixed(0)} 百分位）`
     : `總體環境${MACRO_VERDICT_ZH[verdict] ?? '未知'}（背景參考）`
 
+  // 這一格刻意只留「一句結論」：環境判讀、檢定數字、資料來源在下方 MacroPanel
+  // 都有逐字相同的內容（summary_zh 甚至是同一個字串），全塞進來會讓這格長到
+  // 167 字、把整列撐成兩倍高，而①只有 18 字、旁邊留一大片空白。
   const parts = []
   if (link?.level_zh) {
     parts.push(`連動強度${link.level_zh}${link.level === 'LOW' ? '，加密目前走自己的邏輯' : ''}`)
   }
-  // summary_zh 本身就以「順風：…／逆風：…」開頭，前面再冠一次判讀詞會變成「順風（順風：…）」
-  if (macro.summary_zh) {
-    parts.push(`環境判讀 — ${macro.summary_zh.replace(/。$/, '')}`)
-  }
-  const ev = macro.evidence
-  if (ev?.diff_pct != null) {
-    parts.push(`此判讀的歷史檢定：順風之後 5 日平均比逆風高 ${ev.diff_pct >= 0 ? '+' : ''}${ev.diff_pct.toFixed(2)}%、t=${ev.t_hac}，${ev.level_zh}，不列為方向投票`)
-  }
-  // 摘要是很多人唯一會讀到的地方，出處要在這裡就講，不能只留在下方面板
-  parts.push('資料來源：Yahoo Finance（宏觀日線）、Binance（BTC 日線），逐項代號與收盤日見下方宏觀環境面板')
+  parts.push(macro.evidence?.level === 'SUPPORTED'
+    ? '宏觀僅作背景脈絡，不列為方向投票'
+    : '此環境判讀的歷史檢定未達統計顯著，僅作背景脈絡，不列為方向投票')
+  parts.push('詳細因子、證據與資料出處見下方「宏觀環境」面板')
 
   return {
     available: true,
@@ -230,8 +227,8 @@ function accrualState(gate, ledger) {
   if (!ledger?.ok) {
     return { label: '研究預測（累積中）', detail: gate?.detail ?? '研究預測尚未通過發布門檻，未列入方向依據。' }
   }
-  const detail = ledger.summary_zh
-    + '（研究紀錄持續累積，資料越久越有判斷價值；目前不列為方向依據。）'
+  const detail = ledger.summary_zh.replace(/。$/, '')
+    + '。研究紀錄持續累積，資料越久越有判斷價值；目前不列為方向依據。'
   return { label: '研究預測（累積中）', detail }
 }
 
@@ -254,8 +251,9 @@ function combinedJudgement(technical, gate, history, ledger) {
     // 舊文案「研究預測未通過門檻，暫不整合方向」把結構性事實講成暫時性小狀況：
     // 它其實從上線以來一次都沒通過。改由「技術現況」帶頭，並把累積事實講明。
     const neverReleased = ledger?.ok && ledger.released === 0 && ledger.total > 0
+    // 累積次數留給②格講，狀態列只點出「從未通過」這個性質，避免同一畫面重複同一個數字
     const accrual = neverReleased
-      ? `研究預測自上線以來 ${ledger.total} 次全部未達發布門檻`
+      ? '研究預測自上線以來未曾通過發布門檻'
       : '研究預測尚未通過發布門檻'
     return {
       kind: 'insufficient',
@@ -264,7 +262,7 @@ function combinedJudgement(technical, gate, history, ledger) {
         : `${technical.label}，方向未明`,
       detail: `${accrual}，${historyContext(history)}目前不形成方向結論。`,
       next: neverReleased && ledger.beats_baseline_any === false
-        ? '預測模型目前連「完全不用模型、一律猜較常出現方向」都贏不了，發布門檻不會為了讓畫面有結論而調低；請以技術現況與歷史品質為主。'
+        ? '發布門檻不會為了讓畫面有結論而調低；請以技術現況與歷史品質為主，宏觀僅作背景。'
         : '等待樣本、方向優勢與證據充分度通過門檻；歷史策略品質只用來評估可靠度。',
     }
   }
@@ -298,7 +296,7 @@ function combinedJudgement(technical, gate, history, ledger) {
 
 function EvidenceBlock({ title, label, detail }) {
   return (
-    <div className="forecast-evidence" style={{ minHeight: 104 }}>
+    <div className="forecast-evidence">
       <h4 style={{ color: 'var(--text)' }}>{title}</h4>
       <strong style={{ display: 'block', marginBottom: 6, fontSize: 13 }}>{label}</strong>
       <p style={{ lineHeight: 1.55 }}>{detail}</p>
@@ -391,7 +389,7 @@ export default function DecisionSummary({
             <span>{judgement.detail}{macroNote ? ` ${macroNote}` : ''}</span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 9 }}>
+          <div className="decision-evidence-grid">
             <EvidenceBlock title="① 當前技術方向" label={technical.label} detail={technical.detail} />
             {gate.kind === 'ready'
               ? <EvidenceBlock title={`② ${horizon} 日研究預測方向`} label={gate.label} detail={gate.detail} />

@@ -187,7 +187,7 @@ function NewsArticles({ items }) {
  * 最大宗是動區 BlockTempo，那三家合計只佔約四分之一——寫死的清單會讓人誤以為
  * 新聞只來自那三家英文媒體。點開可看實際前幾大來源與則數，能自己核對。
  */
-function NewsSources() {
+function useNewsSources() {
   const [stats, setStats] = useState(null)
   const [open, setOpen] = useState(false)
   const listId = useId()
@@ -198,10 +198,15 @@ function NewsSources() {
     return () => controller.abort()
   }, [])
 
-  if (!stats?.total) return <span className="news-sources">資料來源載入中…</span>
+  if (!stats?.total) {
+    return { button: <span className="news-sources">資料來源載入中…</span>, list: null }
+  }
 
-  return (
-    <>
+  // 刻意回傳兩個節點分開掛：按鈕留在 .news-panel-header（flex 橫列），
+  // 展開的清單要掛到 header 外面。若用 Fragment 一起回傳，清單會被攤平成
+  // header 的第三個 flex item、橫向擠在按鈕右邊，把標題列撐成一大塊。
+  return {
+    button: (
       <button
         type="button"
         className="news-sources news-sources-btn"
@@ -212,7 +217,8 @@ function NewsSources() {
       >
         資料來源：{stats.rss.length} 家 RSS ＋ Google News 聚合 · 共 {stats.domains} 個來源 {open ? '▲' : '▼'}
       </button>
-      {open && (
+    ),
+    list: open ? (
         <div id={listId} className="news-sources-list">
           <div className="news-sources-sum">
             資料庫 {stats.total.toLocaleString()} 則，其中 {stats.aggregated.toLocaleString()} 則經 Google News 聚合
@@ -229,9 +235,8 @@ function NewsSources() {
             直接訂閱的 RSS：{stats.rss.join('、')}
           </div>
         </div>
-      )}
-    </>
-  )
+    ) : null,
+  }
 }
 
 /**
@@ -252,6 +257,7 @@ function NewsFeed({ symbol, news, historyData, isHistory, availableDates, histor
   }, [displayData])
 
   const currentItems = categories.find(c => c.name === activeTab)?.items ?? []
+  const sources = useNewsSources()
 
   return (
     <div className="news-panel">
@@ -260,8 +266,9 @@ function NewsFeed({ symbol, news, historyData, isHistory, availableDates, histor
         <span className="news-panel-title">
           {isHistory ? `歷史新聞 — ${historyDate}` : `最新新聞 ${symbol ? `— ${coinZh(symbol)}` : ''}`}
         </span>
-        <NewsSources />
+        {sources.button}
       </div>
+      {sources.list}
 
       {/* 歷史日期選擇 */}
       {isHistory && (

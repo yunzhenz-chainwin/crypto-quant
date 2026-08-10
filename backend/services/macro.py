@@ -53,9 +53,9 @@ _FACTOR_SOURCE = {
     "US10Y": {"provider": "Yahoo Finance", "symbol": "^TNX"},
     "SPX":   {"provider": "Yahoo Finance", "symbol": "^GSPC"},
     "GOLD":  {"provider": "Yahoo Finance", "symbol": "GC=F"},
-    "BTC_DOM":    {"provider": "CoinGecko", "symbol": "/api/v3/global",
+    "BTC_DOM":    {"provider": "CoinGecko", "symbol": "CoinGecko global",
                    "url": "https://www.coingecko.com/en/global-charts"},
-    "TOTAL_MCAP": {"provider": "CoinGecko", "symbol": "/api/v3/global",
+    "TOTAL_MCAP": {"provider": "CoinGecko", "symbol": "CoinGecko global",
                    "url": "https://www.coingecko.com/en/global-charts"},
 }
 
@@ -237,13 +237,13 @@ def _compute_linkage_uncached() -> dict | None:
             return None
         for s in out["series"]:
             s["label_zh"] = _LINK_LABEL_ZH.get(s["key"], s["key"])
-        out.update(_linkage_reading(out["series"]))
+        out.update(_linkage_reading(out["series"], out.get("window_days")))
         return out
     except Exception:
         return None
 
 
-def _linkage_reading(series: list[dict]) -> dict:
+def _linkage_reading(series: list[dict], window: int | None = None) -> dict:
     """
     連動強度 → 白話判讀（純規則）。
 
@@ -252,6 +252,7 @@ def _linkage_reading(series: list[dict]) -> dict:
     """
     top = max(series, key=lambda s: abs(s["corr"]))
     strength = abs(top["corr"])
+    n_years = top["n_obs"] / 252.0
     if strength >= 0.5:
         level, level_zh, weight_zh = "HIGH", "高", "宏觀讀值值得看重"
     elif strength >= 0.3:
@@ -270,8 +271,12 @@ def _linkage_reading(series: list[dict]) -> dict:
         "top_key": top["key"], "top_corr": top["corr"],
         "text_zh": (f"目前 BTC 與{top['label_zh']}的 60 日相關性為 {top['corr']:+.2f}"
                     f"（{direction}{extreme}），整體連動強度{level_zh}；{weight_zh}。"),
-        "basis_zh": "以 BTC（Binance 日線收盤）對各宏觀序列（Yahoo Finance 日線收盤）"
-                    "取 60 個交易日的滾動相關；百分位＝目前值在近十年所有滾動值中的位置。",
+        # 百分位的母體是「BTC 與宏觀都有資料的交易日」，受限於 prices 表只有 2021-07 起，
+        # 實際約 1,220 個滾動值（≈5 年），不是宏觀本身的 10 年。寫死年數會跟畫面對不上，
+        # 故依實際樣本數換算，資料期間變長時說法會自己跟著改。
+        "basis_zh": ("以 BTC（Binance 日線收盤）對各宏觀序列（Yahoo Finance 日線收盤）"
+                     f"取 {window} 個交易日的滾動相關；百分位＝目前值在近 {n_years:.0f} 年"
+                     f"（{top['n_obs']:,} 個滾動值）中的位置。"),
     }
 
 

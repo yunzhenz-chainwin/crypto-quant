@@ -271,13 +271,14 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 /* 連動強度的白話結論：決定上面那些宏觀數字現在值不值得看，故留在主畫面 */
 .macro-reading { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--text); opacity: .85; margin-top: 13px; padding: 9px 11px; background: rgba(148,163,184,.05); border: 1px solid var(--border); border-radius: 8px; }
 .macro-reading-tag { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: var(--muted); background: rgba(148,163,184,.12); }
-.macro-reading[data-level="HIGH"]   .macro-reading-tag { color: #eab308; background: rgba(234,179,8,.12); }
-.macro-reading[data-level="MEDIUM"] .macro-reading-tag { color: #38bdf8; background: rgba(56,189,248,.12); }
+.macro-reading[data-level="HIGH"]   .macro-reading-tag { color: #38bdf8; background: rgba(56,189,248,.18); }
+.macro-reading[data-level="MEDIUM"] .macro-reading-tag { color: #38bdf8; background: rgba(56,189,248,.10); }
 /* 展開區：逐序列相關、歷史檢定、環境時間軸 */
 .macro-block { margin-top: 14px; }
 .macro-block-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12.5px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
 .macro-block-sub { font-size: 11px; font-weight: 400; color: var(--muted); }
-.macro-link-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; }
+.macro-link-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 640px) { .macro-link-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .macro-link-cell { background: rgba(148,163,184,.05); border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; }
 .macro-link-bar { position: relative; height: 4px; margin-top: 7px; background: rgba(148,163,184,.14); border-radius: 2px; }
 .macro-link-mid { position: absolute; left: 50%; top: -2px; width: 1px; height: 8px; background: var(--border); }
@@ -693,13 +694,18 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 /* 三個核心指標 */
 .key-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 @media (max-width: 700px) { .key-metrics { grid-template-columns: 1fr; } }
+/* 判斷摘要的四格證據：auto-fit 會在中間寬度排 3 欄讓第④格落單，改固定欄數 */
+.decision-evidence-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+@media (max-width: 1180px) { .decision-evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px)  { .decision-evidence-grid { grid-template-columns: 1fr; } }
 /* 風險調整後的對照：夏普對照／曝險／t 統計量（後端早有、畫面原本沒顯示） */
-.risk-reality { margin-top: 10px; padding: 11px 13px; background: rgba(148,163,184,.05); border: 1px solid var(--border); border-radius: 10px; }
+.risk-reality { margin-top: 16px; padding: 11px 13px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
 .risk-reality-title { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--text); margin-bottom: 9px; }
 .risk-reality-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.risk-reality-item { border-left: 3px solid #475569; padding-left: 10px; }
+.risk-reality-item { border-left: 4px solid #475569; padding-left: 10px; }
 .risk-reality-item[data-tone="warn"] { border-left-color: #eab308; }
 .risk-reality-item[data-tone="ok"]   { border-left-color: #22c55e; }
+.risk-reality-item[data-tone="bad"]  { border-left-color: #ef4444; }
 .risk-reality-lbl { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
 .risk-reality-val { font-size: 14px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .risk-reality-vs { font-size: 11px; font-weight: 400; color: var(--muted); margin: 0 3px; }
@@ -891,8 +897,9 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .news-panel-title  { font-size: 13px; font-weight: 600; color: var(--text); }
 .news-sources { font-size: 10px; color: var(--muted); }
 /* 來源標示可點開看實際分布（依資料庫統計，不是寫死清單） */
-.news-sources-btn { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 10px; color: var(--muted); }
-.news-sources-btn:hover { color: var(--text); }
+.news-sources-btn { background: none; border: 0; padding: 3px 6px; margin: -3px -6px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 11px; color: var(--muted); }
+.news-sources-btn:hover { color: var(--text); background: rgba(255,255,255,.04); }
+.news-sources-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .news-sources-list { margin: 8px 0 2px; padding: 9px 11px; background: rgba(148,163,184,.05); border: 1px solid var(--border); border-radius: 8px; }
 .news-sources-sum { font-size: 10.5px; color: var(--muted); line-height: 1.6; }
 .news-sources-sum code { font-size: 10px; padding: 0 3px; border-radius: 3px; background: rgba(148,163,184,.15); }
