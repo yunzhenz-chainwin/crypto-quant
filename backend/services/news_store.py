@@ -192,6 +192,36 @@ def total_count() -> int:
         return conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
 
 
+def source_stats(top: int = 12) -> dict:
+    """
+    新聞來源的實際分布（前端「資料來源」標示用）。
+
+    為什麼要查實際資料而不是寫死清單：前端原本寫死
+    「CoinTelegraph · CoinDesk · Decrypt」三家，但庫裡實際有數百個網域，
+    最大宗是動區 BlockTempo，而那三家合計只佔約四分之一——
+    寫死的清單不只是漏標，是會讓人誤以為新聞只來自那三家英文媒體。
+
+    domain 以 'GN:' 開頭者＝經 Google News 聚合進來的來源（非我們直接訂閱的 RSS），
+    這裡照實分開標示，讓讀者知道哪些是直接來源、哪些是聚合來的。
+    """
+    with _connect() as conn:
+        total, domains = conn.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT domain) FROM news").fetchone()
+        rows = conn.execute(
+            "SELECT domain, COUNT(*) n FROM news GROUP BY domain "
+            "ORDER BY n DESC LIMIT ?", (top,)).fetchall()
+        aggregated = conn.execute(
+            "SELECT COUNT(*) FROM news WHERE domain LIKE 'GN:%'").fetchone()[0]
+    return {
+        "total": int(total or 0),
+        "domains": int(domains or 0),
+        "aggregated": int(aggregated or 0),      # 經 Google News 聚合的則數
+        "top": [{"domain": r["domain"], "count": r["n"],
+                 "via_aggregator": str(r["domain"] or "").startswith("GN:")}
+                for r in rows],
+    }
+
+
 # ── 每日新聞情緒彙總 ─────────────────────────────────────────────────────────
 # 情緒 → 權重（分數 = (多-空)/總數 × 100，四捨五入，夾在 -100~100）
 def aggregate_daily(dates: list[str] = None) -> int:

@@ -478,6 +478,25 @@ def news_dates():
     return {"dates": available_dates(), "total": total_count()}
 
 
+@router.get("/sentiment/sources")
+def news_sources():
+    """
+    新聞的實際來源分布（前端「資料來源」標示用）。
+
+    直接訂閱的 RSS 清單是寫在程式裡的常數（RSS_SOURCES），照實回傳；
+    但實際入庫的來源遠不只這些——Google News 聚合會帶進大量第三方媒體，
+    所以另外查資料庫給出真實的網域數與前幾大來源，讓畫面上的標示對得起實際資料。
+    """
+    from backend.services.news_store import source_stats
+    stats = source_stats()
+    return {
+        "rss": [name for name, _ in RSS_SOURCES],
+        "aggregator": "Google News（中文聚合，市場級 + 幣種級查詢）",
+        "aggregator_prefix": "GN:",
+        **stats,
+    }
+
+
 # ── 歷史回補核心邏輯 ─────────────────────────────────────────────────────────
 def _hn_fetch_range(from_date: str, to_date: str) -> int:
     """

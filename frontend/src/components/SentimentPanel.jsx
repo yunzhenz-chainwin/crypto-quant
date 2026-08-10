@@ -12,12 +12,12 @@
  *   BackfillPanel     匯入歷史新聞的表單（從 HackerNews 回補）
  *   SentimentPanel    主元件，管理所有狀態並組裝以上子元件
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useId } from 'react'
 import {
   ResponsiveContainer, AreaChart, Area,
   XAxis, YAxis, Tooltip, ReferenceLine,
 } from 'recharts'
-import { fetchFearGreed, fetchNews, fetchNewsHistory, fetchNewsDates, backfillNews, fetchNewsSentiment } from '../api/client'
+import { fetchFearGreed, fetchNews, fetchNewsHistory, fetchNewsDates, backfillNews, fetchNewsSentiment, fetchNewsSources } from '../api/client'
 import { coinZh, coinTicker } from '../constants/coins'
 
 // 依指數值（0~100）回傳對應的顏色、標籤和解說文字
@@ -181,6 +181,60 @@ function NewsArticles({ items }) {
 }
 
 /**
+ * 新聞來源標示：讀 /api/sentiment/sources 的實際分布，不寫死清單。
+ *
+ * 原本這裡寫死「CoinTelegraph · CoinDesk · Decrypt」，但庫裡實際有數百個網域、
+ * 最大宗是動區 BlockTempo，那三家合計只佔約四分之一——寫死的清單會讓人誤以為
+ * 新聞只來自那三家英文媒體。點開可看實際前幾大來源與則數，能自己核對。
+ */
+function NewsSources() {
+  const [stats, setStats] = useState(null)
+  const [open, setOpen] = useState(false)
+  const listId = useId()
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchNewsSources({ signal: controller.signal }).then(setStats).catch(() => {})
+    return () => controller.abort()
+  }, [])
+
+  if (!stats?.total) return <span className="news-sources">資料來源載入中…</span>
+
+  return (
+    <>
+      <button
+        type="button"
+        className="news-sources news-sources-btn"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        aria-controls={listId}
+        title="點看實際來源分布（依資料庫統計，非固定清單）"
+      >
+        資料來源：{stats.rss.length} 家 RSS ＋ Google News 聚合 · 共 {stats.domains} 個來源 {open ? '▲' : '▼'}
+      </button>
+      {open && (
+        <div id={listId} className="news-sources-list">
+          <div className="news-sources-sum">
+            資料庫 {stats.total.toLocaleString()} 則，其中 {stats.aggregated.toLocaleString()} 則經 Google News 聚合
+            （來源名稱前綴 <code>GN:</code>）。以下為則數最多的來源：
+          </div>
+          <div className="news-sources-grid">
+            {stats.top.map(t => (
+              <span key={t.domain} className="news-sources-chip" data-agg={t.via_aggregator}>
+                {t.domain}<b>{t.count.toLocaleString()}</b>
+              </span>
+            ))}
+          </div>
+          <div className="news-sources-sum">
+            直接訂閱的 RSS：{stats.rss.join('、')}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+/**
  * 新聞面板：分類 tab + 文章列表
  * - isHistory=false：顯示最新 RSS 新聞，依幣種篩選
  * - isHistory=true：顯示歷史新聞，加上日期下拉選單
@@ -206,7 +260,7 @@ function NewsFeed({ symbol, news, historyData, isHistory, availableDates, histor
         <span className="news-panel-title">
           {isHistory ? `歷史新聞 — ${historyDate}` : `最新新聞 ${symbol ? `— ${coinZh(symbol)}` : ''}`}
         </span>
-        <span className="news-sources">CoinTelegraph · CoinDesk · Decrypt</span>
+        <NewsSources />
       </div>
 
       {/* 歷史日期選擇 */}

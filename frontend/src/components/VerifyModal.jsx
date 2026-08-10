@@ -60,6 +60,20 @@ export default function VerifyModal({ onClose }) {
               驗證項目:RSI · MACD · 均線(MA) · 布林通道 · 成交量
             </div>
 
+            {/* 出處與參數：這些指標不是任何資料商提供的權威值,是本站用公開公式自己算的。
+                不講清楚,讀者容易誤以為是外部給的;講了參數,「自己算」才不是黑箱。 */}
+            <div className="vm-source">
+              <b>這些數字哪裡來的</b>
+              <p>
+                原始行情(開高低收、成交量)取自 <b>Binance 公開 API</b>,只採用已收盤的 K 棒;
+                技術指標則由<b>本站以公開公式自行計算</b>,並非外部資料商提供的數值。
+              </p>
+              <p className="vm-params">
+                參數:RSI 14(Wilder 平滑) · MACD 12/26/9 · 布林通道 20 期 ±2σ ·
+                均線 MA20/60/200 · 成交量 20 日均量
+              </p>
+            </div>
+
             <div className="vm-coins">
               {(d.coins ?? []).map(c => (
                 <span key={c.symbol} className={`vm-coin ${c.ok ? 'ok' : 'bad'}`}>

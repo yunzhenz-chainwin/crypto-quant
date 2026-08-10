@@ -84,7 +84,10 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 }
 
 /* ── StatusBar ─────────────────────────────────────── */
-.status-bar { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); }
+.status-bar { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.status-source a { color: var(--muted); text-decoration: none; border-bottom: 1px dotted var(--border); }
+.status-source a:hover { color: var(--text); border-bottom-color: currentColor; }
+.status-source-note { opacity: .75; margin-left: 4px; }
 .status-detail { display: flex; gap: 8px; }
 .status-detail span {
   background: var(--bg); padding: 2px 8px;
@@ -126,6 +129,11 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .vm-summary.ok   { color: var(--bull); background: rgba(34,197,94,0.1); }
 .vm-summary.warn { color: var(--neutral); background: rgba(245,158,11,0.1); }
 .vm-items { font-size: 12px; color: var(--muted); text-align: center; margin-bottom: 10px; }
+/* 指標出處與參數：講清楚「行情是 Binance 的、指標是本站自算的」 */
+.vm-source { margin-top: 14px; padding: 10px 12px; background: rgba(148,163,184,.05); border: 1px solid var(--border); border-radius: 8px; }
+.vm-source b { color: var(--text); }
+.vm-source p { font-size: 11.5px; color: var(--muted); line-height: 1.65; margin: 6px 0 0; }
+.vm-params { font-variant-numeric: tabular-nums; }
 .vm-coins { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .vm-coin {
   font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 6px;
@@ -870,6 +878,16 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .news-panel-header { display: flex; justify-content: space-between; align-items: center; }
 .news-panel-title  { font-size: 13px; font-weight: 600; color: var(--text); }
 .news-sources { font-size: 10px; color: var(--muted); }
+/* 來源標示可點開看實際分布（依資料庫統計，不是寫死清單） */
+.news-sources-btn { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 10px; color: var(--muted); }
+.news-sources-btn:hover { color: var(--text); }
+.news-sources-list { margin: 8px 0 2px; padding: 9px 11px; background: rgba(148,163,184,.05); border: 1px solid var(--border); border-radius: 8px; }
+.news-sources-sum { font-size: 10.5px; color: var(--muted); line-height: 1.6; }
+.news-sources-sum code { font-size: 10px; padding: 0 3px; border-radius: 3px; background: rgba(148,163,184,.15); }
+.news-sources-grid { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; }
+.news-sources-chip { display: inline-flex; align-items: baseline; gap: 5px; font-size: 10.5px; color: var(--text); background: rgba(148,163,184,.09); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
+.news-sources-chip[data-agg="true"] { opacity: .72; }
+.news-sources-chip b { color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* 分類 Tabs */
 .news-tabs { display: flex; gap: 6px; flex-wrap: wrap; }

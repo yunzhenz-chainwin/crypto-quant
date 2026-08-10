@@ -82,6 +82,9 @@ export const fetchMacro = () => get('/macro')
 // 宏觀環境的逐日標籤時間軸（與面板同一套規則重算）；展開詳細時才載入
 export const fetchMacroHistory = (days = 365) => get(`/macro/history?days=${days}`)
 
+// 新聞的實際來源分布（直接訂閱的 RSS + Google News 聚合帶進來的第三方媒體）
+export const fetchNewsSources = () => get('/sentiment/sources')
+
 // 取得所有幣種的當前訊號（BULL / BEAR / NEUTRAL）
 export const fetchAllSignals = () => get('/signals')
 
