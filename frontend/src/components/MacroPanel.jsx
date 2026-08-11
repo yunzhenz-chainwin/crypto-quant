@@ -181,23 +181,43 @@ export default function MacroPanel({ data = null }) {
 
       {m.summary_zh && <div className="macro-summary">{m.summary_zh}</div>}
 
-      <div className="macro-grid">
-        {m.factors.map(f => (
-          <div key={f.key} className="macro-cell" data-impact={f.impact} title={f.note_zh}>
-            <div className="macro-cell-lbl">{f.label_zh}</div>
-            <div className="macro-cell-val">{fmtVal(f)}</div>
-            <div className="macro-cell-meta">
-              <span className="macro-cell-tag" data-impact={f.impact}>{f.impact_zh}</span>
-              {f.change_pct != null && (
-                <span className="macro-cell-chg">
-                  {f.change_pct >= 0 ? '▲' : '▼'}{Math.abs(f.change_pct).toFixed(1)}%
-                </span>
+      {/* 分組呈現：十個因子攤成一片格子的話，看不出「哪幾個真的決定了上面那句判讀」。
+          依後端給的 groups 分成「判讀依據 / 加密自身 / 背景對照」三區，
+          背景對照那組視覺上壓低，避免參考資料看起來跟結論依據一樣重。
+          後端沒給 groups 時（舊版本）退回單一區塊，不會整塊消失。 */}
+      {(m.groups?.length ? m.groups : [{ key: null, label_zh: null, note_zh: null }])
+        .map(g => {
+          const items = g.key ? m.factors.filter(f => f.group === g.key) : m.factors
+          if (!items.length) return null
+          return (
+            <div key={g.key ?? 'all'} className="macro-group" data-group={g.key ?? 'all'}>
+              {g.label_zh && (
+                <div className="macro-group-head">
+                  <span className="macro-group-title">{g.label_zh}</span>
+                  <span className="macro-group-count">{items.length}</span>
+                  {g.note_zh && <span className="macro-group-note">{g.note_zh}</span>}
+                </div>
               )}
+              <div className="macro-grid">
+                {items.map(f => (
+                  <div key={f.key} className="macro-cell" data-impact={f.impact} title={f.note_zh}>
+                    <div className="macro-cell-lbl">{f.label_zh}</div>
+                    <div className="macro-cell-val">{fmtVal(f)}</div>
+                    <div className="macro-cell-meta">
+                      <span className="macro-cell-tag" data-impact={f.impact}>{f.impact_zh}</span>
+                      {f.change_pct != null && (
+                        <span className="macro-cell-chg">
+                          {f.change_pct >= 0 ? '▲' : '▼'}{Math.abs(f.change_pct).toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
+                    <SourceTag source={f.source} />
+                  </div>
+                ))}
+              </div>
             </div>
-            <SourceTag source={f.source} />
-          </div>
-        ))}
-      </div>
+          )
+        })}
 
       {/* 連動強度的白話結論放在主畫面：它決定上面那些數字現在值不值得看 */}
       {link?.text_zh && (

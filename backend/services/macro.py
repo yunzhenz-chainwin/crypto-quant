@@ -44,6 +44,24 @@ _EVIDENCE_CACHE: dict = {"mtime": None, "data": None}
 _LINK_LABEL_ZH = {"SPX": "美股標普 500", "DXY": "美元指數",
                   "VIX": "恐慌指數 VIX", "GOLD": "黃金"}
 
+# ── 因子分組 ────────────────────────────────────────────────────────────────
+# 十個因子攤成一片格子，使用者分不出「哪幾個真的決定了上面那句順風／逆風」。
+# 分成三組後，判讀依據與純參考一眼可辨，也不會因為之後再加對照序列而愈來愈亂。
+# driver 的成員必須與 src/macro_regime.DRIVER_KEYS 一致（那份才是計分的唯一定義）。
+_GROUP = {
+    "DXY": "driver", "VIX": "driver", "US10Y": "driver", "SPX": "driver",
+    "BTC_DOM": "crypto", "TOTAL_MCAP": "crypto",
+    "GOLD": "reference", "N225": "reference", "KOSPI": "reference", "JPY": "reference",
+}
+GROUPS = [
+    {"key": "driver", "label_zh": "判讀依據",
+     "note_zh": "這 4 項決定上方的順風／逆風判讀"},
+    {"key": "crypto", "label_zh": "加密自身",
+     "note_zh": "幣圈內部的資金流向，不計入判讀"},
+    {"key": "reference", "label_zh": "背景對照",
+     "note_zh": "只顯示供對照，不計入判讀"},
+]
+
 # ── 資料出處（每個數字都要能被讀者自己追回原始頁面查證）──────────────────────
 # 標的代號是查證的關鍵：光寫「Yahoo Finance」沒辦法核對，寫 ^VIX 才能自己去對收盤價。
 _YAHOO_QUOTE = "https://finance.yahoo.com/quote/"
@@ -53,6 +71,10 @@ _FACTOR_SOURCE = {
     "US10Y": {"provider": "Yahoo Finance", "symbol": "^TNX"},
     "SPX":   {"provider": "Yahoo Finance", "symbol": "^GSPC"},
     "GOLD":  {"provider": "Yahoo Finance", "symbol": "GC=F"},
+    # 背景對照（只顯示、不計入判讀，理由見 _compute 內的註解）
+    "N225":  {"provider": "Yahoo Finance", "symbol": "^N225"},
+    "KOSPI": {"provider": "Yahoo Finance", "symbol": "^KS11"},
+    "JPY":   {"provider": "Yahoo Finance", "symbol": "JPY=X"},
     "BTC_DOM":    {"provider": "CoinGecko", "symbol": "CoinGecko global",
                    "url": "https://www.coingecko.com/en/global-charts"},
     "TOTAL_MCAP": {"provider": "CoinGecko", "symbol": "CoinGecko global",
@@ -62,7 +84,7 @@ _FACTOR_SOURCE = {
 # 面板底部的來源清單（誰提供了什麼、免金鑰、可自行查證）
 SOURCES = [
     {"provider": "Yahoo Finance", "url": "https://finance.yahoo.com",
-     "detail_zh": "美元指數、VIX、美債 10Y、標普 500、黃金的日線收盤"},
+     "detail_zh": "美元指數、VIX、美債 10Y、標普 500、黃金、日經 225、韓國 KOSPI 的日線收盤"},
     {"provider": "CoinGecko", "url": "https://www.coingecko.com/en/global-charts",
      "detail_zh": "BTC 主導率、加密總市值（24h 動能）"},
     {"provider": "Binance", "url": "https://www.binance.com",
@@ -313,6 +335,37 @@ def _compute() -> dict:
             _extra_factor("TOTAL_MCAP", "加密總市值", g["total_mcap"] / 1e12, mc, imp,
                           "全加密市值 24h 動能", unit="兆"), today))
 
+    # 亞股對照（日經 / KOSPI）：純參考，一律 NEUTRAL、不進 impacts、不影響 verdict。
+    #
+    # 為什麼只顯示不計分：日韓確實是加密的大宗「交易量」市場（韓國散戶尤其），
+    # 但那不等於價格驅動力。實測 2021-08~2026-08 共 1,826 個共同交易日，
+    # 與 BTC 的 60 交易日滾動相關中位數只有 0.14（日經）／0.12（KOSPI），
+    # 是所有序列裡最低的兩條；更關鍵的是控制住標普之後的偏相關為 -0.06／-0.05，
+    # 幾乎為 0 —— 代表它們對加密的影響已經被標普涵蓋，計入判讀只會多加雜訊。
+    # 因此提供給使用者當背景對照，但不參與順風／逆風的彙總。
+    for key, label_zh, note_zh in (
+        ("N225", "日經 225",
+         "日本股市風險偏好對照。與 BTC 的 60 日相關性歷來偏低（五年中位數 0.14），"
+         "且扣掉標普後幾乎沒有獨立解釋力；僅供參考，不計入判讀。"),
+        ("KOSPI", "韓國 KOSPI",
+         "韓國股市風險偏好對照。韓國加密散戶交易量大，但 KOSPI 與 BTC 的連動是"
+         "各序列中最低（五年中位數 0.12）；僅供參考，不計入判讀。"),
+        ("JPY", "美元兌日圓",
+         "日圓套利交易是日韓裡少數真實的傳導路徑（2024/8 日銀升息引發平倉、"
+         "全球風險資產同步下挫），但屬罕見事件；日常滾動相關扣掉美元指數後幾乎為 0。"
+         "僅供參考，不計入判讀。"),
+    ):
+        quote_ = _yahoo(_FACTOR_SOURCE[key]["symbol"])
+        if not quote_:
+            continue
+        value, change, as_of = quote_
+        factors.append(_with_source(
+            _extra_factor(key, label_zh, value, change, "NEUTRAL", note_zh), as_of))
+
+    # 分組標記（前台據此把「判讀依據 / 加密自身 / 背景對照」分區呈現）
+    for f in factors:
+        f["group"] = _GROUP.get(f["key"], "reference")
+
     verdict = aggregate(impacts)
     evidence = _evidence_summary(load_evidence())
     link = _compute_linkage()
@@ -324,6 +377,7 @@ def _compute() -> dict:
         "summary_zh": summary_zh(factors),
         "note_zh": "宏觀因子為市場整體背景（非單一幣訊號），依歷史相關性的經驗法則，非保證。",
         "factors": factors,
+        "groups": GROUPS,
         "evidence": evidence,
         "linkage": link,
         "sources": SOURCES,

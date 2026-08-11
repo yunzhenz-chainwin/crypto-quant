@@ -252,6 +252,33 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .macro-verdict.macro-warn { color: #eab308; background: rgba(234,179,8,.1); }
 .macro-verdict.macro-bad  { color: #ef4444; background: rgba(239,68,68,.1); }
 .macro-summary { font-size: 13px; color: var(--text); opacity: .8; margin-bottom: 14px; }
+
+/* ── 因子分組 ────────────────────────────────────────────────────────────
+   十個因子攤成一片一模一樣的格子，看不出哪幾個真的決定了上方的順風／逆風。
+   分成「判讀依據 / 加密自身 / 背景對照」三區，並讓後兩區在視覺上退一階，
+   參考資料才不會看起來跟結論依據一樣重。 */
+.macro-group + .macro-group { margin-top: 14px; }
+.macro-group-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 7px; padding-bottom: 5px; border-bottom: 1px solid var(--border);
+}
+.macro-group-title { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.macro-group-count {
+  font-size: 10.5px; font-weight: 700; color: var(--muted);
+  background: rgba(148, 163, 184, .12); border-radius: 999px; padding: 1px 7px;
+}
+.macro-group-note { font-size: 11px; color: var(--muted); }
+
+/* 判讀依據那一組是結論的來源，維持原本的視覺份量並用主色標題 */
+.macro-group[data-group="driver"] .macro-group-title { color: var(--accent); }
+/* 非判讀組整體降一階：淡一點、格子小一點，但滑鼠移上去回復完整可讀 */
+.macro-group[data-group="crypto"],
+.macro-group[data-group="reference"] { opacity: .78; transition: opacity .15s; }
+.macro-group[data-group="crypto"]:hover,
+.macro-group[data-group="reference"]:hover { opacity: 1; }
+.macro-group[data-group="crypto"] .macro-cell-val,
+.macro-group[data-group="reference"] .macro-cell-val { font-size: 15px; }
+
 .macro-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; }
 .macro-cell { background: rgba(148,163,184,.05); border: 1px solid var(--border); border-left: 3px solid #475569; border-radius: 8px; padding: 8px 11px; }
 .macro-cell[data-impact="TAILWIND"] { border-left-color: #22c55e; }
