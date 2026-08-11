@@ -39,7 +39,7 @@ function EquityCurve({ data }) {
         <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} width={44}
                tickFormatter={(v) => `${v}x`} />
         <Tooltip
-          contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6 }}
+          contentStyle={{ background: '#0b1220', border: '1px solid #334155', borderRadius: 6 }}
           formatter={(v, name) => [`${Number(v).toFixed(3)}x`, name]}
           labelFormatter={(date) => `日期 ${date}`}
         />

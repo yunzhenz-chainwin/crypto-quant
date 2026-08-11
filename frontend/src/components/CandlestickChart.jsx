@@ -131,6 +131,7 @@ const OSC_DETAIL = {
 
 export default function CandlestickChart({ prices, indicators, trades, interval = '1d', compact = false }) {
   const helpId = useId()
+  const toolsId = useId()   // 圖表設定抽屜的 aria-controls 目標
   const containerRef = useRef(null)
   const tooltipRef   = useRef(null)   // 懸停資訊框（直接操作 DOM，避免高頻 re-render）
   const [maType, setMaType] = useState('EMA')   // 均線類型:SMA / EMA
@@ -147,6 +148,9 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
   const [showMarkers, setShowMarkers] = useState(true)
   const [osc, setOsc] = useState('RSI')   // 單一擺盪指標槽
   const [oscDetail, setOscDetail] = useState(false)  // 指標詳細說明是否展開
+  // 圖層/擺盪切換共 20 幾個按鈕，平常收合成一行摘要，需要調整時才展開。
+  // 只是收納，控制項一個都沒有移除。
+  const [showTools, setShowTools] = useState(false)
 
 
   useEffect(() => {
@@ -154,7 +158,9 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
 
     const oscOn = osc !== '無'
     const chart = createChart(containerRef.current, {
-      layout: { background: { color: '#0f172a' }, textColor: '#94a3b8' },
+      // fontSize 比預設(12)大一點：圖表區為了正確量測而抵銷了介面縮放，
+      // 這裡補回來，讓座標軸文字與放大後的其他區塊看起來一致。
+      layout: { background: { color: '#030712' }, textColor: '#94a3b8', fontSize: 13 },
       grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: '#334155' },
@@ -457,31 +463,57 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
 
   return (
     <div className="chart-root" style={{ position: 'relative' }}>
-            <div className="chart-toolbar">
-        <span className="toolbar-lbl">圖層：</span>
-        <button type="button" className="matype-btn" onClick={() => setMaType(t => t === 'SMA' ? 'EMA' : 'SMA')} title="切換 簡單(SMA)/指數(EMA) 移動平均" aria-label={`目前為 ${maType} 均線，按下切換均線類型`}>均線:{maType}</button>
-        {mas.map((ma, i) => (
-          <Toggle
-            key={i} on={ma.on} color={ma.color}
-            onClick={() => setMas(arr => arr.map((m, j) => j === i ? { ...m, on: !m.on } : m))}
-          >
-            {maType}{ma.p}
-          </Toggle>
-        ))}
-        <Toggle on={showBB}      onClick={() => setShowBB(v => !v)}      color="#f87171">布林帶</Toggle>
-        <Toggle on={showVol}     onClick={() => setShowVol(v => !v)}     color="#94a3b8">成交量</Toggle>
-        {interval === '1d' && (
-          <Toggle on={showMarkers} onClick={() => setShowMarkers(v => !v)} color="#22c55e">買賣標記</Toggle>
-        )}
-        <span className="osc-selector">
-          <span className="osc-lbl">擺盪：</span>
-          {OSC_LIST.map(o => (
-            <button type="button" key={o} className={`osc-tab ${osc === o ? 'active' : ''}`} onClick={() => setOsc(o)} aria-pressed={osc === o}>
-              {o}{OSC_NAME[o] ? `(${OSC_NAME[o]})` : ''}
-            </button>
-          ))}
+      {/* 收合列：平常只顯示「目前套用了什麼」，按下齒輪才展開所有切換鈕 */}
+      <div className="chart-toolbar-bar">
+        <button
+          type="button"
+          className={`chart-tools-toggle ${showTools ? 'on' : ''}`}
+          onClick={() => setShowTools(v => !v)}
+          aria-expanded={showTools}
+          aria-controls={toolsId}
+          title="展開/收合 均線、布林帶、成交量、買賣標記與擺盪指標的切換"
+        >
+          <span aria-hidden="true">⚙</span> 圖表設定
+        </button>
+        <span className="chart-tools-summary">
+          {[
+            `均線 ${maType}`,
+            mas.filter(m => m.on).map(m => m.p).join('／') || '關閉',
+            showBB ? '布林帶' : null,
+            showVol ? '成交量' : null,
+            (interval === '1d' && showMarkers) ? '買賣標記' : null,
+            `擺盪 ${osc}`,
+          ].filter(Boolean).join(' · ')}
         </span>
       </div>
+
+      {showTools && (
+        <div className="chart-toolbar" id={toolsId}>
+          <span className="toolbar-lbl">圖層：</span>
+          <button type="button" className="matype-btn" onClick={() => setMaType(t => t === 'SMA' ? 'EMA' : 'SMA')} title="切換 簡單(SMA)/指數(EMA) 移動平均" aria-label={`目前為 ${maType} 均線，按下切換均線類型`}>均線:{maType}</button>
+          {mas.map((ma, i) => (
+            <Toggle
+              key={i} on={ma.on} color={ma.color}
+              onClick={() => setMas(arr => arr.map((m, j) => j === i ? { ...m, on: !m.on } : m))}
+            >
+              {maType}{ma.p}
+            </Toggle>
+          ))}
+          <Toggle on={showBB}      onClick={() => setShowBB(v => !v)}      color="#f87171">布林帶</Toggle>
+          <Toggle on={showVol}     onClick={() => setShowVol(v => !v)}     color="#94a3b8">成交量</Toggle>
+          {interval === '1d' && (
+            <Toggle on={showMarkers} onClick={() => setShowMarkers(v => !v)} color="#22c55e">買賣標記</Toggle>
+          )}
+          <span className="osc-selector">
+            <span className="osc-lbl">擺盪：</span>
+            {OSC_LIST.map(o => (
+              <button type="button" key={o} className={`osc-tab ${osc === o ? 'active' : ''}`} onClick={() => setOsc(o)} aria-pressed={osc === o}>
+                {o}{OSC_NAME[o] ? `(${OSC_NAME[o]})` : ''}
+              </button>
+            ))}
+          </span>
+        </div>
+      )}
       <div ref={containerRef} className="candlestick-wrap" role="img" tabIndex="0" aria-label={latestSummary}>
         {/* 懸停資訊框（subscribeCrosshairMove 直接寫入內容與座標） */}
         <div ref={tooltipRef} className="chart-tooltip" />

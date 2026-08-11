@@ -86,7 +86,7 @@ function FearGreedChart({ history }) {
         <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 9 }} interval="preserveStartEnd" />
         <YAxis domain={[0, 100]} hide />
         <Tooltip
-          contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, fontSize: 11 }}
+          contentStyle={{ background: '#0b1220', border: '1px solid #334155', borderRadius: 6, fontSize: 11 }}
           formatter={(v) => [v, '指數']}
         />
         <ReferenceLine y={25} stroke="#ef4444" strokeDasharray="3 2" strokeOpacity={0.4} />

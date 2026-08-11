@@ -9,7 +9,11 @@ const AdminApp = lazy(() => import('./admin/AdminApp.jsx'))
 
 // 網址以 /admin 開頭 → 載入後台;否則載入一般前台。
 // 後端 serve_spa 對所有路徑都回 index.html,所以 /admin 也會載到同一個 bundle。
-const isAdmin = window.location.pathname.startsWith('/admin')
+// BASE_URL 是 Vite 的部署基底路徑:獨立部署為 '/'(→ /admin);掛在入口網站子路徑下
+// 建置時為 '/crypto/'(→ /crypto/admin)。兩種路徑都要認得為後台。
+const pathname = window.location.pathname
+const isAdmin = pathname.startsWith('/admin')
+  || pathname.startsWith(`${import.meta.env.BASE_URL}admin`)
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

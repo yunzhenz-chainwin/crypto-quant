@@ -1,17 +1,25 @@
 /* ── 全域重置與主題 ─────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* 配色與字體對齊「台股研究平台」(Hermes Stock)，讓兩個平台看起來像同一套系統。
+   對應：--bg = Hermes 的 #030712；--surface = 面板 #0b1220；--panel-alt = 側欄 #07111d；
+   --border = slate-700；--accent = cyan-400，也就是 Hermes 的主色。 */
 :root {
-  --bg:      #0f172a;
-  --surface: #1e293b;
-  --border:  #334155;
-  --text:    #e2e8f0;
-  --muted:   #94a3b8;
-  --accent:  #3b82f6;
+  --bg:        #030712;
+  --surface:   #0b1220;
+  --panel-alt: #07111d;
+  --border:    #334155;
+  --text:      #e2e8f0;
+  --muted:     #94a3b8;
+  --accent:    #22d3ee;
+  /* 主色是亮青色，白字會看不清楚；凡是「以主色為底」的元件一律配深色文字，
+     並加上青色光暈 —— 與 Hermes 的「青底黑字 + glow」選中樣式一致。 */
+  --accent-ink:  #04141a;
+  --accent-glow: 0 0 18px rgba(34, 211, 238, .25);
   --bull:    #22c55e;
   --bear:    #ef4444;
   --neutral: #f59e0b;
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Microsoft JhengHei', 'Noto Sans TC', 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 14px;
   color: var(--text);
   background: var(--bg);
@@ -26,7 +34,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
   flex-shrink: 0;
   display: flex; align-items: center; gap: 14px;
   padding: 0 20px; height: 40px;
-  background: #0a1628;
+  background: var(--panel-alt);
   border-bottom: 1px solid var(--border);
   font-size: 12px;
   overflow-x: auto; white-space: nowrap;
@@ -68,13 +76,14 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 
 /* ── Header 導覽 ────────────────────────────────────── */
 .header-nav { display: flex; gap: 4px; }
+/* 導覽鈕樣式對齊 Hermes 側邊選單：深色底 + slate-700 邊框，hover 轉青色 */
 .nav-btn {
-  padding: 5px 14px; border-radius: 6px;
-  background: transparent; border: 1px solid var(--border);
-  color: var(--muted); font-size: 13px; cursor: pointer; transition: all 0.15s;
+  padding: 5px 14px; border-radius: 8px;
+  background: var(--panel-alt); border: 1px solid var(--border);
+  color: var(--muted); font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.15s;
 }
-.nav-btn:hover  { color: var(--text); border-color: var(--accent); }
-.nav-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.nav-btn:hover  { color: #cffafe; border-color: var(--accent); }
+.nav-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: var(--accent-glow); }
 .nav-back-btn {
   width: 34px;
   min-width: 34px;
@@ -582,7 +591,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .dr-input:focus { outline: none; border-color: var(--accent); }
 .dr-apply {
   padding: 4px 14px; background: var(--accent);
-  border: none; border-radius: 5px; color: #fff;
+  border: none; border-radius: 5px; color: var(--accent-ink); font-weight: 700;
   font-size: 12px; cursor: pointer; transition: opacity 0.12s;
 }
 .dr-apply:hover:not(:disabled) { opacity: 0.85; }
@@ -602,7 +611,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
   font-size: 12px; transition: all 0.12s;
 }
 .day-tab:hover  { color: var(--text); border-color: var(--accent); }
-.day-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.day-tab.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: var(--accent-glow); }
 
 /* ── 折疊區塊 ──────────────────────────────────────── */
 .collapsible-section {
@@ -860,7 +869,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 }
 .backfill-btn {
   padding: 5px 14px; background: var(--accent);
-  border: none; border-radius: 5px; color: #fff;
+  border: none; border-radius: 5px; color: var(--accent-ink); font-weight: 700;
   font-size: 12px; cursor: pointer; transition: opacity 0.12s;
 }
 .backfill-btn:hover    { opacity: 0.85; }
@@ -879,7 +888,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
   transition: all 0.12s;
 }
 .mode-btn:hover  { color: var(--text); }
-.mode-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mode-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: var(--accent-glow); }
 
 /* 歷史日期選擇列 */
 .news-date-row   { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
@@ -918,7 +927,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
   transition: all 0.12s; white-space: nowrap;
 }
 .news-tab:hover { border-color: var(--accent); color: var(--text); }
-.news-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.news-tab.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: var(--accent-glow); }
 .news-tab-count {
   font-size: 10px; padding: 0 5px;
   background: rgba(255,255,255,0.15); border-radius: 10px;
@@ -1101,12 +1110,12 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 /* 可調天數的均線控制(快線/慢線)*/
 .ma-toggle { display: inline-flex; align-items: center; gap: 3px; }
 .matype-btn {
-  background: #1e293b; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
   padding: 3px 10px; font-size: 12px; color: #e2e8f0; cursor: pointer; transition: border-color .12s;
 }
 .matype-btn:hover { border-color: #475569; }
 .ma-period {
-  width: 44px; background: #0f172a; border: 1px solid var(--border);
+  width: 44px; background: var(--bg); border: 1px solid var(--border);
   border-radius: 4px; color: #e2e8f0; font-size: 12px; padding: 2px 4px; text-align: center;
 }
 .ma-period::-webkit-inner-spin-button { opacity: 0.4; }
@@ -1118,14 +1127,14 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
   background: transparent; border: 1px solid var(--border); border-radius: 6px;
   padding: 3px 10px; font-size: 12px; color: #94a3b8; cursor: pointer; transition: all .12s;
 }
-.osc-tab.active { background: #1e293b; color: #e2e8f0; border-color: #475569; }
+.osc-tab.active { background: var(--surface); color: #e2e8f0; border-color: var(--accent); }
 .osc-tab:hover { color: #e2e8f0; }
 
 /* 選到的擺盪指標「怎麼看」說明框 */
 .osc-help {
   margin-top: 8px; padding: 9px 12px; font-size: 12.5px; line-height: 1.7;
-  color: #94a3b8; background: #0f172a; border: 1px solid var(--border);
-  border-left: 3px solid #38bdf8; border-radius: 8px;
+  color: #94a3b8; background: var(--bg); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: 8px;
 }
 .osc-help-tag { color: #38bdf8; font-weight: 700; margin-right: 6px; }
 .osc-help-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -1138,7 +1147,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .osc-help-sec { display: grid; grid-template-columns: 72px 1fr; gap: 10px; align-items: start; }
 .osc-help-sec-label {
   color: #e2e8f0; font-weight: 700; font-size: 12px; text-align: center;
-  background: #1e293b; border-radius: 6px; padding: 3px 0; height: fit-content;
+  background: var(--surface); border-radius: 6px; padding: 3px 0; height: fit-content;
 }
 .osc-help-sec-text { color: #cbd5e1; font-size: 12.5px; line-height: 1.75; }
 .chart-empty      { padding: 40px; text-align: center; color: var(--muted); }
@@ -1218,8 +1227,8 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 }
 .admin-input:focus { outline: none; border-color: var(--accent); }
 .admin-btn {
-  background: var(--accent); color: #fff; border: none;
-  border-radius: 6px; padding: 10px; font-size: 14px; font-weight: 600;
+  background: var(--accent); color: var(--accent-ink); border: none;
+  border-radius: 6px; padding: 10px; font-size: 14px; font-weight: 700;
   cursor: pointer; transition: opacity 0.12s;
 }
 .admin-btn:hover:not(:disabled) { opacity: 0.9; }
@@ -1242,7 +1251,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
   background: transparent; border: 1px solid var(--border);
   color: var(--muted); font-size: 13px; cursor: pointer;
 }
-.admin-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.admin-tab.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: var(--accent-glow); }
 .admin-tab:disabled { opacity: 0.4; cursor: not-allowed; }
 .admin-header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .admin-link {
@@ -1313,7 +1322,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
   color: var(--muted); font-size: 12px; cursor: pointer; transition: all 0.12s;
 }
 .task-filter:hover  { color: var(--text); border-color: var(--accent); }
-.task-filter.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.task-filter.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: var(--accent-glow); }
 .task-filter b { margin-left: 2px; }
 
 /* 篩選狀態下拉 + 顯示筆數 */
@@ -1373,7 +1382,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
   color: var(--muted); cursor: pointer; transition: all 0.12s;
 }
 .db-tab:hover  { border-color: var(--accent); color: var(--text); transform: translateY(-1px); }
-.db-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.db-tab.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: var(--accent-glow); }
 .db-tab-icon  { font-size: 16px; }
 .db-tab-name  { font-size: 13px; font-weight: 600; }
 .db-tab-count {
@@ -1608,7 +1617,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 }
 .ai-input:focus { outline: none; border-color: var(--accent); }
 .ai-send {
-  background: var(--accent); border: none; color: #fff; border-radius: 8px;
+  background: var(--accent); border: none; color: var(--accent-ink); border-radius: 8px;
   padding: 0 18px; font-size: 13px; font-weight: 700; cursor: pointer;
 }
 .ai-send:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -1733,7 +1742,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 }
 .bot-bubble-user {
   align-self: flex-end; border-bottom-right-radius: 4px;
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--accent-ink);
 }
 .bot-brief-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .bot-brief-sub  { color: var(--muted); font-size: 12px; margin-top: 4px; }
@@ -1821,7 +1830,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .tour-skip:hover { color: var(--text); }
 .tour-nav { display: flex; gap: 8px; }
 .tour-btn {
-  background: var(--accent); color: #fff; border: none; border-radius: 8px;
+  background: var(--accent); color: var(--accent-ink); border: none; border-radius: 8px;
   padding: 9px 20px; font-size: 13.5px; font-weight: 700; cursor: pointer;
 }
 .tour-btn.ghost { background: none; border: 1px solid var(--border); color: var(--muted); }
@@ -1974,7 +1983,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .task-dash-bars { flex: 1; min-width: 240px; }
 .task-stack {
   display: flex; height: 18px; border-radius: 9px; overflow: hidden;
-  background: #0f172a; border: 1px solid var(--border);
+  background: var(--bg); border: 1px solid var(--border);
 }
 .ts-seg { height: 100%; transition: width .4s ease; }
 .ts-seg.done { background: #22c55e; }
@@ -2002,8 +2011,8 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .task-cat-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; }
 .tc-name { color: var(--text); font-weight: 600; }
 .tc-cnt { color: var(--muted); }
-.task-cat-bar { height: 6px; border-radius: 3px; background: #0f172a; overflow: hidden; }
-.tc-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #22c55e); transition: width .4s ease; }
+.task-cat-bar { height: 6px; border-radius: 3px; background: var(--bg); overflow: hidden; }
+.tc-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #22c55e); transition: width .4s ease; }
 
 /* 時程徽章 */
 .time-badge {
@@ -2111,8 +2120,8 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 }
 .cat-tab:hover { color: var(--text); border-color: var(--accent); }
 .cat-tab.active {
-  color: #fff; background: var(--accent); border-color: var(--accent);
-  font-weight: 600;
+  color: var(--accent-ink); background: var(--accent); border-color: var(--accent);
+  font-weight: 700; box-shadow: var(--accent-glow);
 }
 .cat-tab-count { opacity: .75; font-size: 11px; margin-left: 2px; }
 .cat-hint {
@@ -2174,7 +2183,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 }
 .rules-step-num {
   flex-shrink: 0; width: 20px; height: 20px; margin-top: 2px;
-  border-radius: 50%; background: var(--accent); color: #fff;
+  border-radius: 50%; background: var(--accent); color: var(--accent-ink);
   font-size: 12px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
 }
@@ -2309,7 +2318,7 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
   color: var(--muted); border-radius: 12px;
   padding: 3px 12px; font-size: 12px; cursor: pointer;
 }
-.lab-mode-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.lab-mode-btn.active { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); font-weight: 700; box-shadow: var(--accent-glow); }
 .lab-mode-note { font-size: 11px; }
 .lab-stats {
   display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px;
@@ -2543,3 +2552,155 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 .tt-field > b { font-size: 14.5px; color: var(--text); font-weight: 700; }
 .tt-field > b.pos { color: var(--bull); }
 .tt-field > b.neg { color: var(--bear); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   版面改版：圖表滿版在上，「一眼結論」橫條在下
+   ────────────────────────────────────────────────────────────────────────
+   原本是左右兩欄（圖 1.7fr ／ 右側窄欄 1fr），資訊密度高、要左右來回看。
+   改成上下兩層之後：
+     · 圖表拿到整個寬度（1175px → 約 1880px），K 線與指標看得更清楚
+     · 原本擠在右側窄欄的「幣價 / 信心分數 / 6 個指標」攤成一整排橫向掃描
+   元件、資料與互動完全沒有變動，只調整排列方式與視覺層次。
+   ════════════════════════════════════════════════════════════════════════ */
+
+.detail-main-stacked {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+/* 上下堆疊後圖表不再被 stretch 撐高，要自己給高度。
+   用視窗高度換算：介面放大後一屏能容納的內容變少，圖表跟著自動縮短，
+   讓下方的「一眼結論」橫條盡量還看得到；螢幕越高圖表就越大（上限 420px）。
+   610px 是圖表以外的內容（頂列、圖表標題與說明、結論橫條）在放大前的高度。 */
+.detail-main-stacked .detail-chart-col .candlestick-wrap {
+  flex: none;
+  height: clamp(300px, calc(100vh / var(--ui-scale) - 610px), 420px);
+}
+.detail-main-stacked .detail-chart-col { margin-bottom: 14px; }
+
+/* ── 一眼結論橫條：幣價 → 信心分數/建議 → 6 個指標 ─────────────────── */
+.conclusion-row {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr) minmax(430px, 2.1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+.conclusion-row > * { min-width: 0; }
+.conclusion-row .side-block { display: flex; flex-direction: column; }
+
+/* 幣價卡原本是滿版寬的橫向排版（.hero-left 設了 flex-shrink:0、說明文字 max-width:560px），
+   放進窄欄後會撐破卡片、壓到隔壁。這裡改成直向堆疊並允許收縮換行。
+   只作用在 .conclusion-row 內，其他地方（如放大彈窗）維持原本行為。 */
+.conclusion-row .hero-signal { height: 100%; margin: 0; flex-direction: column; gap: 10px; }
+.conclusion-row .hero-left { flex-shrink: 1; min-width: 0; }
+.conclusion-row .hero-cat-row { flex-wrap: wrap; }
+.conclusion-row .hero-cat-why { max-width: none; }
+
+/* 指標卡在橫條裡排成 4 欄（共 7 張 → 4+3 兩列，比 6+1 整齊） */
+.conclusion-row .ind-cards { flex: 1 1 auto; }
+.conclusion-row .ind-cards-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* 密度放鬆：結論橫條是要「一眼看完」的地方，字略大、留白略多。
+   只作用在 .conclusion-row 內，不影響詳細資訊彈窗裡的同名元件。 */
+.conclusion-row .ind-card { padding: 10px 12px; }
+.conclusion-row .ind-card-name { font-size: 13px; }
+.conclusion-row .ind-card-note { font-size: 12px; margin-top: 5px; }
+.conclusion-row .ind-cards-title { font-size: 12px; }
+.conclusion-row .side-block-title { font-size: 14px; margin-bottom: 10px; }
+
+@media (max-width: 1600px) {
+  .conclusion-row .ind-cards-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .conclusion-row { grid-template-columns: minmax(220px, 1fr) minmax(240px, 1fr) minmax(360px, 1.8fr); }
+}
+@media (max-width: 1280px) {
+  .conclusion-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .conclusion-row .side-block { grid-column: 1 / -1; }
+}
+@media (max-width: 780px) {
+  .conclusion-row { grid-template-columns: minmax(0, 1fr); }
+  .conclusion-row .ind-cards-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ── 圖表設定收合列 ─────────────────────────────────────────────────
+   圖層／擺盪切換共 20 幾個按鈕，平常收起來只留一行摘要說明目前套用了什麼；
+   按「⚙ 圖表設定」才展開。控制項一個都沒有移除。 */
+.chart-toolbar-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  padding: 0 2px 8px;
+}
+.chart-tools-toggle {
+  background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 12px; font-size: 12px; font-weight: 700; color: var(--muted);
+  cursor: pointer; transition: border-color .12s, color .12s; white-space: nowrap;
+}
+.chart-tools-toggle:hover { border-color: var(--accent); color: #cffafe; }
+.chart-tools-toggle.on { border-color: var(--accent); color: var(--accent); }
+.chart-tools-summary { font-size: 12px; color: var(--muted); }
+
+/* ── 頂部控制列收成一行（分類、幣種、顯示區塊原本會折成三行）─────── */
+.detail-coin-controls {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px;
+}
+.detail-cat-tabs { margin-bottom: 0; }
+.detail-coin-controls .cat-hint { margin: 0; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   整體介面縮放
+   ────────────────────────────────────────────────────────────────────────
+   這份樣式的尺寸幾乎全部寫死 px（約 200 處 font-size），要放大字就得連內距、
+   間距、圓角一起改，逐一調整容易顧此失彼。改用 zoom 等比放大整個介面：
+   字、內距、間距、邊框同步放大，版面比例完全不變。
+
+   要調整大小只改下面這一個數值：
+     1     = 原始大小
+     1.15  = 放大 15%（目前）
+     1.25  = 放大 25%
+   ════════════════════════════════════════════════════════════════════════ */
+:root { --ui-scale: 1.15; }
+body { zoom: var(--ui-scale); }
+/* .app 是 height:100vh 的固定框架。放大後 100vh 會跟著被放大而超出畫面，
+   所以這裡把高度除回去，避免多出一條外層捲軸。 */
+.app { height: calc(100vh / var(--ui-scale)); }
+/* lightweight-charts 會用 getBoundingClientRect 量容器寬度，在 zoom 之下量到的是
+   「放大後」的視覺尺寸，於是畫出比容器更寬的 canvas，右側價格軸就被裁掉。
+   這裡把圖表區的縮放抵銷回 1:1，讓它用原始座標量測。 */
+.candlestick-wrap { zoom: calc(1 / var(--ui-scale)); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   「市場情緒 / 新聞」排版修正
+   ────────────────────────────────────────────────────────────────────────
+   原本的三個問題：
+     · 「最新新聞／歷史查詢」兩顆鈕設了 flex:1，在寬螢幕各被撐成 800px
+     · 左欄固定 220px，卻要塞恐懼貪婪量表、30 天趨勢、資料來源、兩條新聞
+       情緒溫度、匯入鈕共 5 個區塊，字被壓到 9~11px
+     · 右欄有 1600px，但新聞是單欄清單，標題只用掉左半邊，右側近 900px 全空
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* 切換鈕回到自然寬度（分頁鈕不該撐滿整欄） */
+.news-mode-toggle { gap: 6px; }
+.mode-btn { flex: 0 0 auto; padding: 6px 20px; }
+
+/* 左右比例 3:7。
+   左欄原本固定 300px，恐懼貪婪量表、30 天趨勢線與新聞情緒長條都被壓縮
+   （趨勢線只標得下 8 個日期）；拉到 3fr（約 540px）後三張圖都看得清楚。
+   實測過 5:5，左欄確實更寬鬆，但新聞標題平均折行會從 1.04 行變成 1.96 行、
+   可視則數從 14 掉到 10，代價太大。3:7 只折到 1.38 行、還能看到 13 則。
+   想改成各半就把下面兩個值改成 1fr 1fr。 */
+@media (min-width: 1100px) {
+  .sentiment-body { grid-template-columns: minmax(280px, 3fr) minmax(0, 7fr); gap: 26px; }
+}
+.fg-panel { gap: 12px; }
+.fg-gauge-svg { width: 180px; height: 115px; }
+
+/* 新聞清單改用寬螢幕的水平空間：兩欄並排，可視範圍拉高（原本只有 280px） */
+@media (min-width: 1400px) {
+  .news-list {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 22px; max-height: 430px; align-content: start;
+  }
+}
+
+/* 這一區原本有 42 個文字節點在 10~10.5px，往上調到可讀範圍 */
+.fg-source { font-size: 11.5px; }
+.ns-counts { font-size: 11px; }
+.news-sentiment-badge { font-size: 11px; }
+.news-sources { font-size: 11px; }

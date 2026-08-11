@@ -432,10 +432,11 @@ export default function App() {
               </div>
             </div>
 
-            <HeroSignal signal={activeSignal} symbol={active} live={livePrices[active]} slim />
-
-            {/* 儀表板主區：左＝蠟燭圖（縮小、點🔍放大看大圖），右＝分數＋指標即時解讀 */}
-            <div className="detail-main">
+            {/* 儀表板主區改為上下兩層：
+                上＝蠟燭圖（滿版，點🔍放大看大圖）
+                下＝「一眼結論」橫條：幣價/漲跌＋信心分數＋6 個指標的即時解讀
+                （原本擠在圖表右側的窄欄，攤成一整排比較好掃） */}
+            <div className="detail-main detail-main-stacked">
             <section className="chart-section detail-chart-col">
               <div className="chart-section-header">
                 <span className="chart-section-title">{coinName(active)} 蠟燭圖</span>
@@ -535,9 +536,12 @@ export default function App() {
               />
             </section>
 
-            {/* 右欄：買賣策略結論 + 信心分數 + 指標即時解讀（並排在圖旁，第一眼就看到決策）。
-                每一塊都可「點下去看詳細」→ 開啟計分明細表、回測表格與建議的彈窗。 */}
-            <aside className="detail-side-col">
+            {/* 一眼結論橫條：幣價/漲跌 → 信心分數與買賣結論 → 6 個指標即時解讀，
+                由左到右一排掃完。每一塊都可「點下去看詳細」→ 開啟計分明細表、回測表格與建議的彈窗。 */}
+            <aside className="detail-side-col conclusion-row">
+              {/* 幣價、漲跌與多空判讀（原本在圖表上方） */}
+              <HeroSignal signal={activeSignal} symbol={active} live={livePrices[active]} slim />
+
               {/* 綜合建議（已併入信心分數量表；卡內兩個連結各開「計分明細」/「回測驗證」）*/}
               <RecommendationCard
                 signal={activeSignal}

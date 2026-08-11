@@ -1273,7 +1273,7 @@ function StatusPage({ onLogout }) {
                     <YAxis type="category" dataKey="label" width={132} tick={{ fill: '#cbd5e1', fontSize: 11 }} />
                     <ReferenceLine x={0} stroke="#64748b" />
                     <Tooltip cursor={{ fill: '#1e293b55' }}
-                             contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+                             contentStyle={{ background: '#030712', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
                              formatter={(v, n, p) => [(v >= 0 ? '+' : '') + v + 'pp · ' + (p?.payload?.verdict ?? ''), 'edge vs 基準']} />
                     <Bar dataKey="edge" radius={[0, 3, 3, 0]} isAnimationActive={false}>
                       {score.factors.map((f, i) => (<Cell key={i} fill={f.edge >= 0 ? '#22c55e' : '#ef4444'} />))}
