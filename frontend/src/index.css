@@ -2604,10 +2604,69 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 }
 .detail-main-stacked .detail-chart-col { margin-bottom: 14px; }
 
-/* ── 一眼結論橫條：幣價 → 信心分數/建議 → 6 個指標 ─────────────────── */
+/* ── 幣價列併入圖表標題列 ───────────────────────────────────────────────
+   幣價、漲跌與多空判讀原本在圖表下方的結論橫條最左格，看圖時得往下找。
+   移到圖表標題列後（那一列中間原本是空的），看圖的當下就同時看到現價與多空。
+   這裡把卡片外觀拆掉、改成單行排列，只保留左側的多空色條當狀態提示。 */
+/* 報價列的排版原則：
+   1. 只放「辨識 → 價格 → 判讀」三段，每段之間用細分隔線隔開，不讓資訊黏成一串。
+   2. 分類說明（那句 40 字的敘述）不屬於報價列，改用 title 提示；報價列只留分類徽章。
+   3. 垂直置中對齊（不是 baseline）——21px 的價格與 11px 的標籤共用基線會參差不齊。
+   4. 價格用等寬數字 + 固定小數位，即時報價跳動時整列寬度不會抖。 */
+.chart-section-header .hero-signal {
+  flex: 0 1 auto; min-width: 0;
+  display: flex; align-items: center; flex-wrap: nowrap;
+  background: transparent; border: 0; border-radius: 0;
+  padding: 0; margin: 0 4px 0 14px;
+}
+.chart-section-header .hero-left {
+  display: flex; align-items: center; gap: 0; flex-wrap: nowrap;
+  min-width: 0; flex-shrink: 1;
+}
+/* 段落分隔線 */
+.chart-section-header .hero-cat-row,
+.chart-section-header .hero-price,
+.chart-section-header .hero-signal-row {
+  margin: 0; padding: 0 14px; white-space: nowrap;
+  border-left: 1px solid var(--border);
+}
+.chart-section-header .hero-coin {
+  font-size: 13.5px; font-weight: 700; color: var(--text);
+  margin: 0; padding-right: 10px; white-space: nowrap; letter-spacing: .2px;
+}
+/* 分類說明整段不顯示：完整文字在 title 提示（見 HeroSignal.jsx），滑過即可看 */
+.chart-section-header .hero-cat-why { display: none; }
+.chart-section-header .hero-cat-row { padding-left: 0; border-left: 0; }
+
+.chart-section-header .hero-price {
+  display: flex; align-items: baseline; gap: 9px;
+  font-size: 22px; font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums;   /* 等寬數字：跳動時不位移 */
+}
+.chart-section-header .hero-chg {
+  font-size: 13px; font-weight: 700; margin: 0; font-variant-numeric: tabular-nums;
+}
+
+/* 多空判讀做成徽章，用底色標示狀態，不再是裸文字 */
+.chart-section-header .hero-signal-row {
+  display: flex; align-items: center; gap: 5px;
+  margin-left: 4px; padding: 5px 12px;
+  border-left: 0; border-radius: 999px; font-weight: 700;
+}
+.chart-section-header .hero-icon  { font-size: 12px; line-height: 1; }
+.chart-section-header .hero-label { font-size: 13.5px; }
+.chart-section-header .hero-bull  .hero-signal-row { background: rgba(34, 197, 94, .13); }
+.chart-section-header .hero-bear  .hero-signal-row { background: rgba(239, 68, 68, .13); }
+.chart-section-header .hero-neutral .hero-signal-row { background: rgba(245, 158, 11, .13); }
+/* 移除原本卡片的左側色條：狀態已由上面的徽章表達，留著只會像一條孤立的線 */
+.chart-section-header .hero-bull,
+.chart-section-header .hero-bear,
+.chart-section-header .hero-neutral { border-left: 0; }
+
+/* ── 一眼結論橫條：信心分數/建議 → 7 個指標（幣價已移到圖表標題列）───── */
 .conclusion-row {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr) minmax(430px, 2.1fr);
+  grid-template-columns: minmax(280px, 1fr) minmax(520px, 2.4fr);
   gap: 12px;
   align-items: stretch;
 }
@@ -2636,11 +2695,12 @@ body { background: var(--bg); overflow-x: hidden; }   /* 防呆：任何元素�
 
 @media (max-width: 1600px) {
   .conclusion-row .ind-cards-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .conclusion-row { grid-template-columns: minmax(220px, 1fr) minmax(240px, 1fr) minmax(360px, 1.8fr); }
+  .conclusion-row { grid-template-columns: minmax(260px, 1fr) minmax(420px, 2fr); }
 }
 @media (max-width: 1280px) {
-  .conclusion-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .conclusion-row .side-block { grid-column: 1 / -1; }
+  .conclusion-row { grid-template-columns: minmax(0, 1fr); }
+  /* 窄螢幕：幣價列從圖表標題列拆回自己一行，避免與週期鈕擠在一起 */
+  .chart-section-header .hero-signal { flex: 1 1 100%; margin: 4px 0 0; }
 }
 @media (max-width: 780px) {
   .conclusion-row { grid-template-columns: minmax(0, 1fr); }

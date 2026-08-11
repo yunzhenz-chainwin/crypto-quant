@@ -439,8 +439,13 @@ export default function App() {
             <div className="detail-main detail-main-stacked">
             <section className="chart-section detail-chart-col">
               <div className="chart-section-header">
-                <span className="chart-section-title">{coinName(active)} 蠟燭圖</span>
+                {/* 標題只留「蠟燭圖」：幣種名稱由右邊的幣價列負責，避免同一行出現兩次幣名 */}
+                <span className="chart-section-title">蠟燭圖</span>
                 <button className="chart-zoom-btn" onClick={() => setChartZoom(true)} title="放大看大圖">🔍 放大</button>
+
+                {/* 幣價、漲跌與多空判讀移到圖表標題列：看圖的當下就看到現價與多空，
+                    不必再往下找。這一列原本中間是空的，剛好放得下。 */}
+                <HeroSignal signal={activeSignal} symbol={active} live={livePrices[active]} slim />
 
                 <div className="range-controls">
                   {/* 週期切換（有時線資料的幣才顯示；目前 BTC/ETH） */}
@@ -539,9 +544,6 @@ export default function App() {
             {/* 一眼結論橫條：幣價/漲跌 → 信心分數與買賣結論 → 6 個指標即時解讀，
                 由左到右一排掃完。每一塊都可「點下去看詳細」→ 開啟計分明細表、回測表格與建議的彈窗。 */}
             <aside className="detail-side-col conclusion-row">
-              {/* 幣價、漲跌與多空判讀（原本在圖表上方） */}
-              <HeroSignal signal={activeSignal} symbol={active} live={livePrices[active]} slim />
-
               {/* 綜合建議（已併入信心分數量表；卡內兩個連結各開「計分明細」/「回測驗證」）*/}
               <RecommendationCard
                 signal={activeSignal}

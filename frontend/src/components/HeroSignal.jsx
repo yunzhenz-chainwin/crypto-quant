@@ -83,12 +83,17 @@ export function ScoreGauge({ score }) {
 export default function HeroSignal({ signal, symbol, live, slim = false }) {
   const cfg   = SIGNAL_CONFIG[signal?.signal ?? 'UNKNOWN']
   const px    = live?.price ?? signal?.close          // 有即時價就用即時價
-  const price = px ? `$${Number(px).toLocaleString(undefined, { maximumFractionDigits: px < 1 ? 4 : 2 })}` : '—'
+  // 小數位固定（min = max）：即時報價每秒在跳，位數不固定的話整列寬度會跟著抖動
+  const digits = px != null && px < 1 ? 4 : 2
+  const price = px
+    ? `$${Number(px).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+    : '—'
   const chg   = live?.changePct
 
 
+  // 放進圖表標題列時，分類說明會被壓成單行省略號；用 title 保住完整文字
   return (
-    <section className={`hero-signal ${cfg.cls}`}>
+    <section className={`hero-signal ${cfg.cls}`} title={coinWhy(symbol)}>
       {/* 左：幣名、分類（含歸類原因）、價格、訊號 */}
       <div className="hero-left">
         <div className="hero-coin">{coinName(symbol)}</div>
