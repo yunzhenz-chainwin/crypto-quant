@@ -157,7 +157,12 @@ const SENTIMENT_STYLE = {
 }
 
 // 新聞文章列表：最新模式和歷史模式都用同一個元件，只差資料來源不同
-function NewsArticles({ items }) {
+//
+// markCoin 有值時，替 about_this_coin 為真的項目掛上幣種徽章。只在「相關新聞不足、
+// 後端退回全市場」時才傳：沒退回時整頁本來就都是這顆幣的新聞，每則都掛徽章只是雜訊。
+// 判斷用 truthy 而非 item.about_this_coin === true——不帶 symbol 的請求根本不會有
+// 這個欄位（後端刻意不多複製一份清單），嚴格比較會踩到 undefined。
+function NewsArticles({ items, markCoin }) {
   if (!items || items.length === 0)
     return <div className="chart-empty">此分類暫無新聞</div>
   return (
@@ -170,6 +175,12 @@ function NewsArticles({ items }) {
               <span className="news-sentiment-badge" style={{ color: s.color, background: s.bg }}>
                 {s.label}
               </span>
+              {markCoin && item.about_this_coin && (
+                <span className="news-sentiment-badge"
+                      style={{ color: '#38bdf8', background: 'rgba(56,189,248,0.12)' }}>
+                  {markCoin}
+                </span>
+              )}
               <span className="news-title">{item.title}</span>
             </div>
             <span className="news-meta">{item.domain} · {item.published_at || item.fetched_at?.slice(0, 10)}</span>
@@ -259,6 +270,18 @@ function NewsFeed({ symbol, news, historyData, isHistory, availableDates, histor
   const currentItems = categories.find(c => c.name === activeTab)?.items ?? []
   const sources = useNewsSources()
 
+  // 這顆幣的相關新聞不足時，後端會退回全市場頭條（避免整頁開天窗），並把
+  // fell_back_to_market 設為 true。這件事一定要講明白：否則使用者換了幣種卻看到
+  // 同一批新聞，只會以為「換幣沒反應」。
+  // 為什麼現在才需要這段：舊版的幣種過濾是拿 ticker 去比對標題子字串，還 OR 上
+  // "CRYPTO" 這種萬用字，幾乎每則都命中，所以看起來「總是篩得到東西」——那是假的
+  // 篩選結果（UNI 會命中 community、SOL 命中 sold）。後端改用整字比對的 coins 欄
+  // 之後結果變準，但冷門幣就真的可能湊不到 5 則，這時要誠實說湊不到。
+  // 舊版後端沒有這個欄位 → undefined → falsy → 什麼都不畫，前後端可各自先上線。
+  const fallbackTicker = (!isHistory && displayData?.fell_back_to_market)
+    ? (displayData.symbol || null)
+    : null
+
   return (
     <div className="news-panel">
       {/* 標題列 */}
@@ -289,6 +312,21 @@ function NewsFeed({ symbol, news, historyData, isHistory, availableDates, histor
         </div>
       )}
 
+      {/* 相關新聞不足、已退回全市場的提示（見上方 fallbackTicker 的說明） */}
+      {fallbackTicker && (
+        <div className="news-sources-list">
+          <div className="news-sources-sum">
+            {coinZh(symbol)} 目前只有 <b>{displayData.coin_total ?? 0}</b> 則相關新聞，
+            不足以單獨成頁，以下補上全市場頭條——標有
+            <span className="news-sentiment-badge"
+                  style={{ color: '#38bdf8', background: 'rgba(56,189,248,0.12)', margin: '0 4px' }}>
+              {fallbackTicker}
+            </span>
+            的才是這顆幣的新聞。
+          </div>
+        </div>
+      )}
+
       {/* 分類 Tab */}
       {!displayData
         ? <div className="chart-empty">載入中…</div>
@@ -310,7 +348,7 @@ function NewsFeed({ symbol, news, historyData, isHistory, availableDates, histor
                   </button>
                 ))}
               </div>
-              <NewsArticles items={currentItems} />
+              <NewsArticles items={currentItems} markCoin={fallbackTicker} />
             </>
           )
       }

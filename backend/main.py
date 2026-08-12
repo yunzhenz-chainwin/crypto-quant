@@ -22,7 +22,7 @@ from pathlib import Path
 
 from backend.routers import meta, prices, indicators, correlation, signals, backtest, sentiment, admin, ai, macro, forecast
 from backend.scheduler import start_scheduler
-from backend.services import app_db
+from backend.services import app_db, news_store
 from backend.services.security_hardening import SecurityHeadersMiddleware
 
 # React build 輸出目錄（npm run build 產生）
@@ -33,9 +33,15 @@ DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 async def lifespan(app: FastAPI):
     """
     FastAPI lifespan：應用程式啟動 / 關閉時的生命週期管理
-    - 啟動時：開始背景排程（每日拉資料、每 30 分鐘抓新聞）
+    - 啟動時：建表 / 遷移資料庫，然後開始背景排程（每日拉資料、每 30 分鐘抓新聞）
     - 關閉時：乾淨停止排程器，避免背景 thread 殘留
     """
+    # 資料庫建表 / 遷移在這裡明確做一次。以前是 app_db.py 與 news_store.py 在
+    # 模組載入時自動跑，於是「import 一下就會改到正式 DB」——pytest 收集測試、
+    # 開 REPL 都會踩到，且呼叫端沒機會先把 DB_PATH 改掉。改成由啟動流程負責，
+    # 誰動了資料庫一目瞭然（其他進入點仍由 _connect() 第一次使用時自動補做）。
+    app_db.ensure_ready()
+    news_store.ensure_ready()
     scheduler = start_scheduler()
     yield              # yield 前是啟動邏輯，yield 後是關閉邏輯
     scheduler.shutdown()

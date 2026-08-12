@@ -12,17 +12,23 @@ app_db.py — 後台 / 系統用的 SQLite（data/app.db）
   fear_greed   恐懼貪婪指數歷史（自有，不必每次跟外部 API 還原）
   macro_daily  宏觀日資料（DXY / VIX / 美債 10Y / 標普 / 黃金），供宏觀環境歷史重建與驗證
 
-設計與 news_store.py 一致：模組載入時自動建表，任何環境下都已就緒。
+設計與 news_store.py 一致：import 本模組不會碰資料庫，建表 / 植入預設值由
+main.py 的 lifespan 呼叫 ensure_ready()，或第一次 _connect() 時自動補做。
+資料庫位置可用環境變數 CRYPTO_QUANT_APP_DB 覆寫（測試 / 一次性腳本改道用）。
 """
 import csv
 import json
 import os
 import sqlite3
 import subprocess
+import threading
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
-DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "app.db"
+# 專案根目錄一律由 __file__ 推導，不要寫成 DB_PATH.parent.parent —— DB_PATH 現在
+# 可被環境變數改道到別的地方，跟著它推根目錄會找不到 data/clean 與 reports/。
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DB_PATH = Path(os.environ.get("CRYPTO_QUANT_APP_DB") or _PROJECT_ROOT / "data" / "app.db")
 
 # 預設幣種清單（與 frontend/src/constants/coins.js 對齊）。
 # 這是「我們想追蹤的幣」的單一真相來源；後台之後可在此增刪。
@@ -45,11 +51,49 @@ DEFAULT_COINS = [
 ]
 
 
-def _connect() -> sqlite3.Connection:
+# 建表／植入預設值「延到真的要用資料庫時才做」，不在模組載入時做：
+# import 一個模組不該對正式 data/app.db 執行 ALTER TABLE / INSERT，否則
+# pytest 收集測試、開 REPL、只想讀 DB_PATH 的程式碼全都會動到正式庫，
+# 呼叫端也沒有機會先把 DB_PATH 改掉。
+_init_lock = threading.RLock()
+_initialized: set[str] = set()          # 已完成建表／植入的路徑（DB_PATH 可被改道）
+
+
+def _raw_connect() -> sqlite3.Connection:
+    """純連線，不觸發建表；給 init_db() 與 ensure_ready() 內部用，避免遞迴。"""
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def ensure_ready():
+    """確保目前 DB_PATH 的資料庫已建表並植入預設值（每個路徑只做一次）。
+
+    正常情況由 backend/main.py 的 lifespan 明確呼叫；其他進入點（排程腳本、
+    一次性腳本、後台 CLI）靠 _connect() 在第一次用到資料庫時自動補做。
+    """
+    path = str(DB_PATH)
+    if path in _initialized:
+        return
+    with _init_lock:
+        if path in _initialized:
+            return
+        # 先標記再植入：_seed_defaults() / _seed_tasks() 會再走一次 _connect()，
+        # 沒有先標記就會遞迴回到這裡。植入失敗則退回未初始化狀態，下次再試。
+        _initialized.add(path)
+        try:
+            init_db()
+            _seed_defaults()
+            _seed_tasks()
+        except Exception:
+            _initialized.discard(path)
+            raise
+
+
+def _connect() -> sqlite3.Connection:
+    ensure_ready()
+    return _raw_connect()
 
 
 def _now() -> str:
@@ -68,8 +112,12 @@ def _ensure_column(conn, table: str, column: str, decl: str):
 
 
 def init_db():
-    """建立所有資料表與索引（可安全重複呼叫）。"""
-    with _connect() as conn:
+    """建立所有資料表與索引（可安全重複呼叫）。
+
+    會實際連線並跑 DDL；平常請走 ensure_ready()（做過就跳過）或直接用
+    _connect()（第一次會自動補做）。測試要強制重跑遷移時才直接呼叫這個。
+    """
+    with _raw_connect() as conn:
         # WAL 模式:更耐當機、讀寫不互相阻塞(穩定性強化)
         conn.execute("PRAGMA journal_mode=WAL")
         # 舊版 prices/indicators(只有 date 欄)→ 砍掉重建為多週期 schema。
@@ -602,7 +650,7 @@ def ingest_market_data(interval: str = "1d") -> dict:
     匯入資料庫。用 INSERT OR REPLACE，可重複執行（每日排程後再跑一次即增量更新）。
     ts 存到秒(日線為 00:00:00),搭配 interval 支援 1d / 1h 並存。
     """
-    root    = DB_PATH.parent.parent
+    root    = _PROJECT_ROOT
     clean   = root / "data" / "clean"
     reports = root / "reports"
     p_rows = i_rows = syms = skipped = 0
@@ -651,7 +699,7 @@ def ingest_market_data(interval: str = "1d") -> dict:
 
 
 # 專案根目錄與 venv Python（給後台「新增幣種」觸發抓取管線用，與排程同一套）
-_ROOT_DIR = DB_PATH.parent.parent
+_ROOT_DIR = _PROJECT_ROOT
 _PYTHON = str(_ROOT_DIR / ".venv" / "Scripts" / "python.exe")
 
 
@@ -702,10 +750,10 @@ def backfill_daily_signals() -> int:
     讓前台日後可畫『信心分數歷史走勢』。可重複執行(會先清空重建)。
     """
     import sys
-    sys.path.insert(0, str(DB_PATH.parent.parent))
+    sys.path.insert(0, str(_PROJECT_ROOT))
     from src.scoring import score_row, signal_from_score
 
-    reports = DB_PATH.parent.parent / "reports"
+    reports = _PROJECT_ROOT / "reports"
     total = 0
     with _connect() as conn:
         conn.execute("DELETE FROM daily_signal")
@@ -744,7 +792,7 @@ def backfill_backtests(symbols: list[str] = None, stop_loss: float = -0.06,
     可重複執行（先清該幣舊資料再寫，不殘留）。回傳 {symbols, trades}。
     """
     import sys
-    sys.path.insert(0, str(DB_PATH.parent.parent))
+    sys.path.insert(0, str(_PROJECT_ROOT))
     from src.backtest import load_indicators, run_backtest, compute_metrics
 
     if symbols is None:
@@ -1435,7 +1483,6 @@ def _seed_tasks():
                         sort_order=i, notes=t.get("notes", ""))
 
 
-# 模組載入時自動建表並植入預設值
-init_db()
-_seed_defaults()
-_seed_tasks()
+# 這裡刻意「不」在模組載入時建表／植入：import 不該對正式資料庫做 schema 變更
+# 與寫入。實際時機是 main.py 的 lifespan 呼叫 ensure_ready()，或第一次 _connect()
+# 時自動補做（內容與原本這三行完全相同：init_db → _seed_defaults → _seed_tasks）。

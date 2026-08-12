@@ -17,6 +17,7 @@ sentiment.py — 市場情緒 API 路由
 情緒判讀：加權中英雙語詞庫（v2）。舊版純英文等權詞庫有 87% 新聞被判 neutral 的問題；
 GPT 批次標註為下一階段（需金鑰），詞庫版永遠保留作為降級方案。
 """
+import html
 import re
 import time
 from datetime import datetime, timezone
@@ -178,31 +179,118 @@ COIN_EN_NAMES = {
     "UNI": ["uniswap"], "LTC": ["litecoin"], "NEAR": ["near protocol"],
 }
 
+# 中文別名／簡體變體。後台幣種設定每顆幣只能填一個中文名（app_db.DEFAULT_COINS），
+# 但中文語料是這個庫的大宗（動區 1335 則、鏈新聞 817 則，再加上大量 GN:* 中文媒體），
+# 而它們的用字不會剛好等於後台那一個：繁簡混用、同一顆幣好幾種譯名。
+#
+# 為什麼現在才需要補：舊版的幣種過濾有 "CRYPTO" 萬用條件，幾乎永遠篩得到東西，
+# 漏標看不出來。改成嚴格讀 coins 欄之後，漏標就等於「這篇新聞從該幣的清單裡消失」。
+# 實測 2026-07-01 之後有 137 則標題明確點名某顆幣、coins 欄卻是空的（BTC 107、ETH 30）。
+#
+# 收錄原則：只放「幾乎不會出現在其他語境」的詞。刻意不收的例子——
+#   幣安／币安（交易所名，大量非 BNB 新聞都會提到）、雪崩（天災）、宇宙（太常見）、
+#   比特（會命中「比特幣」以外的詞）。寧可漏標也不要誤標：誤標會寫進 news.coins
+#   永久保存，還會污染 aggregate_daily() 的單幣情緒分組。
+#
+# 未收錄的四顆幣：LINK 的後台中文名是「鏈鏈」（疑似打錯，中文媒體多半直接寫
+# Chainlink）；POL／UNI／NEAR 的後台中文名是純 ASCII（Polygon／Uniswap／Near幣），
+# 會被 _coin_patterns() 的 isascii() 判斷濾掉 —— 這四顆目前只靠英文比對。
+COIN_ZH_ALIASES = {
+    "BTC":  ["比特币"],
+    "ETH":  ["以太幣", "以太币", "乙太坊", "乙太幣"],
+    "SOL":  ["索拉纳"],
+    "BNB":  ["币安币"],
+    "XRP":  ["瑞波币"],
+    "DOGE": ["狗狗币"],
+    "ADA":  ["艾达币", "卡爾達諾", "卡尔达诺"],
+    "AVAX": ["雪崩币"],
+    "DOT":  ["波卡幣", "波卡币"],
+    "ATOM": ["宇宙币"],
+    "LTC":  ["莱特币"],
+}
+
+
+# _coin_patterns() 每篇文章都會被呼叫一次，而它每次都重新開 app.db 讀 get_coins()。
+# 實測約 2.4 ms/次：一輪 RSS 265 篇 ≈ 0.64 s、每日幣種級 375 篇 ≈ 0.9 s，全都花在
+# 重複開檔上，納入摘要後比對量還會更大。
+# 幣種設定可由後台隨時修改（admin.py 的 coins_add / coins_update / coins_remove），
+# 所以不能永久快取 —— 用短 TTL 自我失效就夠：抓取排程是每 30 分鐘一輪，TTL 300 秒
+# 等於「同一輪共用一份、下一輪必定重讀」，後台改完最多 5 分鐘生效，而下一批新聞
+# 本來就要等最多 30 分鐘才進來，所以這個延遲在外部完全觀察不到。
+_COIN_PATTERNS_TTL = 300
+_coin_patterns_cache = {"ts": 0.0, "data": None}
+
 
 def _coin_patterns() -> list[tuple[str, list[str], list[str]]]:
-    """[(ticker, [英文整字...], [中文子字串...]), ...]，來源 = 後台幣種設定。"""
+    """[(ticker, [英文整字...], [中文子字串...]), ...]，來源 = 後台幣種設定（短 TTL 快取）。"""
+    now = time.time()
+    if _coin_patterns_cache["data"] is not None \
+       and now - _coin_patterns_cache["ts"] < _COIN_PATTERNS_TTL:
+        return _coin_patterns_cache["data"]
     from backend.services.app_db import get_coins
     pats = []
     for c in get_coins():
         tk = (c.get("ticker") or c["symbol"].replace("USDT", "")).upper()
         en = [tk.lower()] + COIN_EN_NAMES.get(tk, [])
-        zh = [c["zh"]] if c.get("zh") and not c["zh"].isascii() else []
+        # 後台設定的中文名（純 ASCII 的視同沒填）＋ 內建別名；dict.fromkeys 去重保序，
+        # 避免後台之後把中文名改成剛好等於某個別名時出現重複比對。
+        zh_cfg = [c["zh"]] if c.get("zh") and not c["zh"].isascii() else []
+        zh = list(dict.fromkeys(zh_cfg + COIN_ZH_ALIASES.get(tk, [])))
         pats.append((tk, en, zh))
+    # 只有成功組完才寫入快取；get_coins() 若拋例外就照舊往外拋，不會快取到壞值
+    _coin_patterns_cache["data"] = pats
+    _coin_patterns_cache["ts"] = now
     return pats
 
 
-def _match_coins(title: str) -> str:
-    """回傳標題相關的幣種 ticker，逗號分隔（如 "BTC,ETH"）；無則空字串。"""
-    t = title.lower()
+# 這些英文全名同時是普通英文字（ripple effect／an avalanche of selling／the cosmos／
+# polygon／into the ether），只在「標題」比對時採用，掃摘要內文一律跳過。
+# 實測語料（正式庫 11,178 則標題）：cosmos 的 145 次命中幾乎都是 NASA COSMOS、
+# NVIDIA Cosmos、Cosmos Health、New York Cosmos，與 ATOM 無關；polygon 也混著
+# Peugeot Polygon Concept 這類。標題只有 7.2 字都已如此，85 字的內文只會更糟。
+SUMMARY_UNSAFE_EN = {"ether", "ripple", "avalanche", "cosmos", "polygon"}
+
+
+def _coin_hits(text: str, strict: bool = False) -> list[str]:
+    """
+    回傳這段文字相關的幣種 ticker 清單（依 _coin_patterns() 的順序）。
+
+    英文 ticker / 全名走整字比對、中文名走子字串比對。整字比對是關鍵：
+    改成子字串會讓 UNI 命中 "community"、SOL 命中 "sold"、ETH 命中 "whether"。
+
+    strict=True 是「給 RSS 摘要用」的收斂版本，只保留不會誤中的樣式：
+      - 丟掉裸 ticker：near / uni / link / dot / atom / pol 這些本身就是英文字，
+        整字比對在 7.2 字的標題上勉強可用，掃 500 字（約 85 字詞）的內文就是誤標
+        機器。以正式語料的每字出現率外推到 85 字：near 19.7%、uni 7.8%、link 6.3%、
+        dot 5.4%、atom 3.3%、pol 1.8% —— 等於每 5 篇市場新聞就有 1 篇被標成 NEAR。
+        誤標會寫進 news.coins 永久保存，再污染 aggregate_daily() 的單幣分組與
+        signal_engine 的「（全市場）」降級標註，所以摘要寧可漏標也不能誤標。
+      - 丟掉 SUMMARY_UNSAFE_EN 那批「同時是普通英文字」的全名。
+      - 改收 $TICKER 寫法（$btc / $near）：內文點名某幣的慣用寫法，且不會誤中
+        （tokenizer 有保留 $，見下方 re.split 的字元集）。
+      - 保留多字全名（near protocol / binance coin）與中文名：實測 11,178 則標題裡
+        最可能誤中的「鏈鏈」也只命中 1 則，而且是真的 LINK 新聞。
+    """
+    t = text.lower()
     words = set(re.split(r"[^a-z0-9$]+", t))
     hits = []
     for tk, en_names, zh_names in _coin_patterns():
+        if strict:
+            # 一定要建新 list：_coin_patterns() 回的是共享快取物件，就地改會污染整份快取
+            en_names = [n for n in en_names
+                        if n != tk.lower() and n not in SUMMARY_UNSAFE_EN]
+            en_names.append(f"${tk.lower()}")
         hit = any(n in words for n in en_names if " " not in n) \
            or any(n in t for n in en_names if " " in n) \
-           or any(n in title for n in zh_names)
+           or any(n in text for n in zh_names)
         if hit:
             hits.append(tk)
-    return ",".join(hits)
+    return hits
+
+
+def _match_coins(text: str) -> str:
+    """標題用：相關幣種 ticker，逗號分隔（如 "BTC,ETH"）。比對規則見 _coin_hits()。"""
+    return ",".join(_coin_hits(text))
 
 
 def _parse_rss_date(entry) -> str:
@@ -222,9 +310,55 @@ def _parse_rss_date(entry) -> str:
     return ""
 
 
+# ── RSS 摘要：取值 + 去標籤 ──────────────────────────────────────────────────
+# feedparser 6.x 已把 RSS 的 <description> 與 Atom 的 <summary> 正規化成同一個
+# entry.summary（entry.description 只是別名，值完全相同），所以讀 summary 就夠；
+# 少數只給 Atom <content> 的來源再退回 content[0]["value"]。
+# 內容一律是 HTML 片段（<p>、<a>、&nbsp;、&amp;…），必須去標籤 + 解實體才能拿去比對。
+# （feedparser 自己已會濾掉 <script>/<style>，這裡處理的是一般排版標籤。）
+SUMMARY_RAW_MAX   = 4000   # 有些來源把整篇全文塞進 description，先限長避免做白工
+SUMMARY_MAX_CHARS = 500    # 實際保留的純文字長度：夠比對幣種，又不會撐大 API 回應
+_HTML_TAG_RE    = re.compile(r"<[^>]+>")
+_HTML_TAIL_RE   = re.compile(r"<[^>]*$")   # 限長剛好切在標籤中間時留下的半截 "<a href=…
+_WS_RE          = re.compile(r"\s+")
+# WordPress 系來源的固定頁尾「The post … appeared first on 媒體名.」——
+# 它會把媒體名塞進內文，像 Bitcoin Magazine 這種名字會讓每篇都被誤標成 BTC。
+_FEED_FOOTER_RE = re.compile(r"\s*the post\b.*?appeared first on\b.*$", re.I | re.S)
+
+
+def _strip_html(raw: str) -> str:
+    """HTML 片段 → 純文字：去標籤、解實體（&amp; &nbsp; …）、砍來源頁尾、壓多餘空白。"""
+    if not isinstance(raw, str) or not raw:
+        return ""
+    text = _HTML_TAG_RE.sub(" ", raw[:SUMMARY_RAW_MAX])
+    text = _HTML_TAIL_RE.sub(" ", text)
+    text = html.unescape(text)
+    text = _HTML_TAG_RE.sub(" ", text)      # 解實體後可能再露出一層被跳脫的標籤
+    text = _HTML_TAIL_RE.sub(" ", text)
+    text = _FEED_FOOTER_RE.sub("", text)
+    return _WS_RE.sub(" ", text.replace("\xa0", " ")).strip()
+
+
+def _entry_summary(entry) -> str:
+    """
+    取 feedparser entry 的摘要純文字；來源沒給就回空字串。
+
+    一律用 entry.get()，不要寫 entry.summary —— 來源沒有 <description> 時
+    feedparser 連這個 key 都不會建立，屬性存取會直接丟 AttributeError。
+    """
+    raw = entry.get("summary") or ""
+    if not raw:
+        content = entry.get("content") or []      # Atom 只給 <content> 的來源
+        if content:
+            first = content[0]
+            raw = (first.get("value") if isinstance(first, dict) else "") or ""
+    return _strip_html(raw)[:SUMMARY_MAX_CHARS]
+
+
 def _entry_to_article(entry, source_name: str) -> dict:
-    """feedparser entry → 標準文章 dict（含情緒 / 分類 / 幣種標記）。"""
+    """feedparser entry → 標準文章 dict（含摘要 / 情緒 / 分類 / 幣種標記）。"""
     title = entry.title.strip()
+    summary = _entry_summary(entry)
     domain = source_name
     # Google News 的標題尾巴帶「 - 媒體名」，拆出來當 domain、標題留乾淨的部分
     if source_name.startswith("GoogleNews"):
@@ -233,14 +367,37 @@ def _entry_to_article(entry, source_name: str) -> dict:
         if " - " in title:
             title = title.rsplit(" - ", 1)[0].strip()
         domain = f"GN:{media}" if media else "GoogleNews"
+        # Google News 的 description 沒有內文，只是「標題連結 + 媒體名」的 HTML。
+        # 拿去比對等於把媒體名當內容（"Bitcoin Magazine" 會讓每篇都被標成 BTC），
+        # 標題本身已經比對過了，這裡直接不用。
+        summary = ""
+    # 幣種標記：標題走完整比對，摘要只走 strict 版（不含裸 ticker 與普通英文字全名）。
+    # 把整段摘要餵進完整比對會讓誤標暴增一個量級（見 _coin_hits() 的實測數字），
+    # 而 coins 會寫進 DB 永久保存並被 aggregate_daily() 拿去分組，錯了就一路錯下去。
+    coins = _coin_hits(title)
+    if summary:
+        coins += [tk for tk in _coin_hits(summary, strict=True) if tk not in coins]
     return {
         "title":        title,
         "url":          entry.link,
         "published_at": _parse_rss_date(entry),  # RFC822 → YYYY-MM-DD
         "domain":       domain,
+        "summary":      summary,
+        # ↓ 情緒與分類「只看標題」是刻意的，不要順手改成吃摘要 ↓
+        # sentiment 會被存進 news 表，再由 news_store.aggregate_daily() 彙總成
+        # news_sentiment_daily 這條歷史曲線（signal_engine 與前端都在讀）。
+        # 一旦改成連摘要一起算，新舊文章的評分基準就不同，曲線會在改版當天出現
+        # 人為斷層；而舊文章沒有摘要可用，重算也救不回來（實測：對標題追加約
+        # 350 字內文後，60% 的文章情緒判讀會改變，其中還有 bull↔bear 直接反轉的）。
+        # category 同理：實測「安全事件」佔比會從 3.8% 暴增到 21.7%，因為內文裡
+        # 出現一次 attack / breach 就會壓過真正的主題。
         "sentiment":    _sentiment(title),
         "category":     _categorize(title),
-        "coins":        _match_coins(title),
+        # 摘要只影響「這篇跟哪些幣有關」，不影響情緒與分類。但 coins 正是
+        # news_store.aggregate_daily() 的分組依據：摘要多標一顆幣＝那顆幣當天的
+        # 文章母體變大、分數跟著動（公式沒變，是分組成員變了），所以摘要那半段
+        # 用 strict 比對，寧可漏標也不誤標。
+        "coins":        ",".join(coins),
     }
 
 
@@ -410,37 +567,81 @@ def sentiment_summary(symbol: str = "MARKET", days: int = 30):
 
 
 # ── 最新新聞 ─────────────────────────────────────────────────────────────────
+MIN_COIN_ARTICLES = 5   # 單幣相關新聞少於這個數量就退回全市場，避免畫面開天窗
+
+
+def _coin_tickers(item: dict) -> list[str]:
+    """讀一則新聞的 coins 欄，回傳大寫 ticker 清單；沒有這欄或空值回空清單。
+
+    coins 由 _match_coins() 以整字比對算出，是唯一可靠的幣種歸屬依據。
+    舊版拿 ticker 對標題做子字串比對會誤中：UNI 命中 "community"、
+    SOL 命中 "sold"、ETH 命中 "whether"。
+    coins 可能是 None（本欄位加入之前的舊資料），所以一律 `or ""` 後再 split。
+    """
+    return [t.strip().upper() for t in (item.get("coins") or "").split(",") if t.strip()]
+
+
 @router.get("/sentiment/news")
 def crypto_news(symbol: str = None, limit: int = 40):
     """
     從 RSS 取得最新新聞，同時存入資料庫
 
     Args:
-        symbol: 幣種代號（例如 BTCUSDT），有傳則優先顯示相關新聞
+        symbol: 幣種代號（BTCUSDT / btcusdt / BTC 皆可），有傳則優先顯示相關新聞
         limit:  最多回傳幾篇
 
-    若指定幣種但相關文章不足 5 篇，退回顯示全部（避免空白畫面）
+    幣種過濾走 coins 欄（整字比對的結果），與 ai_analyst.py 挑新聞的做法一致。
+    舊版是拿 ticker 對標題做子字串比對，再 OR 上 "BITCOIN" / "CRYPTO" 兩條萬用條件：
+    前者會誤中（UNI→community、SOL→sold、ETH→whether），後者幾乎讓過濾完全失效
+    ——BTC 的新聞本來就會被標成 BTC，那兩條不只多餘，對非 BTC 幣種更是錯的。
+
+    若該幣相關文章不足 MIN_COIN_ARTICLES 篇，仍退回顯示全市場（避免空白畫面），
+    但這時 fell_back_to_market=True，且每則都帶 about_this_coin 讓前端分得出
+    哪幾則真的跟這顆幣有關——不再讓使用者以為整頁都是這顆幣的新聞。
     """
     try:
         all_items = _fetch_and_save()
-        if symbol:
-            ticker = symbol.replace("USDT", "").upper()  # BTCUSDT → BTC
-            filtered = [
-                i for i in all_items
-                if ticker in i["title"].upper()
-                or "BITCOIN" in i["title"].upper()
-                or "CRYPTO" in i["title"].upper()
-            ]
-            items = filtered if len(filtered) >= 5 else all_items
+        # BTCUSDT / btcusdt / BTC → BTC。先 upper 再去尾綴，順序反過來會漏掉小寫的
+        # usdt（舊版 symbol.replace("USDT","").upper() 就是這個順序，btcusdt 會算出
+        # ticker="BTCUSDT" 而永遠對不上任何幣，靠萬用條件才沒穿幫）。
+        # 用 removesuffix 而非 replace，避免把字串中段的 USDT 也切掉。
+        ticker = (symbol or "").strip().upper().removesuffix("USDT") or None
+        coin_total = None
+        fell_back = False
+
+        if ticker:
+            mine = [i for i in all_items if ticker in _coin_tickers(i)]
+            coin_total = len(mine)
+            fell_back = coin_total < MIN_COIN_ARTICLES
+            # 相關的太少就退回全市場，但逐則標記，不是整批冒充成這顆幣的新聞。
+            # 退回時務必把 mine 排在最前面：all_items 依發布時間排序，那 1-4 則
+            # 相關新聞散在約 265 則裡，切 [:limit]（預設 40）幾乎必然一則都不留，
+            # 前端卻正在顯示「標有 [XXX] 的才是這顆幣的新聞」——提示指向一個
+            # 連一個徽章都沒有的畫面。ai_analyst.py:415 本來就是這樣排的。
+            # 用 id() 去重：mine 的元素就是 all_items 裡的同一批 dict 物件，
+            # 比 `not in`（走 == 逐欄比較）快，且不受 dict 內容相同影響。
+            if fell_back:
+                mine_ids = {id(i) for i in mine}
+                source = mine + [i for i in all_items if id(i) not in mine_ids]
+            else:
+                source = mine
+            # 一定要複製再加欄位：all_items 是 _fetch_and_save() 的 30 分鐘快取本體，
+            # 就地寫入會把這次的旗標留給下一個幣種的請求
+            items = [{**i, "about_this_coin": ticker in _coin_tickers(i)} for i in source]
         else:
             items = all_items
 
+        shown = items[:limit]
         return {
-            "categories": _group_by_category(items[:limit]),
-            "total":      min(len(items), limit),
+            "categories":          _group_by_category(shown),
+            "total":               len(shown),   # 語意 = 本次實際回傳的則數（同舊版 min(len,limit)）
+            "symbol":              ticker,       # 正規化後的 ticker；沒指定就是 None
+            "coin_total":          coin_total,   # 標記到這顆幣的則數；沒指定 symbol 為 None
+            "fell_back_to_market": fell_back,    # True = 相關新聞不足，這次顯示的是全市場
         }
     except Exception as e:
-        return {"categories": [], "total": 0, "error": str(e)}
+        return {"categories": [], "total": 0, "symbol": None,
+                "coin_total": None, "fell_back_to_market": False, "error": str(e)}
 
 
 # ── 歷史新聞查詢 ─────────────────────────────────────────────────────────────
@@ -580,6 +781,11 @@ def _hn_fetch_range(from_date: str, to_date: str) -> int:
                         "domain":       domain,
                         "sentiment":    _sentiment(title),
                         "category":     _categorize(title),
+                        # 少了這欄，save_articles() 會用 a.get("coins","") 存成空字串，
+                        # 回補進來的歷史新聞就永遠對不上幣種過濾，也進不了
+                        # news_sentiment_daily 的單幣分組（news_store.aggregate_daily）。
+                        # HN 沒有摘要可用，只能用標題比對——與 RSS 來的新聞同一套規則。
+                        "coins":        _match_coins(title),
                     })
 
                 page += 1
