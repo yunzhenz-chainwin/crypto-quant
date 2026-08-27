@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-merge_docx.py — 把 docs/ 下的 6 份 .docx 合併成「一份合集」給主管一次看完。
+merge_docx.py — 把 docs/ 下的全部交接 .docx 合併成「一份完整合集」給主管/接手一次看完。
 
 用 docxcompose（保留每份原有的表格 / 標題 / 樣式），每份之間插入分頁，
 最前面加一頁封面 + 目錄。
@@ -33,15 +33,28 @@ from docxcompose.composer import Composer
 
 ZH = "微軟正黑體"
 
-# 合併順序：總覽 → 兩份前瞻計畫（增準 → ML，ML 依賴增準）→ 兩份內容審核範本
+# 完整交接順序：總覽 → 維運/介面/資料/開發 → 訊號研究 → 預測研究 → AI/內容 → 匯報/規劃
 SECTIONS = [
     ("crypto-quant_專案說明.docx",   "壹、專案說明（README）"),
-    ("訊號增準計畫.docx",            "貳、訊號增準計畫（規則式）"),
-    ("ML訊號研究計畫.docx",          "參、ML 訊號研究計畫"),
-    ("AI機器人固定問答範本.docx",     "肆、AI 機器人固定問答庫"),
-    ("情緒詞庫範本.docx",            "伍、情緒詞庫範本"),
-    ("預測模型指標報告.docx",        "陸、預測模型指標與參考門檻"),
+    ("部署與運維.docx",              "貳、部署與運維"),
+    ("API規格.docx",                 "參、API 規格"),
+    ("資料庫說明.docx",              "肆、資料庫說明"),
+    ("開發指南.docx",                "伍、開發指南"),
+    ("訊號增準計畫.docx",            "陸、訊號增準計畫（規則式）"),
+    ("ML訊號研究計畫.docx",          "柒、ML 訊號研究計畫"),
+    ("訊號研究記錄.docx",            "捌、訊號研究記錄"),
+    ("forecast-scorecard-p0.docx",   "玖、研究預測成績單與發布門檻"),
+    ("forecast-calibration.docx",    "拾、機率校準研究"),
+    ("預測模型指標報告.docx",        "拾壹、預測模型指標與參考門檻"),
+    ("AI機器人固定問答範本.docx",     "拾貳、AI 機器人固定問答庫"),
+    ("情緒詞庫範本.docx",            "拾參、情緒詞庫範本"),
+    ("成果匯報.docx",                "拾肆、成果匯報"),
+    ("專案路線圖.docx",              "拾伍、專案路線圖"),
+    ("PROJECT_PLAN.docx",            "拾陸、早期規劃 PROJECT_PLAN"),
 ]
+
+# 前言：主管 2 分鐘摘要，排在封面/目錄之後、壹章之前（不編號）
+PREFACE_DOCX = "主管摘要.docx"
 
 
 def _ea(run, size=None, bold=False, color=None):
@@ -71,7 +84,7 @@ def _regen_sources():
 
 def main():
     _regen_sources()
-    missing = [fn for fn, _ in SECTIONS if not (DOCS / fn).exists()]
+    missing = [fn for fn in [PREFACE_DOCX] + [f for f, _ in SECTIONS] if not (DOCS / fn).exists()]
     if missing:
         raise SystemExit(f"缺少來源檔（情緒詞庫範本.docx 需手動存在）：{missing}")
 
@@ -84,18 +97,21 @@ def main():
 
     _ea(master.add_paragraph().add_run("crypto-quant 文件合集"), size=26, bold=True,
         color=RGBColor(0x1F, 0x3A, 0x5F))
-    _ea(master.add_paragraph().add_run("加密貨幣量化分析平台 — 文件包（合併 6 份）"),
+    _ea(master.add_paragraph().add_run(f"加密貨幣量化分析平台 — 完整交接文件包（合併 {len(SECTIONS)} 份）"),
         size=12, color=RGBColor(0x66, 0x66, 0x66))
     master.add_paragraph()
     _ea(master.add_paragraph().add_run("內容"), size=14, bold=True)
+    _ea(master.add_paragraph().add_run("前言　主管摘要（建議先看，2 分鐘看懂）"), size=11, bold=True)
     for i, (_, title) in enumerate(SECTIONS, 1):
         _ea(master.add_paragraph().add_run(f"{i}. {title}"), size=11)
     _ea(master.add_paragraph().add_run(
         "（各份保留原始格式；每份自第二頁起、以分頁分隔。要調整內容請改各來源檔後重跑 merge_docx.py）"),
         size=9, color=RGBColor(0x88, 0x88, 0x88))
 
-    # 依序附加，每份前插分頁
+    # 依序附加，每份前插分頁；主管摘要作為前言排在最前面
     composer = Composer(master)
+    master.add_page_break()
+    composer.append(Document(str(DOCS / PREFACE_DOCX)))
     for fn, _ in SECTIONS:
         master.add_page_break()
         composer.append(Document(str(DOCS / fn)))
@@ -110,6 +126,10 @@ def main():
                 (DOCS / fn).unlink()
             except FileNotFoundError:
                 pass
+    try:
+        (DOCS / PREFACE_DOCX).unlink()
+    except FileNotFoundError:
+        pass
     print("  已清理中繼 docx（docs/ 只留 合集 + 情緒詞庫範本.docx）")
 
 

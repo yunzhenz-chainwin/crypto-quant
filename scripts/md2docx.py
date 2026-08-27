@@ -40,9 +40,21 @@ ZH_FONT = "微軟正黑體"
 MONO    = "Consolas"
 
 JOBS = [
+    (ROOT / "docs" / "主管摘要.md",                ROOT / "docs" / "主管摘要.docx"),
     (ROOT / "README.md",                          ROOT / "docs" / "crypto-quant_專案說明.docx"),
     (ROOT / "docs" / "archive" / "訊號增準計畫.md",  ROOT / "docs" / "訊號增準計畫.docx"),
     (ROOT / "docs" / "archive" / "ML訊號研究計畫.md", ROOT / "docs" / "ML訊號研究計畫.docx"),
+    # 交接完整版：其餘技術文件也轉 Word，供 merge_docx.py 併進「文件合集」
+    (ROOT / "docs" / "archive" / "部署與運維.md",    ROOT / "docs" / "部署與運維.docx"),
+    (ROOT / "docs" / "archive" / "API規格.md",       ROOT / "docs" / "API規格.docx"),
+    (ROOT / "docs" / "archive" / "資料庫說明.md",     ROOT / "docs" / "資料庫說明.docx"),
+    (ROOT / "docs" / "archive" / "開發指南.md",       ROOT / "docs" / "開發指南.docx"),
+    (ROOT / "docs" / "archive" / "訊號研究記錄.md",   ROOT / "docs" / "訊號研究記錄.docx"),
+    (ROOT / "docs" / "archive" / "成果匯報.md",       ROOT / "docs" / "成果匯報.docx"),
+    (ROOT / "docs" / "archive" / "專案路線圖.md",     ROOT / "docs" / "專案路線圖.docx"),
+    (ROOT / "docs" / "archive" / "PROJECT_PLAN.md",  ROOT / "docs" / "PROJECT_PLAN.docx"),
+    (ROOT / "docs" / "forecast-scorecard-p0.md",     ROOT / "docs" / "forecast-scorecard-p0.docx"),
+    (ROOT / "docs" / "forecast-calibration.md",      ROOT / "docs" / "forecast-calibration.docx"),
 ]
 
 
@@ -171,7 +183,7 @@ def _render_mermaid(src, idx, tmp: Path):
     if not pconf.exists():
         pconf.write_text('{"args":["--no-sandbox"]}', encoding="utf-8")
     cmd = (f'npx -y @mermaid-js/mermaid-cli -i "{mmd}" -o "{png}" '
-           f'-b white -s 2 -p "{pconf}"')
+           f'-b white -s 3 -p "{pconf}"')
     try:
         subprocess.run(cmd, shell=True, capture_output=True, timeout=180)
     except Exception:
@@ -194,9 +206,9 @@ def add_diagram(doc, src, idx, tmp):
     run = p.add_run()
     sz = _png_size(png)
     if sz and sz[1] > sz[0] * 1.35:
-        run.add_picture(str(png), height=Cm(17))
+        run.add_picture(str(png), height=Cm(20))
     else:
-        run.add_picture(str(png), width=Cm(14))
+        run.add_picture(str(png), width=Cm(16))
     return True
 
 
