@@ -7,7 +7,7 @@
  *   每 60 秒輪詢 /api/status 的 data_version（各週期最新 K 棒時間戳），
  *   有變化才重拉 訊號/恐懼貪婪/當前圖表資料/AI 分析；分頁切回前景時也立即檢查。
  */
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
 import {
   fetchSymbols, fetchAllSignals, fetchOHLC, fetchStatus, fetchIntervals,
   fetchIndicators, fetchBacktest, fetchFearGreed, fetchForecast, fetchMacro,   // fetchCorrelation 暫停（幣種相關性分析）
@@ -73,13 +73,17 @@ const PANELS = [
   // { key: 'correlation', label: '幣種相關性' },  // 2026-07-06 暫停幣種相關性分析
 ]
 
-// 工具：日期物件 → "YYYY-MM-DD"
+// 工具：日期物件 → "YYYY-MM-DD"（用本地日期，避免 UTC 讓 UTC+8 使用者的「今天」少算一天）
 function toDateStr(d) {
-  return d.toISOString().slice(0, 10)
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
 }
-const TODAY = toDateStr(new Date())
 
 export default function App() {
+  // 「今天」在 render 時即時用本地日期計算：不凍結於模組載入，
+  // 日期選擇器的 max（與初次掛載的預設）會隨輪詢重繪前進到當日，跨過 08:00 收線也不必重整。
+  const today = toDateStr(new Date())
   const [symbols,     setSymbols]     = useState([])
   const [intervals,   setIntervals]   = useState({})        // {'1d': [...], '1h': [...]}
   const [active,      setActive]      = useState('BTCUSDT')
@@ -89,9 +93,9 @@ export default function App() {
   const [hourDays,    setHourDays]    = useState(7)         // 時線用的區間（天）
   const [dateMode,    setDateMode]    = useState('preset')   // 'preset' | 'custom'
   const [startDate,   setStartDate]   = useState('')
-  const [endDate,     setEndDate]     = useState(TODAY)
+  const [endDate,     setEndDate]     = useState(today)
   const [pendingStart, setPendingStart] = useState('')
-  const [pendingEnd,   setPendingEnd]   = useState(TODAY)
+  const [pendingEnd,   setPendingEnd]   = useState(today)
   const [signals,     setSignals]     = useState([])
   const [fearGreed,   setFearGreed]   = useState(null)
   const [lastUpdated, setLastUpdated] = useState(0)
@@ -205,6 +209,8 @@ export default function App() {
         if (!stopped && ver && versionRef.current && ver !== versionRef.current) {
           // 有新資料進來（每小時 K 棒 / 每日更新 / 新增幣種後）→ 全面刷新
           refreshMarket(false)
+          // 一併重抓幣種清單：管理頁新增幣種後開著的分頁也能出現，並從載入時的暫時失敗中復原
+          fetchSymbols().then(setSymbols).catch(() => {})
           fetchIntervals().then(setIntervals).catch(() => {})
           setDataVersion(ver)          // 傳給 AI 面板 & 觸發詳細頁重拉
         }
@@ -331,6 +337,12 @@ export default function App() {
   const forecastError = currentForecast?.error ?? null
   const retryForecast = () => setForecastRetry(value => value + 1)
   const rangeOptions = interval === '1h' ? HOUR_OPTIONS : DAY_OPTIONS
+  // K 線交易標記：memo 化以固定陣列 reference。否則每秒即時報價觸發 App 重繪時，
+  // 這個 inline 陣列每次都是新 reference，會讓整張圖被 remove() 重建、重置使用者的縮放/平移。
+  const chartTrades = useMemo(
+    () => (interval === '1d' ? (labTrades ?? backtest?.recent_trades ?? []) : []),
+    [interval, labTrades, backtest?.recent_trades],
+  )
   const panelOn = (key) => panelPrefs[key] !== false                       // 預設開，明確設 false 才隱藏
   const togglePanel = (key) => setPanelPrefs(p => ({ ...p, [key]: !(p[key] !== false) }))
 
@@ -350,7 +362,7 @@ export default function App() {
           </button>
           */}
         </nav>
-        <StatusBar />
+        <StatusBar dataVersion={dataVersion} />
       </header>
 
       {/* ── 新手導覽（首次造訪自動開啟）／名詞辭典 ─────────────────────── */}
@@ -509,7 +521,7 @@ export default function App() {
                         className="dr-input"
                         value={pendingStart}
                         min="2021-01-01"
-                        max={pendingEnd || TODAY}
+                        max={pendingEnd || today}
                         onChange={e => setPendingStart(e.target.value)}
                       />
                       <label className="dr-label">到</label>
@@ -518,7 +530,7 @@ export default function App() {
                         className="dr-input"
                         value={pendingEnd}
                         min={pendingStart || "2021-01-01"}
-                        max={TODAY}
+                        max={today}
                         onChange={e => setPendingEnd(e.target.value)}
                       />
                       <button
@@ -535,7 +547,7 @@ export default function App() {
               <CandlestickChart
                 prices={ohlc}
                 indicators={indicators}
-                trades={interval === '1d' ? (labTrades ?? backtest?.recent_trades ?? []) : []}
+                trades={chartTrades}
                 interval={interval}
                 compact
               />
@@ -656,7 +668,7 @@ export default function App() {
                   <CandlestickChart
                     prices={ohlc}
                     indicators={indicators}
-                    trades={interval === '1d' ? (labTrades ?? backtest?.recent_trades ?? []) : []}
+                    trades={chartTrades}
                     interval={interval}
                   />
                 </div>

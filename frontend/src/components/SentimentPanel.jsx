@@ -105,6 +105,8 @@ function NewsSentimentStrip({ symbol }) {
 
   useEffect(() => {
     let alive = true
+    // 換幣先清掉上一顆幣的每日情緒，避免新幣標籤下暫時掛著舊幣的數字（全市場與幣種無關，不必清）
+    setCoin(null)
     fetchNewsSentiment('MARKET', 14).then(r => { if (alive) setMarket(r.daily) }).catch(() => {})
     fetchNewsSentiment(coinTicker(symbol), 14).then(r => { if (alive) setCoin(r.daily) }).catch(() => {})
     return () => { alive = false }
@@ -356,6 +358,13 @@ function NewsFeed({ symbol, news, historyData, isHistory, availableDates, histor
   )
 }
 
+// 工具：日期物件 → "YYYY-MM-DD"（用本地日期，避免 UTC 讓 UTC+8 使用者的「今天」少算一天）
+function toLocalDateStr(d) {
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
 /**
  * 歷史回補面板
  * 讓使用者選擇日期範圍，呼叫後端 /api/sentiment/news/backfill
@@ -364,10 +373,10 @@ function NewsFeed({ symbol, news, historyData, isHistory, availableDates, histor
  * 預設範圍：從今天往前 30 天（一個月）
  */
 function BackfillPanel({ onDone }) {
-  const today = new Date().toISOString().slice(0, 10)   // 供日期輸入 max=；每次 render 同值
+  const today = toLocalDateStr(new Date())   // 供日期輸入 max=；用本地日期，每次 render 同日
 
   // 預設起訖用 lazy initializer（只在首次 render 算一次），避免在 render 中呼叫 Date.now() 的不純副作用
-  const [fromDate, setFromDate] = useState(() => new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
+  const [fromDate, setFromDate] = useState(() => toLocalDateStr(new Date(Date.now() - 30 * 86400000)))
   const [toDate,   setToDate]   = useState(today)
   const [loading,  setLoading]  = useState(false)
   const [result,   setResult]   = useState(null)

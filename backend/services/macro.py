@@ -396,6 +396,10 @@ def get_macro() -> dict:
         except Exception as e:
             if _CACHE["data"] is None:
                 return {"ok": False, "error": str(e), "factors": []}
+    # 冷啟動時所有來源都失敗但沒拋例外（factors 為空）→ 快取仍是 None；
+    # 回傳安全的空結構，避免前端對 null 取 .factors 直接崩潰。
+    if _CACHE["data"] is None:
+        return {"ok": False, "error": "no macro data available", "factors": []}
     return _CACHE["data"]
 
 

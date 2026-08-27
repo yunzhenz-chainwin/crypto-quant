@@ -768,7 +768,13 @@ def backfill_daily_signals() -> int:
                         _f(r.get("close")), _f(r.get("MA20")), _f(r.get("MA60")),
                         _f(r.get("MA200")), _f(r.get("volume")), _f(r.get("VOL_MA20")),
                         _f(r.get("BB_UPPER")), _f(r.get("BB_LOWER")))
-                    rows.append((r["date"][:10], symbol, signal_from_score(score),
+                    d = (r.get("date") or "").strip()[:10]
+                    # 防呆：只收 YYYY-MM-DD 的日期，擋掉髒 CSV 列（曾發生 ts='301.99'
+                    # 被寫進 DB 的事故；壞日期在 ORDER BY date DESC 下還會排到最前污染最新值）。
+                    if len(d) != 10 or d[4] != "-" or d[7] != "-" or not d.replace("-", "").isdigit():
+                        prev_hist = _f(r.get("HIST"))
+                        continue
+                    rows.append((d, symbol, signal_from_score(score),
                                  score, _f(r.get("close")), _f(r.get("RSI"))))
                     prev_hist = _f(r.get("HIST"))
             conn.executemany(
@@ -1414,6 +1420,21 @@ def cleanup_ai(chat_keep_days: int = 90, analysis_keep_days: int = 7) -> dict:
         u = conn.execute("DELETE FROM ai_usage WHERE ts < ?", (cut_chat,)).rowcount
         conn.commit()
     return {"analysis": a, "chat": c, "usage": u}
+
+
+def cleanup_logs(keep_days: int = 30) -> dict:
+    """保留政策：access_log 與 job_runs 各留最近 keep_days 天。
+
+    這兩張表每筆 API 請求、每輪排程都會 INSERT 一列，而 cleanup_ai 只清 ai_* 表，
+    沒人管它們就會一路長（實測已累積數萬筆）。時間欄位皆為 _now() 的
+    '%Y-%m-%d %H:%M:%S' 字串，字典序即時間序，可直接字串比較。
+    空表時 DELETE 影響 0 列，安全可重複執行。"""
+    cut = (datetime.now(timezone.utc) - timedelta(days=keep_days)).strftime("%Y-%m-%d %H:%M:%S")
+    with _connect() as conn:
+        a = conn.execute("DELETE FROM access_log WHERE ts < ?", (cut,)).rowcount
+        j = conn.execute("DELETE FROM job_runs   WHERE started_at < ?", (cut,)).rowcount
+        conn.commit()
+    return {"access_log": a, "job_runs": j}
 
 
 # ── 預設資料 ─────────────────────────────────────────────────────────────────

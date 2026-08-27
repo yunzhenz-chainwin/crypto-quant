@@ -124,7 +124,7 @@ function RegimeTimeline({ history }) {
  *       畫面上兩處講的環境才不會出現「摘要說順風、面板說逆風」。
  *       沒給時自行抓（元件仍可獨立使用，例如日後被其他頁面掛載）。
  */
-export default function MacroPanel({ data = null }) {
+export default function MacroPanel({ data }) {
   const [fetched, setFetched] = useState(null)
   const [err, setErr] = useState(false)
   const [open, setOpen] = useState(false)
@@ -132,8 +132,11 @@ export default function MacroPanel({ data = null }) {
   const detailId = useId()
   const m = data ?? fetched
 
+  // 只有「完全沒給 data prop」(獨立掛載) 才自行抓。父層有提供時，即使還在載入中先給 null，
+  // 也交由父層那一支 /api/macro，避免重複發第二支請求。關鍵：用 undefined（沒給）而不是
+  // null（給了但還在載入）當判斷依據——父層 in-flight 時 data 為 null，不能拿它當「沒人抓」。
   useEffect(() => {
-    if (data) return
+    if (data !== undefined) return
     let alive = true
     fetchMacro().then(d => { if (alive) setFetched(d) }).catch(() => { if (alive) setErr(true) })
     return () => { alive = false }

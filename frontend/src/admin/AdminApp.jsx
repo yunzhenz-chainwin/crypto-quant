@@ -6,7 +6,7 @@
  *   監控    系統健康 / 資料新鮮度 / 資料庫統計 / 工作紀錄
  *   工作項目 進度追蹤:記錄做了哪些、預計做哪些、何時做(存資料庫)
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   adminLogin, getToken, setToken, clearToken,
   fetchHealth, fetchDbStats, fetchJobs,
@@ -872,17 +872,32 @@ function DbViewer({ onLogout }) {
       .catch(e => { if (e.message === 'UNAUTH') onLogout() })
   }, [onLogout])
 
+  // 每次請求給一個遞增序號；只有「最新一次發出的請求」的回應能寫進畫面。
+  // 幣種篩選是逐字輸入觸發的，較慢的舊回應可能晚於新回應返回，若不擋就會用舊篩選的結果
+  // 覆蓋新結果（out-of-order）。序號守衛確保只採用最後一次請求的結果與 loading 狀態。
+  const reqSeq = useRef(0)
   const load = useCallback(async () => {
+    const seq = ++reqSeq.current
     setErr(''); setLoading(true)
     try {
-      setData(await fetchDbTable(active, { symbol: symbol || null, limit, offset }))
+      const res = await fetchDbTable(active, { symbol: symbol || null, limit, offset })
+      if (seq === reqSeq.current) setData(res)
     } catch (e) {
+      if (seq !== reqSeq.current) return            // 已被更新的請求取代，舊錯誤不覆蓋畫面
       if (e.message === 'UNAUTH') { onLogout(); return }
       setErr('讀取失敗:' + e.message)
-    } finally { setLoading(false) }
+    } finally {
+      if (seq === reqSeq.current) setLoading(false)
+    }
   }, [active, symbol, limit, offset, onLogout])
 
-  useEffect(() => { load() }, [load])
+  // 去抖動：幣種篩選逐字輸入時 load 會隨 symbol 每個字元重建，直接 fetch 會「一個字打一支」。
+  // 延遲 300ms，停止輸入後才真正發請求（輸入中的每次重建都會先清掉前一個計時器）。
+  // 「↻ 重新整理」按鈕仍直接呼叫 load()，不受去抖動影響。
+  useEffect(() => {
+    const t = setTimeout(() => { load() }, 300)
+    return () => clearTimeout(t)
+  }, [load])
   useEffect(() => { setOpenRow(null) }, [active, offset, symbol, limit])   // 換表/換頁時收合細節
 
   const changeTable = (name) => { setActive(name); setSymbol(''); setOffset(0); setHidden(new Set()) }

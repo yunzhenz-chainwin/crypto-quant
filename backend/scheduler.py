@@ -404,6 +404,17 @@ def run_pipeline():
         except Exception as e:
             print(f"[scheduler] ai cleanup skip: {e}")
 
+        # 9b) 系統紀錄保留政策：access_log（每筆 API 請求）與 job_runs（每輪排程）
+        #     沒有其他地方清，會無限成長（實測已累積數萬筆），各留最近 30 天（非關鍵）
+        try:
+            from backend.services.app_db import cleanup_logs
+            trimmed = cleanup_logs()
+            if trimmed["access_log"] or trimmed["job_runs"]:
+                print(f"[scheduler] log cleanup: access_log -{trimmed['access_log']}, "
+                      f"job_runs -{trimmed['job_runs']}")
+        except Exception as e:
+            print(f"[scheduler] log cleanup skip: {e}")
+
         # 10) data/raw 原始 JSON 保留 7 天（時線每小時抓取會持續累積，非關鍵）
         try:
             import re as _re
@@ -498,17 +509,23 @@ def start_scheduler():
     # max_instances=1 + coalesce：上一輪沒跑完就不疊下一輪（並發打 Binance 容易觸發 429）。
     # 台灣 09:00 = UTC 01:00：日線 K 棒在 UTC 00:00（台灣 08:00）收盤，排在收盤後 1 小時抓，
     # 避免像舊版排在台灣 01:00（= UTC 前一天 17:00、當日日棒尚未收盤）而固定慢一根。
+    # misfire_grace_time：喚醒慢或看門狗重啟剛好跨過排程點時，仍在寬限內補跑
+    # （配 coalesce=True 只補一次），避免預設 1 秒就整輪丟棄、當天資料靜默停在昨天。
     scheduler.add_job(run_pipeline, "cron", hour=9, minute=0,
                       id="daily_pipeline", replace_existing=True,
-                      max_instances=1, coalesce=True)              # 每日 09:00（台灣）
+                      max_instances=1, coalesce=True,
+                      misfire_grace_time=3600)                     # 每日 09:00（台灣）
     scheduler.add_job(run_hourly_pipeline, "cron", minute=6,
                       id="hourly_pipeline", replace_existing=True,
-                      max_instances=1, coalesce=True)              # 每小時 :06（1h K 棒收盤後）
+                      max_instances=1, coalesce=True,
+                      misfire_grace_time=1800)                     # 每小時 :06（1h K 棒收盤後）
     scheduler.add_job(fetch_news_job, "interval", minutes=30,
                       id="news_fetch", replace_existing=True,
-                      max_instances=1, coalesce=True)              # 每 30 分鐘
+                      max_instances=1, coalesce=True,
+                      misfire_grace_time=600)                      # 每 30 分鐘
     scheduler.add_job(run_sqlite_backup, "cron", hour=3, minute=30,
                       id="sqlite_backup", replace_existing=True,
-                      max_instances=1, coalesce=True)              # 每日 03:30
+                      max_instances=1, coalesce=True,
+                      misfire_grace_time=3600)                     # 每日 03:30
     scheduler.start()
     return scheduler

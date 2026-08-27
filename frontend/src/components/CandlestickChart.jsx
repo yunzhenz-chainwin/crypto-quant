@@ -233,7 +233,14 @@ export default function CandlestickChart({ prices, indicators, trades, interval 
           kS.createPriceLine({ price: 80, color: 'rgba(239,68,68,0.6)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '80' })
           kS.createPriceLine({ price: 20, color: 'rgba(34,197,94,0.6)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '20' })
           chart.addSeries(LineSeries, { color: '#22d3ee', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'D', autoscaleInfoProvider: pin100 }, pane).setData(kd.map(x => ({ time: x.time, value: x.d })))
-          chart.addSeries(LineSeries, { color: '#f472b6', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'J', autoscaleInfoProvider: pin100 }, pane).setData(kd.map(x => ({ time: x.time, value: x.j })))
+          // J = 3K − 2D 會衝破 100 / 跌破 0（正是「短線過熱/過冷」要看的極端訊號）；
+          // 不硬釘 0–100，改用「0–100 參考帶」與 J 實際範圍的聯集，極端值才不會被裁平。
+          const jVals = kd.map(x => x.j).filter(v => v != null && Number.isFinite(v))
+          const pinJ = () => ({ priceRange: {
+            minValue: Math.min(0, ...jVals),
+            maxValue: Math.max(100, ...jVals),
+          } })
+          chart.addSeries(LineSeries, { color: '#f472b6', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'J', autoscaleInfoProvider: pinJ }, pane).setData(kd.map(x => ({ time: x.time, value: x.j })))
         }
       } else if (osc === 'DMI') {
         const dm = dmi(P, 14)

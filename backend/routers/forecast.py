@@ -43,8 +43,11 @@ def get_forecast_ledger_status():
             _LEDGER_CACHE["data"] = ledger_status()
             _LEDGER_CACHE["ts"] = now
         except Exception as exc:            # noqa: BLE001 — 加值資訊，不該讓主畫面壞掉
+            # 真正的例外細節只印在伺服器端（與其他 handler 一致），對外一律回通用
+            # 訊息，避免把內部錯誤字串洩漏給未驗證的呼叫端。
+            print(f"[forecast] ledger-status error: {exc}")
             if _LEDGER_CACHE["data"] is None:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": "累積狀態暫時無法取得"}
     return {"ok": True, **_LEDGER_CACHE["data"]}
 
 

@@ -83,6 +83,7 @@ export function ScoreGauge({ score }) {
 export default function HeroSignal({ signal, symbol, live, slim = false }) {
   const cfg   = SIGNAL_CONFIG[signal?.signal ?? 'UNKNOWN']
   const px    = live?.price ?? signal?.close          // 有即時價就用即時價
+  const isLivePrice = live?.price != null             // 接不上 Binance WebSocket 時，px 退回日線收盤（非即時，最舊可能落後約一天）
   // 小數位固定（min = max）：即時報價每秒在跳，位數不固定的話整列寬度會跟著抖動
   const digits = px != null && px < 1 ? 4 : 2
   const price = px
@@ -106,6 +107,18 @@ export default function HeroSignal({ signal, symbol, live, slim = false }) {
         <div className="hero-price">
           {live && <span className="live-dot" title="即時報價（Binance）" />}
           {price}
+          {/* 即時報價接不上時，價格會顯示最近一根日線收盤（可能落後約一天）。
+              若只靠「沒有那顆即時綠點」當提示，防火牆後的使用者很容易把昨天的收盤讀成現價，
+              故補一個低調的「非即時」標記，明說這不是即時價。即時價路徑不受影響。 */}
+          {!isLivePrice && px != null && (
+            <span
+              className="hero-price-asof"
+              title="Binance 即時報價暫時無法連線，顯示的是最近一根日線收盤價（可能落後約一天），非即時價"
+              style={{ marginLeft: 6, fontSize: '0.62em', fontWeight: 400, color: '#94a3b8', letterSpacing: '.02em', verticalAlign: 'middle' }}
+            >
+              · 日線收盤（非即時）
+            </span>
+          )}
           {chg != null && (
             <span className="hero-chg" style={{ color: chg >= 0 ? '#22c55e' : '#ef4444' }}>
               {chg >= 0 ? '▲' : '▼'}{Math.abs(chg).toFixed(2)}%

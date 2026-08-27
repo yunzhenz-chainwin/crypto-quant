@@ -19,6 +19,7 @@ import hmac
 import base64
 import hashlib
 import sqlite3
+import threading
 from datetime import datetime, timezone, date, timedelta
 
 from typing import Optional
@@ -330,6 +331,13 @@ def ops_run(job: str, request: Request, _: str = Depends(require_admin)):
 
 
 # ── 幣種管理（新增 / 啟用停用 / 編輯 / 移除；啟用停用即時生效，不需重啟）──────
+# 幣種設定的「讀→改→寫」序列化鎖：coins_add / coins_update / coins_remove 三者都是
+# get_coins() → 就地修改 → set_config("coins", ...)。兩個後台請求並行時，後寫入的
+# 會拿自己手上那份舊清單整份蓋掉，靜默吃掉前一個請求的變更。用一把行程內鎖把三個
+# handler 的臨界區串成互斥，確保每次寫入都基於最新清單。
+_COINS_CONFIG_LOCK = threading.Lock()
+
+
 class CoinAddReq(BaseModel):
     symbol: str
     zh: str = ""
@@ -380,55 +388,63 @@ def coins_add(body: CoinAddReq, request: Request, _: str = Depends(require_admin
         raise HTTPException(status_code=400, detail="請輸入幣種代號")
     if not symbol.endswith("USDT"):        # 只輸入 BTC 也接受，自動補 USDT
         symbol += "USDT"
-    coins = app_db.get_coins()
-    if any(c["symbol"] == symbol for c in coins):
-        raise HTTPException(status_code=400, detail=f"{symbol} 已在清單中")
-    jid = app_db.start_job("add_coin")
-    try:
-        r = app_db.fetch_and_ingest_symbol(symbol)
-        if not r.get("rows"):
-            raise RuntimeError("抓不到任何資料，代號可能不存在於 Binance")
-        base = symbol.replace("USDT", "")
-        coins.append({
-            "symbol": symbol,
-            "zh": body.zh.strip() or base,
-            "ticker": body.ticker.strip() or base,
-            "enabled": True,
-        })
-        app_db.set_config("coins", coins)
-        app_db.finish_job(jid, "success", f"{symbol} · {r['rows']} 筆 · 最新 {r['last_date']}")
-        return {"ok": True, **r}
-    except Exception as e:
-        app_db.finish_job(jid, "failed", str(e))
-        raise HTTPException(status_code=400, detail=str(e))
+    # 讀→改→寫全程持鎖，序列化幣種設定寫入（避免與其他 coins_* 請求互相覆蓋）。
+    # 新增是後台罕見且已限流（5 次/時）的操作，把 fetch_and_ingest_symbol 一起圈進來
+    # 序列化可接受，換得的是「重複檢查與寫入都基於同一份最新清單」的正確性。
+    with _COINS_CONFIG_LOCK:
+        coins = app_db.get_coins()
+        if any(c["symbol"] == symbol for c in coins):
+            raise HTTPException(status_code=400, detail=f"{symbol} 已在清單中")
+        jid = app_db.start_job("add_coin")
+        try:
+            r = app_db.fetch_and_ingest_symbol(symbol)
+            if not r.get("rows"):
+                raise RuntimeError("抓不到任何資料，代號可能不存在於 Binance")
+            base = symbol.replace("USDT", "")
+            coins.append({
+                "symbol": symbol,
+                "zh": body.zh.strip() or base,
+                "ticker": body.ticker.strip() or base,
+                "enabled": True,
+            })
+            app_db.set_config("coins", coins)
+            app_db.finish_job(jid, "success", f"{symbol} · {r['rows']} 筆 · 最新 {r['last_date']}")
+            return {"ok": True, **r}
+        except Exception as e:
+            app_db.finish_job(jid, "failed", str(e))
+            raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.put("/admin/coins/{symbol}")
 def coins_update(symbol: str, body: CoinPatchReq, _: str = Depends(require_admin)):
     symbol = symbol.upper()
-    coins = app_db.get_coins()
-    hit = False
-    for c in coins:
-        if c["symbol"] == symbol:
-            if body.zh is not None:      c["zh"] = body.zh.strip()
-            if body.ticker is not None:  c["ticker"] = body.ticker.strip()
-            if body.enabled is not None: c["enabled"] = bool(body.enabled)
-            hit = True
-            break
-    if not hit:
-        raise HTTPException(status_code=404, detail=f"{symbol} 不存在")
-    app_db.set_config("coins", coins)
+    # 讀→改→寫全程持鎖，序列化幣種設定寫入（見 _COINS_CONFIG_LOCK）。
+    with _COINS_CONFIG_LOCK:
+        coins = app_db.get_coins()
+        hit = False
+        for c in coins:
+            if c["symbol"] == symbol:
+                if body.zh is not None:      c["zh"] = body.zh.strip()
+                if body.ticker is not None:  c["ticker"] = body.ticker.strip()
+                if body.enabled is not None: c["enabled"] = bool(body.enabled)
+                hit = True
+                break
+        if not hit:
+            raise HTTPException(status_code=404, detail=f"{symbol} 不存在")
+        app_db.set_config("coins", coins)
     return {"ok": True}
 
 
 @router.delete("/admin/coins/{symbol}")
 def coins_remove(symbol: str, _: str = Depends(require_admin)):
     symbol = symbol.upper()
-    coins = app_db.get_coins()
-    kept = [c for c in coins if c["symbol"] != symbol]
-    if len(kept) == len(coins):
-        raise HTTPException(status_code=404, detail=f"{symbol} 不存在")
-    app_db.set_config("coins", kept)
+    # 讀→改→寫全程持鎖，序列化幣種設定寫入（見 _COINS_CONFIG_LOCK）。
+    with _COINS_CONFIG_LOCK:
+        coins = app_db.get_coins()
+        kept = [c for c in coins if c["symbol"] != symbol]
+        if len(kept) == len(coins):
+            raise HTTPException(status_code=404, detail=f"{symbol} 不存在")
+        app_db.set_config("coins", kept)
     return {"ok": True, "removed": symbol, "note": "已從清單移除（歷史資料仍保留在資料庫）"}
 
 

@@ -47,6 +47,19 @@ HOURLY_CAP       = int(os.getenv("AI_HOURLY_CAP", "80"))  # GPT 每小時呼叫�
 _cache: dict = {}              # {cache_key: {"ts":…, "data":…}}
 _gpt_calls = deque()           # 最近一小時的 GPT 呼叫時間戳（成本保護）
 
+# 記憶體快取的條目上限。這些 key 內嵌 data_versions()，每小時 ingest 後就翻新一批，
+# 每顆幣每小時都長出新 key，而多 KB 的舊值不會自己消失（DB 側快取由 cleanup_ai
+# 定期清，這幾個行程內 dict 沒人清）。設個上限，超過就丟最舊的幾筆即可。
+_CACHE_MAX = 200
+
+
+def _prune_cache(cache: dict, max_entries: int = _CACHE_MAX) -> None:
+    """把記憶體快取壓回上限：依存入時間 ts 丟掉最舊的，保留最新 max_entries 筆。"""
+    if len(cache) <= max_entries:
+        return
+    for k in sorted(cache, key=lambda k: cache[k]["ts"])[:len(cache) - max_entries]:
+        del cache[k]
+
 
 # ── GPT 設定 ─────────────────────────────────────────────────────────────────
 def gpt_config() -> dict:
@@ -223,9 +236,9 @@ def detect_symbol(question: str) -> tuple[str | None, bool]:
                 positions.append(i)
         # ticker：歧義字（near/link…）要求原文大寫；其餘小寫也可。前後不得為英數。
         if tk in _AMBIGUOUS_TICKERS:
-            m = re.search(rf"(?<![A-Za-z0-9]){tk}(?![A-Za-z0-9])", q)
+            m = re.search(rf"(?<![A-Za-z0-9]){re.escape(tk)}(?![A-Za-z0-9])", q)
         else:
-            m = re.search(rf"(?<![a-z0-9]){tk.lower()}(?![a-z0-9])", ql)
+            m = re.search(rf"(?<![a-z0-9]){re.escape(tk.lower())}(?![a-z0-9])", ql)
         if m:
             positions.append(m.start())
         # 英文全名（bitcoin、chainlink…）
@@ -678,6 +691,7 @@ def enhance_answer(question: str, base_answer: str, intent: str, symbol: str,
     if not content:
         return None
     _enhance_cache[key] = {"ts": time.time(), "answer": content}
+    _prune_cache(_enhance_cache)
     return content
 
 
@@ -747,6 +761,7 @@ def analyze(symbol: str, use_gpt: bool = True, force: bool = False) -> dict:
         db_hit = load_ai_analysis(key, CACHE_TTL)
         if db_hit:
             _cache[key] = {"ts": time.time(), "data": db_hit}
+            _prune_cache(_cache)
             return db_hit
 
     ctx = build_context(symbol)
@@ -774,6 +789,7 @@ def analyze(symbol: str, use_gpt: bool = True, force: bool = False) -> dict:
             out["gpt_status"] = f"error: {err}"
 
     _cache[key] = {"ts": time.time(), "data": out}
+    _prune_cache(_cache)
     try:
         save_ai_analysis(key, symbol, out)   # 持久化：重啟不失效、可回顧歷史
     except Exception:

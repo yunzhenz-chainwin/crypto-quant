@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from backend.routers.admin import require_admin   # 寫入型端點的登入保護
 from backend.services.rate_limiter import RATE_LIMITER, enforce_rate_limit
 from backend.services.news_store import (
-    save_articles, query_by_date, available_dates, total_count,
+    save_articles, query_by_date, query_recent, available_dates, total_count,
     aggregate_daily, load_sentiment_daily,
 )
 from backend.services.reader import load_fear_greed_history
@@ -39,6 +39,17 @@ router = APIRouter()
 # 格式：{ "cache_key": { "ts": 存入時間, "data": 資料 } }
 _cache = {}
 CACHE_TTL = 1800  # 新聞快取 30 分鐘（避免請求太頻繁）
+
+
+def _parse_feed(url: str):
+    """抓 RSS/Atom 並解析。feedparser.parse() 直接吃 URL 時沒有網路 timeout，
+    單一來源卡住就會無限期吊住整個排程器與 API 執行緒池（曾導致新聞排程靜默停擺數天）。
+    這裡改用 requests 設連線/讀取逾時，再把內容交給 feedparser 解析。"""
+    resp = requests.get(
+        url, timeout=(5, 15),
+        headers={"User-Agent": "Mozilla/5.0 (crypto-quant news fetcher)"})
+    resp.raise_for_status()
+    return feedparser.parse(resp.content)
 
 # ── RSS 新聞來源（全部免費，不需要 API 金鑰；2026-07-02 全數實測可用）────────
 RSS_SOURCES = [
@@ -419,7 +430,7 @@ def _fetch_and_save() -> list:
     source_stats = []
     for source_name, url in [*RSS_SOURCES, ("GoogleNews中文", GOOGLE_NEWS_MARKET)]:
         try:
-            feed = feedparser.parse(url)
+            feed = _parse_feed(url)
             limit = 40 if source_name.startswith("GoogleNews") else 25
             for entry in feed.entries[:limit]:
                 all_items.append(_entry_to_article(entry, source_name))
@@ -439,6 +450,18 @@ def _fetch_and_save() -> list:
     except Exception as e:
         print(f"[news] aggregate skip: {e}")
 
+    # 全部來源都失敗或回空時，別用空清單覆寫快取——否則接下來 30 分鐘新聞頁全空白，
+    # 即使本地 DB 還存著上萬篇。改撈 DB 近期文章墊檔，且刻意不寫快取：來源一恢復，
+    # 下一個請求就能立刻抓到新資料回正，不必等這把空快取熬過 30 分鐘。
+    if not all_items:
+        print(f"[news] all sources empty/failed, serve local DB ({' '.join(source_stats)})")
+        try:
+            return query_recent(days=7)
+        except Exception as e:
+            print(f"[news] local DB fallback failed: {e}")
+            return []
+
+    # 只有抓到非空結果才寫入快取
     _cache["rss_all"] = {"ts": now, "data": all_items}
     return all_items
 
@@ -460,7 +483,7 @@ def fetch_coin_news_google(symbols: list[str], per_coin: int = 25) -> int:
         url = (f"https://news.google.com/rss/search?q={quote(q)}"
                f"&hl=zh-TW&gl=TW&ceid=TW:zh-Hant")
         try:
-            feed = feedparser.parse(url)
+            feed = _parse_feed(url)
             items = [_entry_to_article(e, "GoogleNews幣種") for e in feed.entries[:per_coin]]
             # 幣種查詢來的新聞至少掛上該幣標記（標題比對可能漏掉衍生寫法）
             for it in items:
@@ -520,6 +543,10 @@ def fear_greed(limit: int = 30):
     來源：alternative.me，完全免費，不需要 API 金鑰
     快取 1 小時（該指數每天只更新一次，無需頻繁請求）
     """
+    # limit 若不設限，未登入的呼叫者可用 ?limit=1,2,3… 灌出無限把永久快取 key，
+    # 每一把還會原樣轉發到 alternative.me（limit=0 更是整段歷史）。先夾到合理範圍
+    # 再拿去組 key 與請求外部 API；預設 30、常用值都落在區間內，正常行為不受影響。
+    limit = max(1, min(limit, 100))
     now = time.time()
     key = f"fng_{limit}"
     if key in _cache and now - _cache[key]["ts"] < 3600:  # 1 小時快取
@@ -542,6 +569,11 @@ def fear_greed(limit: int = 30):
             return _cache[key]["data"]
         data = _stored_fear_greed(limit)
 
+    # 寫入前先清掉過期的 fng_ 快取，避免不同 limit 的條目長期堆在記憶體
+    # （夾了 limit 後最多 100 把，再配過期清理就恆定有界）。
+    for stale in [k for k in _cache
+                  if k.startswith("fng_") and now - _cache[k]["ts"] >= 3600]:
+        del _cache[stale]
     _cache[key] = {"ts": now, "data": data}
     return data
 
@@ -640,8 +672,12 @@ def crypto_news(symbol: str = None, limit: int = 40):
             "fell_back_to_market": fell_back,    # True = 相關新聞不足，這次顯示的是全市場
         }
     except Exception as e:
+        # 對外只回泛用訊息，真正的錯誤細節印在伺服器端（與本檔其他 [news] 記錄一致），
+        # 不把內部例外字串洩漏給未登入的呼叫者。
+        print(f"[news] crypto_news error: {e}")
         return {"categories": [], "total": 0, "symbol": None,
-                "coin_total": None, "fell_back_to_market": False, "error": str(e)}
+                "coin_total": None, "fell_back_to_market": False,
+                "error": "新聞暫時無法取得，請稍後再試"}
 
 
 # ── 歷史新聞查詢 ─────────────────────────────────────────────────────────────
@@ -717,10 +753,14 @@ def _hn_fetch_range(from_date: str, to_date: str) -> int:
     import datetime as dt
     from urllib.parse import urlparse
 
-    # 轉換成 Unix timestamp（秒），Algolia 用這格式做時間過濾
-    start_ts = int(dt.datetime.strptime(from_date, "%Y-%m-%d").timestamp())
+    # 轉換成 Unix timestamp（秒），Algolia 用這格式做時間過濾。
+    # 日期一律以 UTC 解讀：strptime 產出無時區的 naive datetime，.timestamp() 會拿
+    # 機器本地時區（台北 UTC+8）換算，害查詢範圍整整平移 8 小時；補 tzinfo=UTC 修正。
+    start_ts = int(dt.datetime.strptime(from_date, "%Y-%m-%d")
+                   .replace(tzinfo=timezone.utc).timestamp())
     # 結束日期 +1 天，讓 to_date 當天的文章也包含在內
-    end_ts   = int(dt.datetime.strptime(to_date, "%Y-%m-%d").timestamp()) + 86400
+    end_ts   = int(dt.datetime.strptime(to_date, "%Y-%m-%d")
+                   .replace(tzinfo=timezone.utc).timestamp()) + 86400
 
     KEYWORDS = ["bitcoin", "ethereum", "cryptocurrency", "crypto", "blockchain"]
     seen_urls    = set()   # 跨關鍵字去重，避免同一篇被存入多次
@@ -765,8 +805,10 @@ def _hn_fetch_range(from_date: str, to_date: str) -> int:
                         continue
                     seen_urls.add(url)
 
-                    # 將 Unix timestamp 轉成日期字串
-                    pub_date = dt.datetime.fromtimestamp(h.get("created_at_i", 0)).strftime("%Y-%m-%d")
+                    # 將 Unix timestamp 轉成日期字串（以 UTC 解讀，與 RSS 入庫的 UTC
+                    # 日期一致；用機器本地時區會讓 published_at 差一天、對不上其他來源）
+                    pub_date = dt.datetime.fromtimestamp(
+                        h.get("created_at_i", 0), tz=timezone.utc).strftime("%Y-%m-%d")
 
                     # 從 URL 取網域，例如 coindesk.com
                     try:

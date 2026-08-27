@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react'
 import { fetchStatus } from '../api/client'
 import VerifyModal from './VerifyModal'
 
-export default function StatusBar() {
+export default function StatusBar({ dataVersion }) {
   const [data, setData] = useState(null)
   const [showVerify, setShowVerify] = useState(false)
 
+  // 跟著 App 的資料版本輪詢一起更新：dataVersion 變了（例如每日 09:00 更新後）就重抓，
+  // 否則整夜開著的分頁會停在昨天的「資料截至」日期與驗證徽章數字。
   useEffect(() => {
     fetchStatus().then(setData).catch(() => {})
-  }, [])
+  }, [dataVersion])
 
   if (!data) return null
 
