@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.cryptoquant.backend.plist — macOS 開機自動啟動範本
+  （對應 Windows 這邊的 Task Scheduler 工作 "CryptoQuantBackend"）
+
+  安裝：
+    1. 把 __REPO__ 換成實際路徑，例如 /Users/你的帳號/crypto-quant
+    2. cp scripts/com.cryptoquant.backend.plist ~/Library/LaunchAgents/
+    3. launchctl load  -w ~/Library/LaunchAgents/com.cryptoquant.backend.plist
+  停用／重啟：
+    launchctl unload -w ~/Library/LaunchAgents/com.cryptoquant.backend.plist
+    launchctl kickstart -k gui/$(id -u)/com.cryptoquant.backend
+
+  注意：LaunchAgent 是「使用者登入後」才啟動；MacBook 闔上蓋子睡眠時排程不會跑，
+  醒來後 APScheduler 會接續下一個排程點（錯過的那次不補跑）。
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cryptoquant.backend</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__REPO__/start_backend.sh</string>
+        <string>--once</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+    <!-- KeepAlive 就是 launchd 版的看門狗，所以上面用 --once 不再自己 loop -->
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>StandardOutPath</key>
+    <string>__REPO__/logs/backend.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO__/logs/backend.log</string>
+</dict>
+</plist>

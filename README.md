@@ -47,6 +47,8 @@
 
 ## 2. 快速啟動
 
+### Windows（目前的部署機）
+
 ```powershell
 # 後端 + 前端一起（開發模式）
 cd frontend
@@ -64,13 +66,55 @@ cd frontend && npm run build
 
 - 正式前台：`http://10.201.7.12:8000`；後台：`http://10.201.7.12:8000/admin`
 - 本機開發：前端 `http://localhost:5174`，API `http://localhost:8001`
-- 後台：`/admin`，帳密來自環境變數 `ADMIN_USER` / `ADMIN_PASS`；正式/排程啟動由 `secrets.local.cmd` 注入 `ADMIN_PASS` 與 `ADMIN_SECRET`（該檔已 gitignore）。正式/對外模式若簽章密鑰仍是預設值、密鑰少於 32 字元或一般密碼少於 12 字元會拒絕啟動；因既有使用者決策而明確設定的 legacy `admin123` 暫保留相容但會高風險警告，且登入連續失敗 5 次鎖定 15 分鐘。fallback 只允許明確宣告 `CRYPTO_QUANT_BIND_HOST=127.0.0.1` 的 loopback 開發，並須設定 `ALLOW_INSECURE_ADMIN_DEFAULTS=1`。
+- 後台：`/admin`，帳密來自環境變數 `ADMIN_USER` / `ADMIN_PASS`；正式/排程啟動由 `secrets.local.cmd`（Windows）／`secrets.local.sh`（macOS，從 `secrets.example.sh` 複製）注入 `ADMIN_PASS` 與 `ADMIN_SECRET`（該檔已 gitignore）。正式/對外模式若簽章密鑰仍是預設值、密鑰少於 32 字元或一般密碼少於 12 字元會拒絕啟動；因既有使用者決策而明確設定的 legacy `admin123` 暫保留相容但會高風險警告，且登入連續失敗 5 次鎖定 15 分鐘。fallback 只允許明確宣告 `CRYPTO_QUANT_BIND_HOST=127.0.0.1` 的 loopback 開發，並須設定 `ALLOW_INSECURE_ADMIN_DEFAULTS=1`。
 - GPT 金鑰：後台「AI 設定」頁填入，或環境變數 `OPENAI_API_KEY`（優先）；不填則 AI 只用規則引擎
 - 對外公開（選用）：可將 Cloudflare Quick Tunnel 指向 `10.201.7.12:8000`；啟用前必須先更換預設後台密碼與簽章密鑰。named tunnel、Cloudflare Access/WAF 仍需外部網域與帳號權限，尚未由本 repo 自動完成。
 - **正式部署（開機自啟/看門狗/服務化）詳見 [`docs/archive/部署與運維.md`](docs/archive/部署與運維.md)。**
 
 > ⚠️ Windows 上 `.venv\Scripts\python.exe` 是啟動器殼，工作管理員會看到
 > 「venv + 系統 Python **成對**的 uvicorn」— 那是**一台**伺服器，不是重複執行；殺掉子進程=殺掉整台。
+
+### macOS / Linux
+
+```bash
+./setup.sh                  # 首次：建 .venv、裝 Python 相依、npm ci、build 前端（--dev 另裝驗證/文件相依）
+cd frontend && npm run start   # 開發：API :8001（--reload）+ vite :5174，同 Windows
+./start_backend.sh             # 正式：FastAPI 直接服務 frontend/dist，預設 127.0.0.1:8000，含看門狗
+./start_backend.sh --once      # 不套看門狗、輸出印在畫面上，用來看啟動錯誤
+```
+
+- 要讓區網或 Cloudflare Tunnel 連進來：`CRYPTO_QUANT_BIND_HOST=0.0.0.0 ./start_backend.sh`。
+  非 loopback 位址會被判定為對外模式，此時 `ADMIN_SECRET` 需 32 字元以上、`ADMIN_PASS` 需 12 字元以上才會啟動。
+- 開機自動啟動（等同 Windows 的排程工作 `CryptoQuantBackend`）：把 `scripts/com.cryptoquant.backend.plist`
+  裡的 `__REPO__` 換成實際路徑後放進 `~/Library/LaunchAgents/` 再 `launchctl load -w`，說明寫在檔案開頭。
+  注意筆電闔蓋睡眠時排程不會跑，醒來後 APScheduler 接續下一個排程點，錯過的那次不補跑。
+- `npm run api` 走 `scripts/dev_api.mjs`（跨平台，自動找對應平台的 venv python）。
+  找不到 python 時用 `DEV_API_DRY_RUN=1 npm run api` 只印指令、不啟動，方便排查路徑。
+
+### 換一台機器（搬遷）
+
+git 只帶程式碼；**後台帳密、`data/app.db`（工作項目／後台設定／AI 金鑰）、`data/news.db`
+與執行期資料都被 gitignore**，必須另外帶。舊機器上執行：
+
+```bash
+python scripts/make_migration_bundle.py     # 產生 ../crypto-quant-migration/crypto-quant-migration-<日期>.zip
+```
+
+包含 `secrets.local.sh`（由 `secrets.local.cmd` 轉出）、兩個 SQLite 的線上備份快照
+（WAL 模式下直接複製檔案會拿到不一致的快照，所以走 sqlite3 backup API）、`data/clean`、
+`data/raw`、`reports`。**內含後台密碼，請用私人管道傳**（`--no-secrets` 可排除）。
+
+新機器上：
+
+```bash
+git clone <repo> crypto-quant && cd crypto-quant
+./setup.sh
+unzip -o ~/Downloads/crypto-quant-migration-*.zip -d .   # 還原 DB 與帳密
+./start_backend.sh
+```
+
+沒有搬遷包也能跑：排程會自己重抓 K 線與新聞重建資料，只是工作項目追蹤、
+歷史新聞情緒與後台設定（含 AI 金鑰）會是空的。
 
 ## 3. 系統架構與資料流
 

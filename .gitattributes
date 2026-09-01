@@ -1,0 +1,7 @@
+# 這台 Windows 開發機 core.autocrlf=true，簽出時會把 LF 換成 CRLF。
+# macOS 上帶 CRLF 的 shell 腳本會噴 "bad interpreter: /usr/bin/env bash^M"，
+# 所以新增的 POSIX 腳本一律強制以 LF 存放與簽出（兩個平台都用 LF，Git Bash 讀 LF 沒問題）。
+# 刻意不寫 *.cmd / *.json：既有 blob 存的是 CRLF，加上屬性會讓整包檔案被重新正規化成一大包無意義的 diff。
+*.sh   text eol=lf
+*.mjs  text eol=lf
+*.plist text eol=lf
