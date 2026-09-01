@@ -1,7 +1,7 @@
 # crypto-quant — 加密貨幣量化分析平台
 
 > **這份文件是專案的入口**：接手開發、回顧架構、或讓 AI 助手了解專案之前，先讀這一份。
-> 最後更新：2026-08-10
+> 最後更新：2026-09-01
 
 一句話介紹：一個自架的加密貨幣分析網站 — 自動抓行情與新聞、算技術指標與訊號、
 保留「規則引擎 + GPT」雙 AI 解讀能力，新增可拒答、可稽核的研究預測，附**即時報價**，配有管理後台，前台資料自動更新。
@@ -15,17 +15,16 @@
 | 想做的事 | 看這份 |
 |---|---|
 | **快速了解 / 接手** | 本檔 README（你在這） |
-| **部署、重啟、改前端、輪密鑰、排錯** | [`docs/archive/部署與運維.md`](docs/archive/部署與運維.md) |
-| **呼叫 API（前台/後台端點規格）** | [`docs/archive/API規格.md`](docs/archive/API規格.md) |
-| **研究預測成績單、資料契約與發布門檻** | [`docs/forecast-scorecard-p0.md`](docs/forecast-scorecard-p0.md) |
-| **模型實測指標（F1／Recall／AUC／AP／SHAP 適用性）** | [`docs/crypto-quant_文件合集.docx`](docs/crypto-quant_文件合集.docx) 第陸章 |
-| **機率校準研究（Platt／Beta、walk-forward 與升級判定）** | [`docs/forecast-calibration.md`](docs/forecast-calibration.md) |
-| **本地開發、開發鐵律、測試怎麼跑** | [`docs/archive/開發指南.md`](docs/archive/開發指南.md) |
-| **資料庫每張表結構與資料流** | [`docs/archive/資料庫說明.md`](docs/archive/資料庫說明.md) |
-| **給主管的成果匯報 / 驗證數據** | [`docs/archive/成果匯報.md`](docs/archive/成果匯報.md) |
-| **未來路線圖 / 訊號改良與 ML 計畫** | [`docs/archive/專案路線圖.md`](docs/archive/專案路線圖.md)、[`docs/archive/訊號增準計畫.md`](docs/archive/訊號增準計畫.md)、[`docs/archive/ML訊號研究計畫.md`](docs/archive/ML訊號研究計畫.md) |
+| **部署、重啟、改前端、換機搬遷、輪密鑰、排錯；本地開發、開發鐵律、測試怎麼跑** | [`docs/archive/部署與運維.md`](docs/archive/部署與運維.md)（**第二部＝開發指南**） |
+| **呼叫 API（前台/後台端點規格）、資料庫每張表結構與資料流** | [`docs/archive/API規格.md`](docs/archive/API規格.md)（**第二部＝資料庫說明**） |
+| **研究預測成績單（資料契約、發布門檻）與機率校準研究（Platt／Beta、walk-forward）** | [`docs/archive/研究預測評估.md`](docs/archive/研究預測評估.md)（第一部＝成績單規格、第二部＝校準研究） |
+| **模型實測指標（F1／Recall／AUC／AP／SHAP 適用性）** | [`docs/crypto-quant_文件合集.docx`](docs/crypto-quant_文件合集.docx) 第柒章 |
+| **給主管的成果匯報 / 驗證數據、訊號研究軌跡** | [`docs/archive/成果匯報.md`](docs/archive/成果匯報.md)（**第二部＝訊號研究記錄**） |
+| **未來路線圖 / 訊號改良與 ML 計畫** | 進度真相＝後台「工作項目」（`tasks` 表）＋本檔 §12；計畫細節見 [`docs/archive/訊號增準計畫.md`](docs/archive/訊號增準計畫.md)（含**第二部 ML 計畫**） |
 
-> 進度的**單一真相來源**是後台「工作項目」（`app.db` 的 `tasks` 表），本檔與路線圖是規劃視角的快照。
+> 進度的**單一真相來源**是後台「工作項目」（`app.db` 的 `tasks` 表），本檔 §12 是規劃視角的快照。
+>
+> **Word 合集怎麼重生**：改動 README／`docs/` 任一來源文件後，跑 `.venv\Scripts\python.exe scripts\merge_docx.py` 一鍵重生 [`docs/crypto-quant_文件合集.docx`](docs/crypto-quant_文件合集.docx)（自動重轉全部來源（合集現為 9 章＋前言）、渲染 mermaid 圖、清理中繼檔；渲染需 node/npx）。章節編號固定在該腳本的 `SECTIONS` 清單，改章序時要同步所有引用「第 X 章」的文件。
 
 ---
 
@@ -68,6 +67,7 @@ cd frontend && npm run build
 - 本機開發：前端 `http://localhost:5174`，API `http://localhost:8001`
 - 後台：`/admin`，帳密來自環境變數 `ADMIN_USER` / `ADMIN_PASS`；正式/排程啟動由 `secrets.local.cmd`（Windows）／`secrets.local.sh`（macOS，從 `secrets.example.sh` 複製）注入 `ADMIN_PASS` 與 `ADMIN_SECRET`（該檔已 gitignore）。正式/對外模式若簽章密鑰仍是預設值、密鑰少於 32 字元或一般密碼少於 12 字元會拒絕啟動；因既有使用者決策而明確設定的 legacy `admin123` 暫保留相容但會高風險警告，且登入連續失敗 5 次鎖定 15 分鐘。fallback 只允許明確宣告 `CRYPTO_QUANT_BIND_HOST=127.0.0.1` 的 loopback 開發，並須設定 `ALLOW_INSECURE_ADMIN_DEFAULTS=1`。
 - GPT 金鑰：後台「AI 設定」頁填入，或環境變數 `OPENAI_API_KEY`（優先）；不填則 AI 只用規則引擎
+- **區網對外主入口是 quant-portal（另一個 repo，`:8080`）**：`http://10.201.7.12:8080/` 由 `C:\Users\Administrator\quant-portal`（排程工作 `Portal-LAN-Web`）服務，加密／股票平台切換器在那裡；其 `/crypto/` 是本專案前端的**另一份建置產物**＋API 代理。**改前端要 build 兩次**：`cd frontend && npm run build`（更新 `:8000`）之後，還要到 `quant-portal` 跑 `build.ps1`（更新 `:8080`），否則入口網站看不到變更。細節見 `quant-portal\部署說明.md` 與 [`docs/archive/部署與運維.md`](docs/archive/部署與運維.md)。
 - 對外公開（選用）：可將 Cloudflare Quick Tunnel 指向 `10.201.7.12:8000`；啟用前必須先更換預設後台密碼與簽章密鑰。named tunnel、Cloudflare Access/WAF 仍需外部網域與帳號權限，尚未由本 repo 自動完成。
 - **正式部署（開機自啟/看門狗/服務化）詳見 [`docs/archive/部署與運維.md`](docs/archive/部署與運維.md)。**
 
@@ -162,7 +162,7 @@ flowchart TD
 
 ### 設計決策（為什麼這樣做）
 
-- **雙 SQLite（`app.db` / `news.db`）**：零設定、ACID、開 WAL（耐當機、讀寫不互鎖）；資料量萬~百萬列綽綽有餘；`prices`/`indicators`/`daily_signal` 全可由 CSV 或 Binance 重建，遺失≠永久遺失。詳見 [`docs/archive/資料庫說明.md`](docs/archive/資料庫說明.md)。
+- **雙 SQLite（`app.db` / `news.db`）**：零設定、ACID、開 WAL（耐當機、讀寫不互鎖）；資料量萬~百萬列綽綽有餘；`prices`/`indicators`/`daily_signal` 全可由 CSV 或 Binance 重建，遺失≠永久遺失。詳見 [`docs/archive/API規格.md`](docs/archive/API規格.md)（第二部：資料庫說明）。
 - **CSV 中繼 + DB 中央**：抓取/計算落 CSV（可備援、可肉眼查），再 ingest 進 DB 當查閱與分析中心。
 - **6 因子計分單一真相（`src/scoring.py`）**：前台訊號與回測**共用同一把尺**，回測才能佐證畫面建議（否則兩套邏輯各說各話）。
 - **雙 AI 引擎互輔**：GPT 吃規則引擎整理好的結構化事實 + 固定提示詞，被本地數據錨定防幻覺；立場不一致標「觀點分歧」。
@@ -216,7 +216,7 @@ src/
   macro_regime.py        ★宏觀規則單一真相來源（即時面板與歷史檢定共用；門檻已凍結，見檔頭）
   macro_eval.py          宏觀預測力檢定（HAC t 值/不重疊對照/區段數）→ reports/macro_evidence.json
   macro_longrun.py       宏觀檢定的長樣本旁路（2017 起 8 年；已否定「樣本不夠」的退路，不動正式資料）
-  cross_sectional*.py …  跨幣動量研究血脈（收斂成 momentum_signal.py，見 docs/archive/訊號研究記錄.md）
+  cross_sectional*.py …  跨幣動量研究血脈（收斂成 momentum_signal.py，見 docs/archive/成果匯報.md 第二部）
 frontend/src/
   App.jsx                根元件：總覽/詳細切換、60 秒輪詢自動更新、時線切換
   api/client.js          公開 API client；api/admin.js 後台 client
@@ -239,7 +239,7 @@ reports/ indicators_*.csv backtest_*（json/csv；圖 png 不追蹤）
 
 ## 5. 資料庫（SQLite×2，皆 WAL）
 
-> 完整表結構、資料流、容量評估見 **[`docs/archive/資料庫說明.md`](docs/archive/資料庫說明.md)**。
+> 完整表結構、資料流、容量評估見 **[`docs/archive/API規格.md`](docs/archive/API規格.md)**（第二部：資料庫說明）。
 
 **data/app.db**：`prices`/`indicators`（多週期 K 線與指標，PK=symbol+interval+ts）、
 `daily_signal`（每日訊號歷史）、`fear_greed`、`app_config`（幣種清單/hourly_symbols/AI 設定 — 集中設定，後台可改）、
@@ -270,10 +270,10 @@ flowchart LR
     S["09:00 觸發"] --> F["抓日線"] --> I["算指標"] --> IN["入庫"]
     IN --> DS["重算訊號"] --> BT["重產回測+入庫"] --> FR{"資料夠新?"}
     FR -->|"是"| FC["封存預測+解析outcome"] --> FG["恐懼貪婪"] --> MA["宏觀日資料<br/>+重跑預測力檢定"] --> NW["幣種新聞+情緒"] --> CL["清理AI/raw"] --> OK["job=success"]
-    FR -->|"否/任一步失敗"| FAIL["job=failed<br/>不假性成功"]
+    FR -->|"否（核心步驟失敗）"| FAIL["job=failed<br/>不假性成功"]
 ```
 
-> 每步都經結束碼檢查 + 收尾「資料新鮮度」防線，任一步失敗整個 job 標 `failed`，不再假性成功。
+> **核心行情步驟**（抓日線→算指標→入庫→重算訊號→新鮮度檢查）任一失敗，整個 job 標 `failed`、不假性成功；回測報表、恐懼貪婪、宏觀、幣種新聞、清理屬**附屬步驟**，失敗只記錄警告、不阻斷 job（`backend/scheduler.py` 各步 try/except，註解明載「非關鍵」）；研究預測另立獨立 `forecast_pipeline` job 記錄成敗，失敗時 daily job 訊息會附註「預測失敗」。
 > （舊版有的「算相關性」步驟已移除：只產 PNG 熱圖無人用，`/api/correlation` 由 `reader` 直接讀 DB 計算。）
 
 ## 7. AI 系統設計（雙引擎互輔）
@@ -310,7 +310,7 @@ CryptoSlate、Blockworks、BitcoinMagazine、動區、鏈新聞 + Google News �
 ## 9. 訊號現況（誠實聲明）
 
 - 目前前台 6 因子「信心分數」經成績單檢驗**無預測力**（5 日勝率 45.2% vs 隨機 47.4%），屬教學性質。
-- 已驗證有效的是後台**防禦型跨幣動量策略**（動量選幣+BTC>100MA regime+波動目標）；研究血脈見 `src/cross_sectional*`、`docs/archive/訊號研究記錄.md`。
+- 相對最有據的是後台**防禦型跨幣動量策略**（動量選幣+BTC>100MA regime+波動目標）：樣本外大幅優於等權大盤（2026-08-31 實跑：年化 **+25.6% vs −16.4%**、最大回撤 **−20.6% vs −74.6%**）。**但要誠實**：①策略常數是在**包含該樣本外段**的多組設定比較中選出的（嚴格說「樣本外」不純，參數凍結〔約 2026-06 底〕之後才是乾淨驗證段）；②60/40 切分隨資料成長重算，數字會漂移，現值以後台「現況」頁為準；③回測幣池實為 16 檔、含已下市 MATIC 歷史。研究血脈與完整誠實聲明見 `src/cross_sectional*`、`docs/archive/成果匯報.md`（第二部：訊號研究記錄）。
 - 宏觀環境（`/api/macro`）**已上架但刻意不進買賣分數**：事先指定的主檢定「等權籃子・持有 5 日・順風減逆風＝ **+0.66%，HAC t=0.72**」**未達統計顯著**（1/5/20 日方向排序一致，但都測不到證據）。面板照實標示不顯著，只當背景脈絡。重跑：`.venv\Scripts\python.exe src\macro_eval.py`。
 - 「樣本不夠才測不出來」這條退路**已經走過並否定**：把加密歷史拉到 2017（同 15 幣、8 年、327 區段，`src/macro_longrun.py`）重測，順風減逆風從 +0.81% 掉到 **+0.29%**、HAC t 從 0.90 掉到 **0.32**。樣本量幾乎翻倍而 t 值反向縮小，是沒有效果的典型指紋——不是資料不夠，是規則本身沒有 edge。
 - 宏觀真正可用的是**連動強度**（`linkage`）：BTC 對標普/美元/VIX/黃金的 60 日滾動相關＋歷史百分位——描述性事實，回答「此刻宏觀該給多少權重」，不做預測宣稱。
@@ -327,13 +327,13 @@ flowchart TD
     C -->|"同一把尺檢驗"| D{"有 edge?"}
     D -->|"全數失敗"| E["換維度：跨幣動量<br/>15幣排名·強者恆強"]
     E --> F["加 regime + 風控 + 樣本外驗證"]
-    F --> G["✅ 防禦型動量策略<br/>樣本外 +27% vs 大盤 -19%"]
+    F --> G["✅ 防禦型動量策略<br/>樣本外 +25.6% vs 大盤 -16.4%<br/>（數字含選參保留·會隨資料漂移）"]
     G --> H["收斂成 momentum_signal.py<br/>後台『現況』頁"]
 ```
 
 ## 10. 開發慣例與注意事項
 
-> 完整版（環境設定、開發鐵律、測試怎麼跑）見 **[`docs/archive/開發指南.md`](docs/archive/開發指南.md)**。
+> 完整版（環境設定、開發鐵律、測試怎麼跑）見 **[`docs/archive/部署與運維.md`](docs/archive/部署與運維.md)**（第二部：開發指南）。
 
 - **進度追蹤**：後台「工作項目」（app.db `tasks` 表）是唯一真相來源 — 做完標 done、新待辦即時補上，notes 欄寫交接說明。
 - 設定集中：幣種清單、時線幣種、AI 金鑰等都在 `app_config`，別寫死在程式裡。
@@ -378,7 +378,7 @@ python src\correlation.py                             # 相關性（手動分析
 
 ## 12. 未來規劃與可發展方向
 
-> 進度真相在後台「工作項目」（`tasks` 表）；完整分層路線圖（T0 立即動手 → T4 未來參考）見 [`docs/archive/專案路線圖.md`](docs/archive/專案路線圖.md)。下列為六大發展方向的鳥瞰。
+> 進度真相在後台「工作項目」（`tasks` 表）；歷史規劃文件已於 2026-09-01 刪除，內容見 git 歷史。下列為六大發展方向的鳥瞰。
 
 **▸ 圖：六大發展方向**（線上 README 可見渲染圖）
 
@@ -400,7 +400,7 @@ flowchart LR
 
 **A. 訊號準度（核心價值、最該先做）**
 - **訊號增準計畫（規則式）**：Phase A 先把已驗證的防禦型動量策略搬上前台當正式建議、6 因子降級為教學分數；Phase B–D 做因子手術、regime 開關、walk-forward 校準。驗收門檻寫死：樣本外 5 日勝率 ≥ 基準 +0.5pp（見 `docs/archive/訊號增準計畫.md`）。
-- **ML 訊號研究**：LightGBM + purged walk-forward，通過六道 Go/No-Go 關卡後成為「第三個 AI 引擎」（規則/GPT/ML 三票制）。需規則式先完成當地基（見 `docs/archive/ML訊號研究計畫.md`）。
+- **ML 訊號研究**：LightGBM + purged walk-forward，通過六道 Go/No-Go 關卡後成為「第三個 AI 引擎」（規則/GPT/ML 三票制）。需規則式先完成當地基（見 `docs/archive/訊號增準計畫.md` 第二部）。
 
 **B. 產品閉環（從被動查詢 → 主動推播）**
 - 到價 / 訊號變化通知（站內鈴鐺 + Telegram Bot，時線資料已就緒）。

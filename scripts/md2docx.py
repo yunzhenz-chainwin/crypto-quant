@@ -2,7 +2,7 @@
 """
 md2docx.py — 通用 Markdown → Word(.docx) 轉換引擎（本機無 pandoc 用）。
 
-支援：標題、表格、程式碼區塊、引用、清單、**粗體**、`行內碼`、分隔線，
+支援：標題、表格、程式碼區塊、引用、清單、**粗體**、`行內碼`、分隔線、本地圖片 ![說明](相對路徑)，
 以及 ```mermaid 流程圖/架構圖（用本機 mermaid-cli via npx 渲染成 PNG 嵌入，
 渲染失敗自動退回「見線上版」文字註記）。中文用微軟正黑體。
 
@@ -12,10 +12,9 @@ md2docx.py — 通用 Markdown → Word(.docx) 轉換引擎（本機無 pandoc �
   .venv\\Scripts\\python.exe scripts\\md2docx.py          # 轉換下方 JOBS 全部
 其他腳本可： from md2docx import convert; convert(md_path, out_path)
 
-JOBS（來源 .md → 輸出 .docx）：
-  README.md                      → docs/crypto-quant_專案說明.docx
-  docs/archive/訊號增準計畫.md    → docs/訊號增準計畫.docx
-  docs/archive/ML訊號研究計畫.md  → docs/ML訊號研究計畫.docx
+JOBS（來源 .md → docs/*.docx，共 7 份，完整對照見下方 JOBS 清單）：
+  docs/主管摘要.md、README.md（→ crypto-quant_專案說明.docx）、
+  docs/archive/ 的 部署與運維／API規格／成果匯報／訊號增準計畫／研究預測評估。
 ※ 任一來源 .md 改動後重跑本腳本；再跑 merge_docx.py 同步合集。
 """
 import io
@@ -42,19 +41,11 @@ MONO    = "Consolas"
 JOBS = [
     (ROOT / "docs" / "主管摘要.md",                ROOT / "docs" / "主管摘要.docx"),
     (ROOT / "README.md",                          ROOT / "docs" / "crypto-quant_專案說明.docx"),
-    (ROOT / "docs" / "archive" / "訊號增準計畫.md",  ROOT / "docs" / "訊號增準計畫.docx"),
-    (ROOT / "docs" / "archive" / "ML訊號研究計畫.md", ROOT / "docs" / "ML訊號研究計畫.docx"),
-    # 交接完整版：其餘技術文件也轉 Word，供 merge_docx.py 併進「文件合集」
     (ROOT / "docs" / "archive" / "部署與運維.md",    ROOT / "docs" / "部署與運維.docx"),
     (ROOT / "docs" / "archive" / "API規格.md",       ROOT / "docs" / "API規格.docx"),
-    (ROOT / "docs" / "archive" / "資料庫說明.md",     ROOT / "docs" / "資料庫說明.docx"),
-    (ROOT / "docs" / "archive" / "開發指南.md",       ROOT / "docs" / "開發指南.docx"),
-    (ROOT / "docs" / "archive" / "訊號研究記錄.md",   ROOT / "docs" / "訊號研究記錄.docx"),
     (ROOT / "docs" / "archive" / "成果匯報.md",       ROOT / "docs" / "成果匯報.docx"),
-    (ROOT / "docs" / "archive" / "專案路線圖.md",     ROOT / "docs" / "專案路線圖.docx"),
-    (ROOT / "docs" / "archive" / "PROJECT_PLAN.md",  ROOT / "docs" / "PROJECT_PLAN.docx"),
-    (ROOT / "docs" / "forecast-scorecard-p0.md",     ROOT / "docs" / "forecast-scorecard-p0.docx"),
-    (ROOT / "docs" / "forecast-calibration.md",      ROOT / "docs" / "forecast-calibration.docx"),
+    (ROOT / "docs" / "archive" / "訊號增準計畫.md",  ROOT / "docs" / "訊號增準計畫.docx"),
+    (ROOT / "docs" / "archive" / "研究預測評估.md",   ROOT / "docs" / "研究預測評估.docx"),
 ]
 
 
@@ -249,6 +240,36 @@ def convert(src: Path, out: Path):
                     i += 1
                 if block:
                     add_table(doc, block)
+                continue
+            mi = re.match(r"^!\[([^\]]*)\]\(([^)]+)\)\s*$", line.strip())
+            if mi:
+                img_path = (Path(src).resolve().parent / mi.group(2)).resolve()
+                if img_path.exists():
+                    p = doc.add_paragraph()
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = p.add_run()
+                    sz = _png_size(img_path)
+                    if sz and sz[1] > sz[0] * 1.35:
+                        run.add_picture(str(img_path), height=Cm(18))
+                    else:
+                        run.add_picture(str(img_path), width=Cm(15.5))
+                    if mi.group(1):
+                        cap = doc.add_paragraph()
+                        cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        r = cap.add_run(mi.group(1))
+                        _set_ea(r)
+                        r.italic = True
+                        r.font.size = Pt(9)
+                        r.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+                else:
+                    p = doc.add_paragraph()
+                    p.paragraph_format.left_indent = Cm(0.3)
+                    r = p.add_run(f"〔圖：{mi.group(1) or mi.group(2)}（本機檔案未找到，見線上版）〕")
+                    _set_ea(r)
+                    r.italic = True
+                    r.font.size = Pt(9.5)
+                    r.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+                i += 1
                 continue
             m = re.match(r"^(#{1,6})\s+(.*)$", line)
             if m:

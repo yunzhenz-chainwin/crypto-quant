@@ -9,11 +9,12 @@ merge_docx.py — 把 docs/ 下的全部交接 .docx 合併成「一份完整合
   .venv\\Scripts\\python.exe scripts\\merge_docx.py
 輸出：
   docs/crypto-quant_文件合集.docx
-本腳本會**先自動重生 5 份可生成的來源 docx**（md2docx.py 產 專案說明/增準/ML、
-  export_qa_docs.py 產問答範本、export_forecast_metrics_docx.py 產模型指標），再與
-  「情緒詞庫範本.docx」(手工來源、無生成腳本) 合併。
+本腳本會**先自動重生全部可生成的來源 docx**（md2docx.py 轉 7 份 .md：主管摘要、
+  README、docs/archive 的 部署與運維／API規格／成果匯報／訊號增準計畫／研究預測評估；
+  export_qa_docs.py 產問答範本、export_forecast_metrics_docx.py 產模型指標），
+  即 9 章來源＋前言主管摘要全數重生，唯一例外「情緒詞庫範本.docx」(手工來源、無生成腳本)。
   → 一鍵重生合集：改 README / 各 .md / canned_qa.py 後，直接跑本腳本即可。
-  那 5 份 docx 是中繼產物（已 gitignore，不入版）；只有合集與情緒詞庫範本.docx 進版控。
+  這些 docx 是中繼產物（已 gitignore，不入版，合併後自刪）；只有合集與情緒詞庫範本.docx 進版控。
 """
 import io
 import os
@@ -36,21 +37,14 @@ ZH = "微軟正黑體"
 # 完整交接順序：總覽 → 維運/介面/資料/開發 → 訊號研究 → 預測研究 → AI/內容 → 匯報/規劃
 SECTIONS = [
     ("crypto-quant_專案說明.docx",   "壹、專案說明（README）"),
-    ("部署與運維.docx",              "貳、部署與運維"),
-    ("API規格.docx",                 "參、API 規格"),
-    ("資料庫說明.docx",              "肆、資料庫說明"),
-    ("開發指南.docx",                "伍、開發指南"),
-    ("訊號增準計畫.docx",            "陸、訊號增準計畫（規則式）"),
-    ("ML訊號研究計畫.docx",          "柒、ML 訊號研究計畫"),
-    ("訊號研究記錄.docx",            "捌、訊號研究記錄"),
-    ("forecast-scorecard-p0.docx",   "玖、研究預測成績單與發布門檻"),
-    ("forecast-calibration.docx",    "拾、機率校準研究"),
-    ("預測模型指標報告.docx",        "拾壹、預測模型指標與參考門檻"),
-    ("AI機器人固定問答範本.docx",     "拾貳、AI 機器人固定問答庫"),
-    ("情緒詞庫範本.docx",            "拾參、情緒詞庫範本"),
-    ("成果匯報.docx",                "拾肆、成果匯報"),
-    ("專案路線圖.docx",              "拾伍、專案路線圖"),
-    ("PROJECT_PLAN.docx",            "拾陸、早期規劃 PROJECT_PLAN"),
+    ("部署與運維.docx",              "貳、部署與運維・開發指南"),
+    ("API規格.docx",                 "參、API 規格・資料庫說明"),
+    ("成果匯報.docx",                "肆、成果匯報・訊號研究記錄"),
+    ("訊號增準計畫.docx",            "伍、訊號增準計畫（規則式＋ML）"),
+    ("研究預測評估.docx",            "陸、研究預測評估（成績單與校準）"),
+    ("預測模型指標報告.docx",        "柒、預測模型指標與參考門檻"),
+    ("AI機器人固定問答範本.docx",     "捌、AI 機器人固定問答庫"),
+    ("情緒詞庫範本.docx",            "玖、情緒詞庫範本"),
 ]
 
 # 前言：主管 2 分鐘摘要，排在封面/目錄之後、壹章之前（不編號）
@@ -70,8 +64,8 @@ def _ea(run, size=None, bold=False, color=None):
 
 
 def _regen_sources():
-    """用子行程重生 5 份可生成來源（md2docx ×3 + export_qa ×1 + metrics ×1）。
-    情緒詞庫範本.docx 無生成腳本（手工來源），不在此列，需自身存在。"""
+    """用子行程重生全部可生成來源（md2docx ×7 + export_qa ×1 + metrics ×1，
+    涵蓋 9 章來源＋前言主管摘要）。情緒詞庫範本.docx 無生成腳本（手工來源），不在此列，需自身存在。"""
     here = Path(__file__).resolve().parent
     for script in (
         "md2docx.py",

@@ -50,10 +50,15 @@ memory/
 # macOS 檔案總管產生的垃圾
 .DS_Store
 
-# 由腳本重生的 docx 中繼產物（md2docx.py / export_qa_docs.py 隨時可重生）；
-# 只提交合併後的 crypto-quant_文件合集.docx 與手工來源 情緒詞庫範本.docx
+# 由 merge_docx.py 重生後自刪的全部中繼產物（md2docx.py / export_qa_docs.py /
+# export_forecast_metrics_docx.py 隨時可重生，中途失敗殘留也不入版）；
+# 只提交 crypto-quant_文件合集.docx、crypto-quant_系統規格書.docx 與手工來源 情緒詞庫範本.docx
+docs/主管摘要.docx
 docs/crypto-quant_專案說明.docx
+docs/部署與運維.docx
+docs/API規格.docx
+docs/成果匯報.docx
 docs/訊號增準計畫.docx
-docs/ML訊號研究計畫.docx
+docs/研究預測評估.docx
 docs/AI機器人固定問答範本.docx
 docs/預測模型指標報告.docx
