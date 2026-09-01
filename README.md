@@ -88,6 +88,9 @@ cd frontend && npm run start   # 開發：API :8001（--reload）+ vite :5174，
 - 開機自動啟動（等同 Windows 的排程工作 `CryptoQuantBackend`）：把 `scripts/com.cryptoquant.backend.plist`
   裡的 `__REPO__` 換成實際路徑後放進 `~/Library/LaunchAgents/` 再 `launchctl load -w`，說明寫在檔案開頭。
   注意筆電闔蓋睡眠時排程不會跑，醒來後 APScheduler 接續下一個排程點，錯過的那次不補跑。
+- **排程用系統本地時區**：`BackgroundScheduler()` 沒有指定 timezone，「每日 09:00」是照
+  台灣時間設計的（UTC 01:00＝日 K 棒收盤後 1 小時）。MacBook 若設成別的時區或帶出國，
+  抓取時間點會跟著漂移，日線可能固定慢一根。
 - `npm run api` 走 `scripts/dev_api.mjs`（跨平台，自動找對應平台的 venv python）。
   找不到 python 時用 `DEV_API_DRY_RUN=1 npm run api` 只印指令、不啟動，方便排查路徑。
 
@@ -113,8 +116,17 @@ unzip -o ~/Downloads/crypto-quant-migration-*.zip -d .   # 還原 DB 與帳密
 ./start_backend.sh
 ```
 
-沒有搬遷包也能跑：排程會自己重抓 K 線與新聞重建資料，只是工作項目追蹤、
-歷史新聞情緒與後台設定（含 AI 金鑰）會是空的。
+沒有搬遷包也能跑，但要注意兩件事：排程**不會在啟動時補跑**，第一批資料要等下一個
+排程點（每小時 `:06`、每日 `09:00`），想立刻有資料就先手動跑一次：
+
+```bash
+./.venv/bin/python src/fetch_binance.py BTCUSDT ETHUSDT SOLUSDT
+./.venv/bin/python src/indicators.py BTCUSDT --no-plot
+```
+
+另外工作項目追蹤、歷史新聞情緒與後台設定都會是空的（那些只存在 `app.db` / `news.db`）。
+`data/backups/`（sqlite 自動備份，舊機器上約 640 MB）刻意不放進搬遷包，新機器每日 03:30
+的備份排程會自己重新產生。
 
 ## 3. 系統架構與資料流
 

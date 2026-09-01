@@ -25,6 +25,8 @@ import threading
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
+from backend.services.venv_python import venv_python
+
 # 專案根目錄一律由 __file__ 推導，不要寫成 DB_PATH.parent.parent —— DB_PATH 現在
 # 可被環境變數改道到別的地方，跟著它推根目錄會找不到 data/clean 與 reports/。
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -700,7 +702,7 @@ def ingest_market_data(interval: str = "1d") -> dict:
 
 # 專案根目錄與 venv Python（給後台「新增幣種」觸發抓取管線用，與排程同一套）
 _ROOT_DIR = _PROJECT_ROOT
-_PYTHON = str(_ROOT_DIR / ".venv" / "Scripts" / "python.exe")
+_PYTHON = venv_python(_ROOT_DIR)
 
 
 def fetch_and_ingest_symbol(symbol: str) -> dict:

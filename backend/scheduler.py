@@ -29,6 +29,7 @@ from backend.services.app_db import (
 from backend.services.reader import load_prices
 from backend.services.forecast_scorecard import build_forecast_scorecard
 from backend.services.sqlite_backup import backup_sqlite_databases, prune_managed_backups
+from backend.services.venv_python import venv_python
 from src.forecasting import (
     MODEL_VERSION, SUPPORTED_HORIZONS, generate_forecast,
     latest_completed_daily_date, model_metadata,
@@ -36,8 +37,8 @@ from src.forecasting import (
 
 # 專案根目錄（相對於本檔往上一層）
 ROOT   = Path(__file__).resolve().parent.parent
-# 使用虛擬環境裡的 Python，確保套件版本一致
-PYTHON = str(ROOT / ".venv" / "Scripts" / "python.exe")
+# 使用虛擬環境裡的 Python，確保套件版本一致（Windows 與 macOS 的 venv 版面不同）
+PYTHON = venv_python(ROOT)
 
 # 資料最多可落後幾天；超過視為抓取失敗（而非靜默沿用舊資料）
 MAX_DATA_LAG_DAYS = 2
