@@ -28,7 +28,8 @@ DOCS = ROOT / "docs"
 OUT  = DOCS / "crypto-quant_文件合集.docx"
 
 from docx import Document
-from docx.shared import Pt, RGBColor
+from docx.shared import Pt, RGBColor, Cm
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docxcompose.composer import Composer
 
@@ -82,25 +83,47 @@ def main():
     if missing:
         raise SystemExit(f"缺少來源檔（情緒詞庫範本.docx 需手動存在）：{missing}")
 
-    # 封面（空白 master + 中文字型）
+    # 封面（空白 master；主題同 md2docx.py 的 iFare 深藍排版）
+    ACCENT = RGBColor(0x1F, 0x4E, 0x79)
+    MUTED = RGBColor(0x59, 0x59, 0x59)
     master = Document()
+    for s in master.sections:
+        s.top_margin = s.bottom_margin = Cm(2)
+        s.left_margin = s.right_margin = Cm(2.2)
     st = master.styles["Normal"]
     st.font.name = "Microsoft JhengHei"
     st.font.size = Pt(11)
+    st.font.color.rgb = RGBColor(0x33, 0x33, 0x33)
     st.element.rPr.rFonts.set(qn("w:eastAsia"), ZH)
 
-    _ea(master.add_paragraph().add_run("crypto-quant 文件合集"), size=26, bold=True,
-        color=RGBColor(0x1F, 0x3A, 0x5F))
+    def _bottom_border(p, size=12, color="1F4E79", space=6):
+        pPr = p._p.get_or_add_pPr()
+        pBdr = OxmlElement("w:pBdr")
+        el = OxmlElement("w:bottom")
+        el.set(qn("w:val"), "single")
+        el.set(qn("w:sz"), str(size))
+        el.set(qn("w:color"), color)
+        el.set(qn("w:space"), str(space))
+        pBdr.append(el)
+        pPr.append(pBdr)
+
+    tp = master.add_paragraph()
+    _ea(tp.add_run("crypto-quant 文件合集"), size=26, bold=True, color=ACCENT)
+    _bottom_border(tp)
     _ea(master.add_paragraph().add_run(f"加密貨幣量化分析平台 — 完整交接文件包（合併 {len(SECTIONS)} 份）"),
-        size=12, color=RGBColor(0x66, 0x66, 0x66))
+        size=12, color=MUTED)
     master.add_paragraph()
-    _ea(master.add_paragraph().add_run("內容"), size=14, bold=True)
-    _ea(master.add_paragraph().add_run("前言　主管摘要（建議先看，2 分鐘看懂）"), size=11, bold=True)
+    _ea(master.add_paragraph().add_run("內容"), size=14, bold=True, color=ACCENT)
+    pre = master.add_paragraph()
+    _ea(pre.add_run("前言　"), size=11, bold=True, color=ACCENT)
+    _ea(pre.add_run("主管摘要（建議先看，2 分鐘看懂）"), size=11, bold=True)
     for i, (_, title) in enumerate(SECTIONS, 1):
-        _ea(master.add_paragraph().add_run(f"{i}. {title}"), size=11)
+        row = master.add_paragraph()
+        _ea(row.add_run(f"{i:>2}.　"), size=11, bold=True, color=ACCENT)
+        _ea(row.add_run(title), size=11)
     _ea(master.add_paragraph().add_run(
         "（各份保留原始格式；每份自第二頁起、以分頁分隔。要調整內容請改各來源檔後重跑 merge_docx.py）"),
-        size=9, color=RGBColor(0x88, 0x88, 0x88))
+        size=9, color=MUTED)
 
     # 依序附加，每份前插分頁；主管摘要作為前言排在最前面
     composer = Composer(master)
