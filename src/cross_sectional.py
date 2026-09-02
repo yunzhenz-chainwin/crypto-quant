@@ -2,7 +2,7 @@
 """
 cross_sectional.py — 橫斷面（跨幣比較）找 edge 的「全方法掃描」（唯讀，不改資料）
 
-單一幣看自己的技術指標已證實無 forward edge（見 docs/archive/訊號研究記錄.md）。
+單一幣看自己的技術指標已證實無 forward edge（見 docs/crypto-quant_交接手冊.docx 第 11 章）。
 這裡換維度：每天把 15 幣「互相比較、排名」，做多排名前段 / 放空後段，
 測各種跨幣訊號有沒有預測力。
 

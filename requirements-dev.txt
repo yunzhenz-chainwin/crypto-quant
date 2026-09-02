@@ -4,11 +4,8 @@
 # 當作參考,與 frontend/src/lib/indicators.js 的計算逐點比對:
 pandas_ta
 
-# 產生 Word 文件(計畫書/詞庫範本 → docs/*.docx)
+# 產生 Word 交接文件(docs/src/*.md → docs/*.docx；scripts/build_docs.py，mermaid 圖需 node/npx)
 python-docx
-
-# 合併多份 .docx 成一份合集(scripts/merge_docx.py)
-docxcompose
 
 # 測試框架 + FastAPI TestClient 做 API smoke test
 # starlette TestClient 依賴 httpx；新版建議 httpx2（httpx 仍可用但會出 Deprecation 警告）
